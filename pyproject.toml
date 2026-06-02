@@ -1,0 +1,29 @@
+# Watcher — Python tooling config (API + eval).
+# The build itself is not packaged yet (pre-Phase-1); this file pins the lint,
+# type-check, and test configuration the CI pipeline runs against. See AGENTS.md.
+
+[project]
+name = "watcher"
+version = "0.0.0"
+description = "Watcher — the WhatsApp intelligence layer that turns conversations into CRM records."
+requires-python = ">=3.12"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["apps/api", "packages"]
+
+[tool.ruff.lint]
+# E/F: pyflakes+pycodestyle, I: import sort, UP: pyupgrade, B: bugbear, ASYNC: async pitfalls.
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["apps/api", "packages"]
+# Pydantic v2 models are the source of truth (AGENTS.md); third-party stubs land as deps are added.
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["apps/api", "packages"]

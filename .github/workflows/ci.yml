@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API · lint · types · tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install tooling
+        run: python -m pip install --upgrade pip ruff==0.6.9 mypy==1.11.2 pytest==8.3.3
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Ruff format check
+        run: ruff format --check .
+
+      - name: Mypy (strict)
+        run: |
+          if find apps packages -name '*.py' 2>/dev/null | grep -q .; then
+            mypy
+          else
+            echo "::notice::No Python sources yet — skipping mypy. Job activates when apps/api lands."
+          fi
+
+      - name: Pytest
+        run: |
+          if find apps packages \( -name 'test_*.py' -o -name '*_test.py' \) 2>/dev/null | grep -q .; then
+            pytest
+          else
+            echo "::notice::No tests yet — skipping pytest. Job activates when tests land."
+          fi
+
+  web:
+    name: Control page · lint · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect control-page app
+        id: detect
+        run: |
+          if [ -f apps/control-page/package.json ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No apps/control-page yet — skipping. Job activates when the Next.js app lands."
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.detect.outputs.exists == 'true'
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/control-page/package-lock.json
+
+      - name: Install · lint · typecheck · build
+        if: steps.detect.outputs.exists == 'true'
+        working-directory: apps/control-page
+        run: |
+          npm ci
+          npm run lint --if-present
+          npm run typecheck --if-present
+          npm run build --if-present
+
+  eval-gate:
+    name: Classifier eval gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # AGENTS.md / §13: no prompt change merges without an eval run; CI blocks a >2pp
+      # accuracy drop. Wiring the live run depends on D13-a (LLM key in CI vs recorded
+      # fixtures) — until that's decided and a golden set exists, this self-skips.
+      - name: Run eval gate (when wired)
+        run: |
+          if [ -f packages/eval/pyproject.toml ] && find packages/eval -name '*.jsonl' 2>/dev/null | grep -q .; then
+            echo "Eval tool + golden set present — running gate."
+            echo "::warning::Eval runner not yet implemented; see docs/build-spec-addendum.md §13 (D13-a)."
+          else
+            echo "::notice::No eval tool/golden set yet — skipping gate. Activates per §13 once D13-a is decided."
+          fi
