@@ -25,7 +25,10 @@ jobs:
           cache: pip
 
       - name: Install tooling
-        run: python -m pip install --upgrade pip ruff==0.6.9 mypy==1.11.2 pytest==8.3.3
+        run: |
+          python -m pip install --upgrade pip
+          # Lint/type/test tooling + runtime deps mypy & pytest need to resolve imports.
+          python -m pip install ruff==0.6.9 mypy==1.11.2 pytest==8.3.3 pydantic==2.9.2
 
       - name: Ruff lint
         run: ruff check .
