@@ -279,12 +279,17 @@ per-tenant LLM + media spend surfaced in the Admin/Eval view.
 
 ## 17. Consolidated open questions (NEEDS INPUT)
 
+> **Placeholders scaffolded:** the model IDs (D8-a), WhatsApp number / Meta API identifiers, and ASR provider
+> below have `<...>` placeholders in **`.env.example`** at the repo root. Filling that file in answers the
+> config half of these items; the framing/commercial choices still need a decision.
+
 ### Blocks starting the build
 1. **(D8-a) Model IDs** — confirm first-pass / escalation / fallback model IDs; is Opus budgeted for hardest
-   escalations?
+   escalations? *(placeholders: `CLASSIFIER_MODEL_*` in `.env.example`)*
 2. **(D2-a) Auth provider** — confirm Clerk for SaaS (+ Supabase/Ory for self-hosted), or name another.
 3. **Accounts/access** — do you already have: a verified Meta Business + WABA (or test number)? Anthropic +
-   OpenAI API access? A cloud account for hosting (AWS/Render)?
+   OpenAI API access? A cloud account for hosting (AWS/Render)? *(placeholders: `META_*` / `WHATSAPP_*` in
+   `.env.example`)*
 
 ### Shapes Phase 1–2
 4. **(D3-a)** Transcription provider (Whisper API vs self-hostable) — confirm.
