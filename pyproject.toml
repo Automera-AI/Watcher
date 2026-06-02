@@ -9,6 +9,7 @@ description = "Watcher — the WhatsApp intelligence layer that turns conversati
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.8,<3",
+    "fastapi>=0.115,<1",
 ]
 
 [tool.ruff]
