@@ -24,7 +24,19 @@ Python 3.12+ end-to-end server-side (FastAPI, Pydantic v2, SQLAlchemy 2.0 + Alem
 WhatsApp Business Cloud API ingestion via `pywa`. Anthropic Claude primary / OpenAI secondary; Qwen via
 vLLM for the self-hosted tier. Next.js 15 + TypeScript + Tailwind for the control page.
 
+## CI/CD
+
+GitHub Actions pipeline lives in `.github/workflows/` and is scaffolded ahead of the backend:
+
+- **`ci.yml`** — on every PR/push to `main`: Python `api` job (Ruff lint + format check, strict mypy, pytest),
+  a `web` job (lint/typecheck/build the Next.js control page), and the **classifier eval gate** (AGENTS.md /
+  §13). Each job activates automatically as its code lands and self-skips (green) until then, so the pipeline
+  is in place now without blocking the empty repo. Tool config is pinned in `pyproject.toml`.
+- **`cd.yml`** — on push to `main` and `v*` tags: build + publish the API container image to GHCR
+  (provider-neutral). The deploy step is a gated placeholder pending the §17 hosting decision (AWS / Render /
+  self-hosted).
+
 ## Status
 
-Pre-Phase-1. The two spec documents above are complete; the build starts once the §17 "blocks starting the
-build" questions in the addendum are answered.
+Pre-Phase-1. The two spec documents above are complete; the CI/CD pipeline is scaffolded; the build starts
+once the §17 "blocks starting the build" questions in the addendum are answered.
