@@ -1,0 +1,60 @@
+/* Watcher control page — design tokens (verbatim from DESIGN-SPEC.md §2–§4).
+ *
+ * Drop into the Next.js app's globals.css. Source of truth is DESIGN-SPEC.md; propose new tokens there
+ * first, never hardcode a color per screen. Self-hosted constraint: fonts via next/font (no runtime CDN). */
+
+:root {
+  /* Base / neutral (light) */
+  --bg: #FBFBFD;
+  --surface: #FFFFFF;
+  --surface-2: #F4F5F7;
+  --border: #E6E8EC;
+  --text: #0E1116;
+  --text-muted: #5B616E;
+  --text-faint: #8A909C;
+
+  /* Brand accent (indigo) */
+  --accent: #4F46E5;
+  --accent-hover: #4338CA;
+  --accent-subtle: #EEF0FF;
+
+  /* Confidence bands (semantic — never reuse) */
+  --band-high: #16A34A;
+  --band-medium: #D97706;
+  --band-low: #DC2626;
+
+  /* Functional */
+  --success: #16A34A;
+  --danger: #DC2626;
+  --warning: #D97706;
+  --focus-ring: rgba(79, 70, 229, 0.4);
+
+  /* Typography */
+  --font-sans: Inter, system-ui, sans-serif;
+  --font-arabic: Cairo, Inter, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-full: 9999px;
+
+  /* Elevation */
+  --shadow-1: 0 1px 2px rgba(16, 17, 22, 0.06);
+  --shadow-2: 0 4px 16px rgba(16, 17, 22, 0.08);
+  --shadow-3: 0 12px 40px rgba(16, 17, 22, 0.16);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0B0C0E;
+    --surface: #16181C;
+    --surface-2: #1E2127;
+    --border: #2A2E36;
+    --text: #F2F4F8;
+    --text-muted: #9BA3B0;
+    --text-faint: #6B7280;
+    --accent-subtle: #1E1B3A;
+  }
+}

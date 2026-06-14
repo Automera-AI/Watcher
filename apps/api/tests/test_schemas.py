@@ -37,9 +37,9 @@ def _valid_result_kwargs() -> dict[str, object]:
     [
         (0.85, ConfidenceBand.HIGH),
         (0.999, ConfidenceBand.HIGH),
-        (0.60, ConfidenceBand.MEDIUM),
+        (0.50, ConfidenceBand.MEDIUM),
         (0.84, ConfidenceBand.MEDIUM),
-        (0.59, ConfidenceBand.LOW),
+        (0.49, ConfidenceBand.LOW),
         (0.0, ConfidenceBand.LOW),
     ],
 )

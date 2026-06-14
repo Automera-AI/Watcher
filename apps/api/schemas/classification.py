@@ -18,7 +18,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from apps.api.schemas.common import Confidence, PhoneE164, band_for
-from apps.api.schemas.enums import ConfidenceBand, Language
+from apps.api.schemas.enums import ConfidenceBand, IntentType, Language, RecordType
 
 
 class ClassificationResult(BaseModel):
@@ -26,9 +26,8 @@ class ClassificationResult(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # ``intent`` and ``suggested_record_type`` are open-vocabulary: the controlled list is
-    # defined by v1.2 §3 and should be pinned to an enum once that taxonomy is confirmed.
-    intent: str = Field(description="Why this message exists (v1.2 §3 controlled vocabulary).")
+    # ``intent`` / ``suggested_record_type`` use the locked taxonomy enums (DECISIONS.md).
+    intent: IntentType = Field(description="Why this message exists (locked taxonomy).")
     summary_one_line: str = Field(description="One-line human-readable summary for the inbox row.")
     language: Language
 
@@ -41,8 +40,8 @@ class ClassificationResult(BaseModel):
     phone_e164: PhoneE164 | None = Field(
         default=None, description="Phone extracted from content, if any (E.164)."
     )
-    suggested_record_type: str | None = Field(
-        default=None, description="Destination record type, e.g. lead/contact (v1.2 §3 vocabulary)."
+    suggested_record_type: RecordType | None = Field(
+        default=None, description="Shape of the destination record to create (locked taxonomy)."
     )
 
     confidence_overall: Confidence

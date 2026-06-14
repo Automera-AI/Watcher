@@ -41,6 +41,26 @@ def _message(wa_message_id: str) -> MessageEnvelope:
     )
 
 
+def test_all_tables_create() -> None:
+    # The full §4 data model registers and creates without error.
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    expected = {
+        "tenants",
+        "sources",
+        "messages",
+        "classifications",
+        "inbox_items",
+        "crm_cache",
+        "identity_resolutions",
+        "destinations",
+        "rules",
+        "audit_log",
+        "eval_runs",
+    }
+    assert expected <= set(Base.metadata.tables)
+
+
 def test_save_then_exists(session: Session) -> None:
     repo = SqlAlchemyMessageRepository(session)
     assert repo.exists(TENANT_A, "wamid.A") is False

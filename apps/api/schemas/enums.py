@@ -31,6 +31,25 @@ class MessageDirection(StrEnum):
     OUTBOUND = "outbound"
 
 
+class IntentType(StrEnum):
+    """Why an inbound message exists — locked taxonomy (DECISIONS.md / role guide §1.1)."""
+
+    NEW_LEAD = "new_lead"
+    EXISTING_CONTACT_REPLY = "existing_contact_reply"
+    SUPPORT_ISSUE = "support_issue"
+    INTERNAL_TEAM = "internal_team"
+    SPAM_OR_NOISE = "spam_or_noise"
+    UNCLEAR = "unclear"
+
+
+class RecordType(StrEnum):
+    """Shape of the destination record to create — locked taxonomy (DECISIONS.md)."""
+
+    INDIVIDUAL_ONLY = "individual_only"
+    CONTACT_UNDER_COMPANY = "contact_under_company"
+    COMPANY_ONLY = "company_only"
+
+
 class MessageType(StrEnum):
     """WhatsApp message modality (addendum §4 ``messages.type``)."""
 

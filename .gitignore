@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Local DBs (Alembic autogenerate/dev)
+*.db
+
 # Python
 __pycache__/
 *.py[cod]
