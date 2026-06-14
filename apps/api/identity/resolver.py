@@ -38,11 +38,17 @@ def _fuzzy_score(incoming: IncomingContact, record: CrmRecord) -> float:
     return float(fuzz.token_set_ratio(incoming_key, record_key)) / 100.0
 
 
-def decide(score: float, candidate: CrmRecord | None) -> Resolution:
-    """Map a similarity score to a decision (≥0.92 merge, ≥0.75 review, else new)."""
-    if candidate is not None and score >= MERGE_THRESHOLD:
+def decide(
+    score: float,
+    candidate: CrmRecord | None,
+    *,
+    merge_threshold: float = MERGE_THRESHOLD,
+    review_threshold: float = REVIEW_THRESHOLD,
+) -> Resolution:
+    """Map a similarity score to a decision (≥merge → merge, ≥review → review, else new)."""
+    if candidate is not None and score >= merge_threshold:
         return Resolution(decision=IdentityDecision.MERGE, score=score, candidate=candidate)
-    if candidate is not None and score >= REVIEW_THRESHOLD:
+    if candidate is not None and score >= review_threshold:
         return Resolution(decision=IdentityDecision.LINK_RELATED, score=score, candidate=candidate)
     return Resolution(decision=IdentityDecision.NEW, score=score, candidate=None)
 

@@ -57,7 +57,7 @@ def test_high_confidence_first_pass_does_not_escalate() -> None:
 
 
 def test_low_confidence_escalates_and_takes_larger_model_result() -> None:
-    first = ScriptedProvider("cheap", [_result_json(0.50, intent="unsure")])
+    first = ScriptedProvider("cheap", [_result_json(0.50, intent="existing_contact_reply")])
     escalation = ScriptedProvider("big", [_result_json(0.97, intent="new_lead")])
     outcome = Classifier(first, escalation).classify(_INPUT)
 
