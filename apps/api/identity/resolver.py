@@ -53,8 +53,14 @@ def decide(
     return Resolution(decision=IdentityDecision.NEW, score=score, candidate=None)
 
 
-def resolve(incoming: IncomingContact, candidates: list[CrmRecord]) -> Resolution:
-    """Pick the best candidate and decide merge / link_related / new."""
+def resolve(
+    incoming: IncomingContact,
+    candidates: list[CrmRecord],
+    *,
+    merge_threshold: float = MERGE_THRESHOLD,
+    review_threshold: float = REVIEW_THRESHOLD,
+) -> Resolution:
+    """Pick the best candidate and decide merge / link_related / new (thresholds tunable)."""
     if incoming.phone_e164 is not None:
         for record in candidates:
             if incoming.phone_e164 in record.phones:
@@ -67,4 +73,6 @@ def resolve(incoming: IncomingContact, candidates: list[CrmRecord]) -> Resolutio
         if score > best_score:
             best, best_score = record, score
 
-    return decide(best_score, best)
+    return decide(
+        best_score, best, merge_threshold=merge_threshold, review_threshold=review_threshold
+    )

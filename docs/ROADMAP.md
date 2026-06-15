@@ -165,3 +165,36 @@ Each numbered item is one PR‑sized slice. Items map 1:1 to the review's Tracks
 | Arabic accuracy drift | Per‑language eval metric; production verify Phase 4 | Sprint 1 / pilot |
 | AWS Bedrock MENA availability | Research call before first regulated sale | Watch (Phase 5) |
 | Self‑hosted pricing | 2–3 GCC conversations during pilot | Watch (Phase 5) |
+
+---
+
+## 7. Progress log — RESUME HERE (updated 2026‑06‑15)
+
+> A fresh session has no chat memory; this section + `DECISIONS.md` + `AGENTS.md` are the handoff.
+
+**Repo state:** All work is committed and pushed. `main` is current; the only unmerged work is the
+**orchestration worker** on branch `claude/confident-albattani-1Ybz6` (PR open). **87 backend tests green.**
+
+**Done (all behind ports, fully unit‑tested):**
+- Schemas · ingestion/webhook · classifier tiering (slices 1–3) — *merged*
+- Domain: rules · identity · control‑chat · destinations · audit — *merged*
+- Persistence: full §4 DB schema (11 tables) + Alembic initial migration — *merged*
+- Media pipeline — *merged*
+- Lane‑A decisions applied: taxonomy enums, band 0.5, `core/policy.py::TenantPolicy` — *merged*
+- Eval golden‑set seed (8 examples) + frontend design tokens — *merged*
+- **Orchestration worker** (`apps/api/orchestration/`) — end‑to‑end routing keystone — *in PR*
+
+**Next up (Sprint‑1 finish → Phase‑1 "done‑when"):**
+1. **Eval runner** (`packages/eval`): golden → 5 metrics → HTML/JSON, recorded‑fixtures CI mode (D13‑a);
+   add the `[build-system]` here + collapse the `ci.yml` dep duplication.
+2. **Concrete LLM providers** (Anthropic/OpenAI) against the `LLMProvider` seam — needs API keys.
+3. **Queue/worker wiring**: BackgroundTasks consumer loads the persisted message and calls the
+   orchestrator; grow golden set to 50 → lock the **baseline accuracy number**.
+   Then Sprint 2: REST API + Inbox view.
+
+**Build‑loop working agreement (match this style):** Python‑only backend; each slice = ports + Pydantic v2,
+fully unit‑tested; `ruff` + `ruff format` + `mypy --strict` + `pytest` all green before commit; line‑length
+100; one slice per commit; open a PR when asked; CI installs deps explicitly in `ci.yml`.
+
+**External / founder carry‑over:** start Meta WABA verification (longest pole), Anthropic + OpenAI keys,
+Render Postgres URL, confirm ≥1 pilot LOI, delete the stale `nifty-johnson` branch via the GitHub UI.
