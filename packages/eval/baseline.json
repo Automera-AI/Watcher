@@ -1,0 +1,6 @@
+{
+  "model": "claude-haiku-4-5-20251001",
+  "overall_intent_accuracy": 0.875,
+  "generated_from": "fixtures/recorded_haiku.jsonl",
+  "note": "Phase-1 recorded-fixture baseline (D13-a). The CI eval-gate fails a PR whose overall intent accuracy drops >2pp below this. Re-record fixtures and bump this number when the prompt/model legitimately improves; nightly live runs (Anthropic/OpenAI) catch silent model drift."
+}

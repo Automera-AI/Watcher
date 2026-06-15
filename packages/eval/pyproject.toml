@@ -1,0 +1,23 @@
+# Watcher classifier eval harness (packages/eval).
+#
+# Its presence (plus a golden *.jsonl) is what flips the CI `eval-gate` job from self-skip to a real
+# run — see .github/workflows/ci.yml and AGENTS.md / §13. The runner imports the locked Pydantic
+# schemas from `apps/api`, so it is exercised from the repo root (`python -m packages.eval`) rather
+# than installed standalone; this file pins the package metadata and the gate's only runtime dep.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "watcher-eval"
+version = "0.0.0"
+description = "Watcher classifier eval harness — golden set, metrics, and the CI accuracy gate."
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.8,<3",
+]
+
+[tool.setuptools]
+# Run from the repo root alongside `apps`; not packaged for distribution (see the API pyproject).
+packages = []
