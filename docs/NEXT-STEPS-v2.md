@@ -341,3 +341,150 @@ Honest list, not a disclaimer:
   business-initiated messages. A receptionist mostly *replies* within the 24-hour window, so this
   is genuinely fine for demo and early pilot — verification should still be filed early so it is
   done before it starts to bind.
+
+---
+
+## 14. If the facts already live in a system (Base360 or similar)
+
+This changes §12 substantially, and mostly for the better. It also raises one commercial question
+that should be answered before any code is written.
+
+### 14.1 What Base360 appears to be — and the limits of this research
+
+**Caveat first:** `base360.ai` and its developer portal both refused inspection (HTTP 403), so
+everything below is from search summaries rather than primary sources. Treat it as a starting
+point to confirm, not as fact. Note also that an unrelated Argentinian photo-booth product shares
+the name.
+
+What the summaries indicate for **Base360.ai**:
+
+- Positioned as an "AI operating system for B2C brands", grown out of a short-term-rental operator.
+- **Unified messaging**: Meta and TikTok DMs, WhatsApp, SMS, phone calls, email and web chat in
+  one inbox, against a single customer record.
+- **STR management**: direct bookings, guest messaging, pricing, cleaning, upsells, analytics.
+- **Real-time OTA sync** with Airbnb, Booking.com and others for reservations, availability and
+  guest details.
+- A separate **Base360 Verify** developer portal exists, documenting webhook-style delivery with
+  retries, delivery history and per-event filtering — but that is the identity-verification
+  product, and it is not evidence of a general-purpose public API.
+
+**The unknown that governs everything else: is there a documented public API for properties,
+reservations and guests, and can we get credentials?** Nothing found confirms this. Getting an
+answer is a half-hour email and it gates the entire integration.
+
+### 14.2 The commercial question, which matters more than the technical one
+
+Base360.ai's described feature set — unified inbox across WhatsApp, SMS and phone, one customer
+record, automated guest messaging — is substantially **the same pitch as Watcher v2**.
+
+That is not automatically a problem, but it forces a choice that should be made deliberately:
+
+- **Build on top of it.** Watcher becomes the intelligence layer over someone else's system of
+  record. Faster to build, less to maintain, and the knowledge base problem largely dissolves.
+  The cost is that the platform can absorb the feature and end the business.
+- **Compete with it.** Watcher owns the conversation end to end. More work, more defensible.
+- **Integrate but stay portable.** Pull from it through a swappable port, exactly as the repo
+  treats every other external system, and stay able to speak to Guesty, Hostaway or Cloudbeds
+  tomorrow. **This is the recommendation** — it costs almost nothing extra given the existing
+  architecture, and it avoids betting the product on one vendor.
+
+One unverified observation worth checking rather than acting on: a job posting for **The Flex**
+surfaced adjacent to the Base360 searches, and Flex Living is the client named in the golden-set
+leak (§2 of the previous document). If Base360 is that operator's own platform, then "integrate
+with Base360" and "sell to this client" may be the same conversation — which is useful, but it
+means the first integration is also a commercial dependency on one customer.
+
+### 14.3 How this rewrites the knowledge base plan
+
+The §12 split into three kinds of knowledge holds. What changes is **who authors each one**:
+
+| Kind | If there is no system | If Base360 has an API |
+|---|---|---|
+| **Exact facts** (WiFi, check-in time, address) | Client fills in a form | **Synced from the system.** The form shrinks to only what the platform does not hold |
+| **Prose** (house rules, cancellation policy) | Client writes it | **Mostly still authored.** PMS platforms rarely hold "can I bring a dog" in a usable shape |
+| **Live answers** (availability, pricing) | Cannot answer honestly | **Answerable.** This is the real prize |
+
+The third row is the big win. Availability and pricing are the questions a receptionist most
+needs to answer and the ones a knowledge base fundamentally cannot hold, because they change
+hourly. An API turns "I'll check and come back to you" into a real answer.
+
+**This does not remove the knowledge base — it shrinks the authoring burden and moves the hard
+part to sync.** §13's 2.5-day estimate stays roughly right; the work moves from intake tooling to
+integration.
+
+### 14.4 Pull continuously: three patterns, chosen by volatility
+
+Not one answer — the right pattern depends on how fast the data goes stale, and getting this
+wrong is how you double-book someone.
+
+| Data | Pattern | Why |
+|---|---|---|
+| **Availability, pricing** | **Live read at question time. Never cache.** | Stale availability means a double booking. This is the one place caching is actively dangerous |
+| **Property facts** (WiFi, check-in, address) | **Cache**, refreshed by webhook or a nightly poll | Changes monthly at most. No reason to pay the latency on every question |
+| **Guest and reservation records** | **Cache with a short TTL**, invalidated by webhook | Changes during a stay, but not between one message and the next |
+
+The three mechanisms, in order of preference:
+
+1. **Webhook push** — they tell us when something changes. Freshest and cheapest, but only if
+   they support it. The Verify portal suggests the platform knows how to emit webhooks.
+2. **Scheduled poll** — we pull every N minutes into cache. Works against any API. Slightly
+   stale, entirely predictable.
+3. **Live read-through** — call at the moment the guest asks. Freshest possible, but adds their
+   latency and their uptime to every reply. Reserve it for the top row.
+
+Most likely the real answer is webhooks where offered, a nightly poll as a safety net to catch
+missed events, and live reads for availability only.
+
+### 14.5 API or MCP?
+
+Worth separating, because they are not interchangeable.
+
+**Use a plain REST API for the guest-reply path.** It is one hop, it is easy to put behind a
+Protocol with a fake for tests, and it keeps latency inside the sub-800ms phone budget. MCP adds
+a hop and is generally built for interactive agents rather than high-throughput backends.
+
+**MCP is genuinely useful in two places:** if Base360 offers *only* MCP and no REST, and for the
+internal operations surface — letting an agent inspect and reconcile data during a build or a
+support investigation, where a few hundred milliseconds do not matter.
+
+**Do not put MCP on the guest hot path if a REST call will do.**
+
+### 14.6 What the repo needs, and why it is cheap
+
+Verified in the code today:
+
+- **`crm_cache` already has the right shape** — `external_record_id`, `last_synced_at`,
+  `source_destination_id`, per-tenant. The sync-and-cache pattern was already designed for.
+- **But the delivery path is write-only.** `destinations/delivery.py` exposes exactly one
+  operation, `WebhookTransport.post()`. There is no read direction. This confirms the earlier
+  finding that delivery "needs a read path added" — concretely, it needs a new port, not a tweak.
+
+So the work is: define a `PropertySystemPort` Protocol with the read operations
+(`get_property_facts`, `check_availability`, `get_reservation`), write a Base360 adapter behind
+it, add a fake for tests, and wire the sync job to the existing cache table.
+
+This is cheap **because the repo already puts every external system behind a swappable seam with
+a fake** — the same property that made the whole v2 pivot affordable. It also means swapping
+Base360 for Guesty or Hostaway later is an adapter, not a rewrite.
+
+### 14.7 The risks worth naming
+
+- **Their downtime becomes our silence.** If the API is unreachable, the receptionist cannot
+  answer availability. It must degrade to "let me check and come back to you" plus a human
+  handoff — never a guess. This is the autonomy gate doing its job, and it needs a test.
+- **Rate limits are unknown.** A per-message live read multiplies quickly across properties.
+- **Vendor concentration.** Mitigated by the port, not eliminated.
+- **Access may take longer than the build.** Getting API credentials from a platform is a
+  commercial conversation, and it can easily outrun a three-day integration.
+
+### 14.8 Effect on the timeline
+
+- **Integration: +2 to 3 days** — port, adapter, sync job, cache invalidation, failure handling.
+- **But it removes intake tooling work**, so the net is roughly **+1 to 1.5 days** on §13's ~12.5.
+- **Gated on API access**, which is not an engineering task. Start that conversation now, in
+  parallel — it is the new version of the Meta-verification lesson: the thing you wait on should
+  be started on day one, not discovered in week three.
+
+**Do this first, before any of it: get the API documentation and confirm credentials are
+obtainable.** Everything in §14 is contingent on what Base360 actually exposes, and I could not
+verify that from outside.
