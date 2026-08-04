@@ -67,7 +67,55 @@ means there is no longer an excuse for the calendar slipping while we wait on so
 
 This is the biggest genuinely-new decision, so it gets its own section.
 
-### 12.1 The mistake to avoid first
+### 12.1 First, a correction: Graphify is not what I evaluated
+
+An earlier draft of this section assessed **Graphiti** (Zep's agent-memory graph). The tool
+actually under discussion is **Graphify**, which is a different product entirely. The
+substitution was mine and the conclusion it produced was answering the wrong question.
+
+**Graphify** (`github.com/Graphify-Labs/graphify`, ~102k stars, Apache-2.0/MIT, YC S26) turns a
+**codebase** — plus its docs, SQL schemas, configs and PDFs — into a queryable knowledge graph.
+It parses locally with tree-sitter, uses **no embeddings and no vector store**, tags every edge
+as either extracted or inferred, and outputs three files: an HTML visualisation, a markdown
+report, and a `graph.json`. You query it from the CLI or over MCP.
+
+The decisive fact: it is a **developer-time tool**, for making AI coding assistants understand a
+repository. Its own documentation states it is not designed for runtime application querying.
+
+So it is not a candidate for the receptionist's knowledge base — not because it is bad, but
+because it does a different job. A guest asking "what time is check-in?" is not a question about
+our source code.
+
+### 12.2 But should we use Graphify anyway? Probably yes — for the other job
+
+Dismissing it as the product's knowledge base is not the same as dismissing it. There is a real
+fit here, just not the one the question assumed.
+
+This repo is 66 Python files, 10 modules, and about to undergo a rename that touches nearly every
+file. Most of that work is agent-assisted. The recurring failure in that setup is an agent that
+greps, half-understands the module boundaries, and puts new code in the wrong place. That is
+precisely what Graphify is built to prevent, and two properties make it a low-risk thing to try:
+
+- **Nothing leaves the machine** for code parsing — local AST, no API calls. Given a public repo
+  that has already leaked a client name once, that matters.
+- **No vector store and no embeddings**, so there is no index to maintain, and every edge can be
+  traced to its source rather than being a similarity score.
+
+The honest caveats: the graph is a snapshot that goes stale as the code changes, so it wants
+regenerating rather than trusting; and it is worth confirming what the non-code path (docs, PDFs,
+media — which uses LLM extraction, not local parsing) sends anywhere before pointing it at
+anything tenant-related.
+
+**Verdict: worth an afternoon during the §13 rename, as a development aid. It has no bearing on
+the product's knowledge base, and the two decisions should not be bundled.**
+
+One caution: at least four different domains present themselves as Graphify
+(`graphify.com`, `graphify.net`, `getgraphify.com`, plus the GitHub org). All three sites refused
+inspection, so I could only verify the GitHub repository. There is also a large volume of
+near-identical SEO content about the project quoting wildly different star counts
+(58k / 63k / 85k / 101k). **Install from the GitHub repository, not from a search result.**
+
+### 12.3 The mistake to avoid first
 
 The instinct is "upload the documents and let the AI read them." **Do not start there.** A
 receptionist's job is mostly *exact facts*, and semantic search is *approximate by design*. A
@@ -85,7 +133,7 @@ Kind 1 is the bulk of the work and the bulk of the questions. Kind 3 is the one 
 try to solve with a knowledge base — availability changes hourly, so it must be a live lookup.
 Only kind 2 actually needs the clever retrieval everyone talks about.
 
-### 12.2 How big is this actually?
+### 12.4 How big is this actually?
 
 Worth doing the arithmetic before choosing a tool, because it changes the answer completely.
 
@@ -95,7 +143,7 @@ That is *nothing*. It fits in a spreadsheet. Postgres handles it without noticin
 that starts "but at scale…" needs to explain how we get from 1,500 rows to the millions where
 specialised tools start to matter.
 
-### 12.3 Every option, and why each wins or loses
+### 12.5 Every option, and why each wins or loses
 
 **Option A — Put everything in the prompt. No retrieval at all.**
 For a single property, the entire fact set is a few thousand tokens. Modern context windows
@@ -112,41 +160,53 @@ magnitude under that.
 *Wins for: everything up to a few hundred properties.*
 
 **Option C — A dedicated vector database (Pinecone, Weaviate, Qdrant).**
-Faster at huge scale, better tooling. But it is a second database, a second bill, a second thing
-that can be down at 2am, and a second place tenant data lives — which matters because the repo
-scopes everything per tenant and a self-hosted option is on the roadmap.
-*Loses on: solving a scale problem we do not have.*
+These are good products solving a real problem: retrieval over millions of vectors, where
+Postgres genuinely starts to strain. We have roughly 200 chunks per client. The scale argument
+does not reach us and will not for years.
 
-**Option D — Graphiti / Zep / a knowledge graph.**
-Worth taking seriously, because it is genuinely good technology, and worth being precise about
-what it is good *at*. Graphiti is an **agent memory** system: it stores facts with validity
-windows so it can tell you what was true in January versus what is true now, and invalidate old
-facts when they change.
+The costs are not theoretical. It is a second database, a second bill, and a second thing that
+can be down at 2am. It is a second place tenant data lives, which matters concretely here: the
+repo scopes every table per tenant, and a self-hosted deployment for regulated clients is on the
+roadmap — a hosted vector service makes that promise harder to keep. It also splits the data,
+so "give me this property's facts and its policy text" becomes two round trips and a join done
+in application code instead of one query.
 
-That is a real and useful capability — but it answers *"what did this guest tell us three months
-ago and has it changed?"*, not *"what is the WiFi password?"* The costs are concrete:
+*Verdict: no. Revisit past a few million chunks, which is a problem we would be lucky to have.*
 
-- Adds Neo4j — a second database, on a stack that is currently one Postgres.
-- Ingesting a fact requires LLM calls to pull out entities and relationships. That is money,
-  latency, and a brand-new way to be silently wrong.
-- Retrieval is quoted around 300ms at P95. Fine on WhatsApp. Meaningful when the phone budget
-  is under 800ms before silence gets awkward.
-- The repo already has identity resolution and a messages table, which covers "is this a
-  returning guest" — the main thing we would be buying.
+**Option D — A knowledge graph for the product's knowledge (Neo4j, or Graphiti-style memory).**
+Distinct from Graphify in §12.1 — this is about storing *guest and property knowledge* as a
+graph, not our source code.
 
-*Verdict: not now.* Revisit if guest history across months becomes a selling point. Note it in
-`DECISIONS.md` as considered-and-deferred, with this reasoning, so it does not get re-argued.
+The genuine appeal is temporal memory: storing facts with validity windows so the system knows
+what was true in January versus now, and invalidates old facts rather than holding both. For a
+returning-guest story — *"they complained about the AC last time"* — that is real value.
 
-**Option E — Graphlit or another managed knowledge-base service.**
-Fastest to a working demo, genuinely. But it puts client data in a third party, makes the
-self-hosted/regulated-client path harder, and hands a core part of the product to someone else's
-roadmap and pricing.
-*Loses on: strategic control of the thing customers are actually paying for.*
+But it answers *"what did this guest tell us months ago?"*, not *"what is the WiFi password?"*,
+and the latter is the overwhelming majority of a receptionist's traffic. Costs: another database
+to run; ingestion needs LLM calls to extract entities and relationships, which is money, latency
+and a new way to be silently wrong; and retrieval latency lands around 300ms — fine on WhatsApp,
+meaningful against a sub-800ms phone budget.
+
+Meanwhile the repo already has identity resolution and a messages table, which covers the
+returning-guest case well enough to test whether anyone actually wants it.
+
+*Verdict: not now.* Record it in `DECISIONS.md` as considered-and-deferred **with this reasoning**,
+so it is not re-argued from scratch in three months.
+
+**Option E — A managed knowledge-base service.**
+Genuinely the fastest route to a working demo. But it puts client data in a third party, makes
+the self-hosted path harder, and hands a core part of the product to someone else's roadmap and
+pricing. The knowledge base *is* much of what clients pay for; outsourcing it is a strategic
+choice, not a technical shortcut.
+*Loses on: control of the thing being sold.*
 
 **Recommendation: A for the demo, B as the real thing.** They are not in conflict — start with
-facts in the prompt, and the move to pgvector later is additive, not a rewrite.
+facts in the prompt, and the move to pgvector later is additive, not a rewrite. The single most
+important point in this section is §12.3: **most of a receptionist's knowledge is exact facts and
+belongs in an ordinary table.** Every option above is only arguing about where the small prose
+remainder lives, which is why the answer should be "wherever is cheapest to operate."
 
-### 12.4 What it should look like to the client
+### 12.6 What it should look like to the client
 
 This is a product decision as much as a technical one.
 
