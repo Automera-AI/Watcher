@@ -93,14 +93,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
       # AGENTS.md / §13: no prompt change merges without an eval run; CI blocks a >2pp
-      # accuracy drop. Wiring the live run depends on D13-a (LLM key in CI vs recorded
-      # fixtures) — until that's decided and a golden set exists, this self-skips.
-      - name: Run eval gate (when wired)
+      # accuracy drop. CI runs in recorded-fixtures mode (D13-a) — deterministic, no live
+      # key; the nightly live run lands with the concrete providers. Self-skips until the
+      # eval tool (pyproject) + a golden set exist.
+      - name: Run eval gate
         run: |
           if [ -f packages/eval/pyproject.toml ] && find packages/eval -name '*.jsonl' 2>/dev/null | grep -q .; then
-            echo "Eval tool + golden set present — running gate."
-            echo "::warning::Eval runner not yet implemented; see docs/build-spec-addendum.md §13 (D13-a)."
+            python -m pip install --upgrade pip
+            python -m pip install pydantic==2.9.2
+            python -m packages.eval \
+              --golden   packages/eval/golden/golden_set.jsonl \
+              --fixtures packages/eval/fixtures/recorded_haiku.jsonl \
+              --baseline packages/eval/baseline.json \
+              --out-dir  eval-out
           else
             echo "::notice::No eval tool/golden set yet — skipping gate. Activates per §13 once D13-a is decided."
           fi
+
+      - name: Upload eval report
+        if: always() && hashFiles('eval-out/report.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: eval-out
