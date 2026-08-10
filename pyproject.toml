@@ -30,10 +30,10 @@ select = ["E", "F", "I", "UP", "B", "ASYNC"]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-files = ["apps/api"]
+files = ["apps/api", "packages/eval"]
 # Pydantic v2 models are the source of truth (AGENTS.md); third-party stubs land as deps are added.
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 addopts = "-q"
-testpaths = ["apps/api"]
+testpaths = ["apps/api", "packages/eval"]
