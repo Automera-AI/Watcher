@@ -195,7 +195,7 @@ story.extend(section(
          "A founder call, not code. <b>Blocks four items</b> (1.2, 2.4, 2.5, and the golden set). Cheapest and most blocking thing on this page."),
         ("0.4", "Merge the eval branch",
          "NOW", "Trivial", "0.25",
-         "Verified a clean fast-forward: runner, five measures, reports, recorded fixtures, plus the job queue. A sprint of finished work. Nothing can be measured until it lands."),
+         "Verified conflict-free and green: +15 tests, 86 to 101, all passing. Runner, five measures, reports, recorded fixtures, plus the job queue. A merge commit, not a fast-forward &mdash; main has moved since."),
         ("0.5", "Delete the stale <font name='Courier'>nifty-johnson</font> branch",
          "LOW", "Trivial", "1 min",
          "Housekeeping your own roadmap already flags."),

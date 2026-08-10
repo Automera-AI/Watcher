@@ -255,7 +255,7 @@ the golden set. It is the cheapest thing on this list and the most-blocking.
 | # | Work | Days | Notes |
 |---|---|---|---|
 | 0 | Decide the receptionist intent vocabulary. Write it into `DECISIONS.md` | — | Founder, one hour. **Blocks 1, 5, 6, 7** |
-| 1 | Merge the eval branch | 0.25 | Verified: it is a clean fast-forward, two commits, no conflicts |
+| 1 | Merge the eval branch | 0.25 | Verified conflict-free: two commits, +15 tests (86 to 101, all passing). A merge commit, not a fast-forward |
 | 2 | Fix the client name in the golden set; decide on history rewrite | 0.25 | It is in a public repo today |
 | 3 | Rename the message shape so the core stops speaking WhatsApp | 1.5 | 86 tests point at every site |
 | 4 | Port the four kept files properly | 1 | **Not free** — see 13.3 |
