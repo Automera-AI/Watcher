@@ -388,7 +388,7 @@ the asset; the adapter is disposable.
 
 The §12 split into three kinds of knowledge holds. What changes is **who authors each one**:
 
-| Kind | If there is no system | If Base360 has an API |
+| Kind | If there is no system | If the client's PMS has an API |
 |---|---|---|
 | **Exact facts** (WiFi, check-in time, address) | Client fills in a form | **Synced from the system.** The form shrinks to only what the platform does not hold |
 | **Prose** (house rules, cancellation policy) | Client writes it | **Mostly still authored.** PMS platforms rarely hold "can I bring a dog" in a usable shape |
