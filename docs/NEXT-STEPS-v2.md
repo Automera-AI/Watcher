@@ -344,55 +344,45 @@ Honest list, not a disclaimer:
 
 ---
 
-## 14. If the facts already live in a system (Base360 or similar)
+## 14. Pulling knowledge from a property management system
 
-This changes §12 substantially, and mostly for the better. It also raises one commercial question
-that should be answered before any code is written.
+The facts a receptionist needs mostly already exist in whatever system the client runs their
+properties on. That changes §12 substantially, and for the better.
 
-### 14.1 What Base360 appears to be — and the limits of this research
+### 14.1 Decision: Base360.ai is ruled out as a partner
 
-**Caveat first:** `base360.ai` and its developer portal both refused inspection (HTTP 403), so
-everything below is from search summaries rather than primary sources. Treat it as a starting
-point to confirm, not as fact. Note also that an unrelated Argentinian photo-booth product shares
-the name.
+**Decided, and recorded here so it is not revisited.** Base360.ai was investigated as a possible
+source of property and guest data. It is ruled out on commercial grounds, not technical ones:
 
-What the summaries indicate for **Base360.ai**:
+1. **Their product is substantially ours.** A unified inbox across WhatsApp, SMS, phone, email
+   and web chat against a single customer record, with automated guest messaging, is the Watcher
+   v2 pitch. Integrating would mean building the intelligence layer on a platform positioned to
+   absorb it.
+2. **Their client base is off limits to us.** Whatever the integration's technical merit, it
+   cannot open the customers it touches.
 
-- Positioned as an "AI operating system for B2C brands", grown out of a short-term-rental operator.
-- **Unified messaging**: Meta and TikTok DMs, WhatsApp, SMS, phone calls, email and web chat in
-  one inbox, against a single customer record.
-- **STR management**: direct bookings, guest messaging, pricing, cleaning, upsells, analytics.
-- **Real-time OTA sync** with Airbnb, Booking.com and others for reservations, availability and
-  guest details.
-- A separate **Base360 Verify** developer portal exists, documenting webhook-style delivery with
-  retries, delivery history and per-event filtering — but that is the identity-verification
-  product, and it is not evidence of a general-purpose public API.
+No further research needed here. The question was worth asking and it is now closed.
 
-**The unknown that governs everything else: is there a documented public API for properties,
-reservations and guests, and can we get credentials?** Nothing found confirms this. Getting an
-answer is a half-hour email and it gates the entire integration.
+### 14.2 What replaces it: a vendor-neutral integration port
 
-### 14.2 The commercial question, which matters more than the technical one
+The good news is the underlying assumption held. **Hostaway, Guesty, Cloudbeds, Mews and the rest
+of the PMS field all publish documented APIs**, so the capability §14 was reaching for is
+available without a partnership that costs us a market.
 
-Base360.ai's described feature set — unified inbox across WhatsApp, SMS and phone, one customer
-record, automated guest messaging — is substantially **the same pitch as Watcher v2**.
+The design consequence is important, and it is better than the Base360 version would have been:
 
-That is not automatically a problem, but it forces a choice that should be made deliberately:
+**Build one `PropertySystemPort`, not a Hostaway integration.** The port defines what the
+receptionist needs to know — property facts, availability, a reservation. Each platform gets a
+thin adapter behind it. This is exactly how the repo already treats every other external system,
+and it means:
 
-- **Build on top of it.** Watcher becomes the intelligence layer over someone else's system of
-  record. Faster to build, less to maintain, and the knowledge base problem largely dissolves.
-  The cost is that the platform can absorb the feature and end the business.
-- **Compete with it.** Watcher owns the conversation end to end. More work, more defensible.
-- **Integrate but stay portable.** Pull from it through a swappable port, exactly as the repo
-  treats every other external system, and stay able to speak to Guesty, Hostaway or Cloudbeds
-  tomorrow. **This is the recommendation** — it costs almost nothing extra given the existing
-  architecture, and it avoids betting the product on one vendor.
+- The first client's platform does not dictate the second client's.
+- A client switching PMS is an adapter, not a rewrite.
+- Tests run against a fake, with no vendor account needed — the property that makes this repo's
+  86 tests run with no network.
 
-One unverified observation worth checking rather than acting on: a job posting for **The Flex**
-surfaced adjacent to the Base360 searches, and Flex Living is the client named in the golden-set
-leak (§2 of the previous document). If Base360 is that operator's own platform, then "integrate
-with Base360" and "sell to this client" may be the same conversation — which is useful, but it
-means the first integration is also a commercial dependency on one customer.
+**Pick the first adapter by which client signs first, not by which API is nicest.** The port is
+the asset; the adapter is disposable.
 
 ### 14.3 How this rewrites the knowledge base plan
 
@@ -443,7 +433,7 @@ Worth separating, because they are not interchangeable.
 Protocol with a fake for tests, and it keeps latency inside the sub-800ms phone budget. MCP adds
 a hop and is generally built for interactive agents rather than high-throughput backends.
 
-**MCP is genuinely useful in two places:** if Base360 offers *only* MCP and no REST, and for the
+**MCP is genuinely useful in two places:** if a platform offers *only* MCP and no REST, and for the
 internal operations surface — letting an agent inspect and reconcile data during a build or a
 support investigation, where a few hundred milliseconds do not matter.
 
@@ -460,12 +450,12 @@ Verified in the code today:
   finding that delivery "needs a read path added" — concretely, it needs a new port, not a tweak.
 
 So the work is: define a `PropertySystemPort` Protocol with the read operations
-(`get_property_facts`, `check_availability`, `get_reservation`), write a Base360 adapter behind
-it, add a fake for tests, and wire the sync job to the existing cache table.
+(`get_property_facts`, `check_availability`, `get_reservation`), write the first client's adapter
+behind it, add a fake for tests, and wire the sync job to the existing cache table.
 
 This is cheap **because the repo already puts every external system behind a swappable seam with
 a fake** — the same property that made the whole v2 pivot affordable. It also means swapping
-Base360 for Guesty or Hostaway later is an adapter, not a rewrite.
+Hostaway for Guesty or Cloudbeds later is an adapter, not a rewrite.
 
 ### 14.7 The risks worth naming
 
@@ -485,6 +475,8 @@ Base360 for Guesty or Hostaway later is an adapter, not a rewrite.
   parallel — it is the new version of the Meta-verification lesson: the thing you wait on should
   be started on day one, not discovered in week three.
 
-**Do this first, before any of it: get the API documentation and confirm credentials are
-obtainable.** Everything in §14 is contingent on what Base360 actually exposes, and I could not
-verify that from outside.
+**Do this first, before any of it: pick the first client, then read that platform's API docs.**
+Hostaway, Guesty and Cloudbeds all publish theirs openly, so this is an afternoon of reading
+rather than a negotiation — but the port's read operations should be shaped by what two or three
+of them actually offer in common, not by guesswork. Sandbox credentials are usually
+self-service; confirm that before committing to a date.
