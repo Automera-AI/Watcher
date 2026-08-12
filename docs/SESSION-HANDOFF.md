@@ -40,14 +40,15 @@ Numbering matches `docs/Watcher_v2_Roadmap.pdf`.
 | # | Item | Status |
 |---|---|---|
 | 0.1 | Set default branch to `main` | **DONE** — remote HEAD is `refs/heads/main` |
-| 0.2 | Remove the client name from the golden set and fixtures | **NOT DONE** — still live in a public repo |
-| 0.3 | Decide the receptionist intent vocabulary | **NOT DONE** — blocks 1.2, 2.4, 2.5 |
+| 0.2 | Remove the client name from the golden set and fixtures | **DONE** — replaced with invented placeholders; eval still 87.5% |
+| 0.3 | Decide the receptionist intent vocabulary | **DONE** — `packages/intents`, 18 intents, 37 tests |
 | 0.4 | Merge the eval branch | **DONE** — PR #10, 101 tests, gate passing |
-| 0.5 | Delete the stale `nifty-johnson` branch | **NOT DONE** |
+| 0.5 | Delete the stale `nifty-johnson` branch | **DONE** |
 
-### Everything else — all NOT STARTED
+### Everything else
 
-Track 1: 1.1 de-WhatsApp the core · 1.2 port the four scaffold files · 1.3 Python 3.12→3.13
+Track 1: 1.1 de-WhatsApp the core (**NOT STARTED**) · 1.2 port the four scaffold files
+(**DONE, with a caveat — see §8**) · 1.3 Python 3.12→3.13 (**NOT STARTED**)
 Track 2: 2.1 conversations/tasks/slot filling · 2.2 reply path · 2.3 autonomy gate ·
 2.4 knowledge base · 2.5 prompt v2 + golden set
 Track 3: 3.1 `PropertySystemPort` + first adapter · 3.2 end to end on a real number
@@ -60,16 +61,16 @@ P4 Graphify as a build aid (optional)
 
 ## 3. Do these next, in this order
 
-1. **0.3 — decide the intent vocabulary.** One founder hour. Blocks three items and the golden
-   set. Cheapest and most blocking thing on the whole plan. **Do not start 1.2, 2.4 or 2.5
-   before this lands.**
-2. **0.2 — fix the client name.** Two hours. It is in a public repo. Decide separately whether
-   to rewrite history; changing the string now at least stops it being the first thing a
-   prospect reads.
-3. **0.5 — delete the stale branch.** One minute. Keep `claude/dazzling-gates-iepkxa` if you
-   want the history, but it is fully merged now.
-4. **1.1 — de-WhatsApp the core.** Do this before anything else is built on the current shape.
-   Every week it waits adds call sites.
+> **Superseded by §8.** All of Track 0 is now done, and so is 1.2. The current list is at the end
+> of §8; this section is kept as written so the original reasoning is still legible.
+
+1. ~~**0.3 — decide the intent vocabulary.**~~ Done. One founder hour, blocked three items and the
+   golden set. Cheapest and most blocking thing on the whole plan.
+2. ~~**0.2 — fix the client name.**~~ Done. **The history rewrite is still an open decision** —
+   changing the string stopped it being the first thing a prospect reads, nothing more.
+3. ~~**0.5 — delete the stale branch.**~~ Done.
+4. **1.1 — de-WhatsApp the core.** Still the next thing. Do it before anything else is built on
+   the current shape; every week it waits adds call sites. `test_boundary.py` now defines done.
 
 ---
 
@@ -132,9 +133,13 @@ Each of these was found by reading the code, and each contradicts something a do
 Nothing is pre-installed. To get to a green test run:
 
 ```
-pip install pytest pydantic fastapi sqlalchemy rapidfuzz alembic httpx
-python3 -m pytest            # expect 101 passed
+pip install pytest pydantic fastapi sqlalchemy rapidfuzz alembic httpx pyyaml
+python3 -m pytest            # expect 194 passed, 14 xfailed
 ```
+
+`pyyaml` is needed by `packages/intents` (build-time only — the application loads compiled JSON).
+The 14 xfails are the 1.2 specification tests waiting on items 2.1–2.3; they are `strict`, so
+they will start *failing* the moment those land, which is the intended prompt to unmark them.
 
 To reproduce the full CI locally:
 
@@ -176,3 +181,71 @@ Documentation and repo hygiene only. **No product code was written.**
 Corrections made to earlier documents, in case older copies are still circulating: Meta
 verification is no longer the binding constraint; the eval merge was a merge commit rather than
 a fast-forward; the Python baseline is 3.12 not 3.10; and Graphify is not Graphiti.
+
+---
+
+## 8. Session 2 — 0.2, 0.3 and 1.2
+
+Branch `claude/roadmap-handoff-setup-1faxg7`. **194 passing, 14 xfailed** (was 101). Ruff clean,
+strict mypy clean on 84 files, eval gate still 87.5%.
+
+**0.2 — done.** `Northwind Residences` / `Riverside Quarter` / `Riverside Quarter` are gone from the golden set and the
+fixtures, replaced with invented placeholders in the same style as the fictional Acme Trading
+already there. Both files were rewritten together because the recorded predictor keys on message
+text. No scored field moved, so the baseline still holds. New test
+`test_every_golden_message_has_a_recorded_prediction` makes a one-sided edit fail a test rather
+than the runner. **Still open:** whether to rewrite git history — the old strings remain in it.
+
+**0.3 — done.** `packages/intents/`: 18 intents, 80 examples, 5 languages, 6 emergency triggers,
+2 client overrides, 37 tests. Adapted to the repo rather than dropped in — package-qualified
+imports, `python -m packages.intents[.compile]`, wired into pytest/mypy/CI, `build/` gitignored,
+PyYAML build-only via a lazy import.
+
+Two bugs came in with it, both of which had a check that could not fire:
+
+1. **The fire emergency trigger could never match.** `7arі2` carried a Cyrillic `і` (U+0456)
+   where the Latin `i` belongs. It passed the validator and all 32 original tests and reached
+   `build/intents.json` — verified against the compiled artifact. `EmergencyTrigger` now rejects
+   any phrase mixing alphabets.
+2. **The Franco-Arabic guard was dead code.** `if latin and ... and not intent.examples` — a
+   non-empty `latin` implies non-empty `examples`, so it never ran. Replaced with a real rule:
+   languages declare `spoken`, and an acting intent needs at least one spoken example or its
+   phone test set in 3.2 is empty. A client on a voice channel may not declare a typed-only
+   language either.
+
+**1.2 — done, with a caveat worth reading.** The four scaffold files were not in this repo or
+its history, so they were written from the descriptions in §5 and NEXT-STEPS §13.3 rather than
+ported from source. All four traps are addressed:
+
+| File | State |
+|---|---|
+| `test_boundary.py` | **Fully live, 43 cases.** Bans `wa_`, which is the leak `whatsapp` never matched |
+| `test_envelope.py` | 2 live, 4 spec. Decision taken: **cap in the channel adapter, not the core** |
+| `test_autonomy.py` | 4 live, 5 spec. Pins matching-is-not-verification |
+| `test_task.py` | 5 live, 5 spec. Carries the cancel-confirmation-on-date-change rule |
+
+The 14 "spec" cases are `xfail(strict=True)` against items 2.1–2.3, which do not exist yet.
+Strict is the point: when those land and the tests pass, XPASS **fails** the suite and forces
+the markers off, so the specification cannot drift out of date unnoticed.
+
+**`test_boundary.py` is the one to understand.** 1.1 has not happened, so the core still leaks.
+Rather than fail, it carries `KNOWN_LEAKS` — eight files and exactly which tokens each still
+has. A new leak fails immediately; a *stale* entry also fails, so 1.1 cannot half-land and be
+forgotten. The list only shrinks, and when it is empty 1.1 is done. That makes it a checklist:
+
+```
+classifier/prompt.py · control_chat/state.py · core/config.py · db/models.py
+db/repository.py · orchestration/queue.py · schemas/enums.py · schemas/message.py
+```
+
+### Do these next
+
+1. **1.1 — de-WhatsApp the core.** Now has an executable definition of done: empty `KNOWN_LEAKS`.
+2. **2.1 — conversations, tasks, slot filling.** 10 xfail cases are already waiting for it.
+3. **Decide on the history rewrite** left open by 0.2.
+
+### Two environment mismatches spotted
+
+The batch-2 artifacts were built on **Python 3.10** (`schema.cpython-310.pyc`) with **pytest
+9.1.1**. The repo is 3.12 everywhere and CI pins pytest 8.3.3. A green local run on that setup
+is not evidence of a green CI run. Worth reconciling before 1.3 moves the baseline to 3.13.
