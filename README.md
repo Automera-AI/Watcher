@@ -11,6 +11,10 @@ LLM-first, Arabic from day one, human-in-the-loop, with a real data-residency st
 
 ## Documents
 
+- **`docs/SESSION-HANDOFF.md`** — **read this first.** Verified state of `main`, roadmap status, what to do
+  next and in what order, decisions not to re-litigate, and the traps found by reading the code.
+- **`docs/Watcher_v2_Roadmap.pdf`** — the scored plan (urgency, ease, effort per work item), regenerable
+  from `docs/make_roadmap.py`.
 - **`docs/build-spec-addendum.md`** — build-ready engineering decisions resolving the gaps in MVP v1.2
   (auth, multi-tenancy, data model, media pipeline, identity resolution, control-chat state machine, eval,
   residency). Start here before writing backend code.
