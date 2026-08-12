@@ -1,68 +1,79 @@
 # Session handoff — read this first
 
-**Updated:** 12 August 2026
-**Branch this was written on:** `claude/strategy-shift-review-roadmap-i9zkwe` (restarted from `main` after PR #11 merged)
-**`main` is at:** `b89eb06`
+**Updated:** end of session 2, 12 August 2026
+**Branch:** `claude/roadmap-handoff-setup-1faxg7` — all work pushed, no PR
+**`main` is at:** `b89eb06`, untouched
+**Start at §2 for status, §9 for what to do first.**
 
 Purpose: let a new session pick up without re-deriving anything. Companion documents are
 `docs/NEXT-STEPS-v2.md` (the reasoning, §11–14) and `docs/Watcher_v2_Roadmap.pdf` (the scored plan).
 
 ---
 
-## 1. Verified state of `main` right now
+## 1. Verified state right now
 
-Measured by running it, not read off a document.
+Measured by running it, not read off a document. **Work is on the branch, not on `main`.**
 
 | | |
 |---|---|
-| Tests | **101 passing** (was 86 before this session) |
-| Python files | 79 |
-| Backend modules | 10, each with the outside world behind a swappable seam |
-| DB tables | 11, migration written |
-| Eval runner | **on `main`**, with a CI gate |
-| Recorded baseline | **87.5%** intent accuracy on Haiku, gate fails on a >2pp drop |
-| Default branch | `main` |
-| Python | 3.12 everywhere (`requires-python >=3.12`, ruff `py312`, mypy `3.12`, CI `3.12`) |
+| Branch | `claude/roadmap-handoff-setup-1faxg7` — 6 commits, all pushed |
+| `main` | **`b89eb06`, untouched.** No PR opened |
+| Tests | **221 passing**, 0 xfailed (was 101 at the start of this session) |
+| Python files | 97 (was 79) |
+| Lint / types | ruff clean; strict mypy clean on 92 files |
+| Recorded baseline | **87.5%** intent accuracy, gate passing |
+| Python | 3.12 everywhere |
+
+To get green in a fresh container:
+
+```
+pip install pytest pydantic fastapi sqlalchemy rapidfuzz alembic httpx pyyaml
+python3 -m pytest            # expect 221 passed
+```
 
 **The product gap, unchanged:** the pipeline can listen and file, but it cannot reply.
-`orchestration/worker.py` has exactly three outcomes — `AUTO_ROUTE`, `CONTROL_PING`,
+`orchestration/worker.py` still has exactly three outcomes — `AUTO_ROUTE`, `CONTROL_PING`,
 `INBOX_REVIEW` — and all three mean "put this somewhere". Adding a fourth that means
-**answer the customer** is the project.
+**answer the customer** is still the project. What changed this session is that the pieces a
+fourth outcome needs now exist; nothing is wired to it yet.
 
 ---
 
 ## 2. Roadmap status
 
-Numbering matches `docs/Watcher_v2_Roadmap.pdf`.
+Against `docs/Watcher_v2_Roadmap.pdf` (v1.11, unchanged). Days are the roadmap's own estimates.
 
-### Track 0 — today
+| # | Item | Days | Status |
+|---|---|---|---|
+| 0.1 | Set default branch to `main` | 1 min | **DONE** |
+| 0.2 | Remove the client name from the golden set | 0.25 | **DONE** — history rewrite still open |
+| 0.3 | Decide the receptionist intent vocabulary | 1 hr | **DONE** — 19 intents, 38 tests |
+| 0.4 | Merge the eval branch | 0.25 | **DONE** |
+| 0.5 | Delete the stale branch | 1 min | **DONE** |
+| 1.1 | Stop the core speaking WhatsApp | 1.5 | **NOT STARTED** — next up |
+| 1.2 | Port the four kept scaffold files | 1.0 | **DONE** |
+| 1.3 | Python 3.12 → 3.13 | 0.5 | NOT STARTED — do after 1.1 |
+| 2.1 | Conversations, tasks and slot filling | 2.0 | **PART DONE** — state machine in, persistence not |
+| 2.2 | The reply path | 1.5 | **PART DONE** — envelope + adapters in, composer not |
+| 2.3 | Autonomy gate | 1.0 | **PART DONE** — `decide_autonomy` in, not wired to the worker |
+| 2.4 | Knowledge base | 2.0 | NOT STARTED |
+| 2.5 | Prompt v2 + rewrite the golden set | 1.0 | NOT STARTED — unblocked by 0.3 |
+| 3.1 | `PropertySystemPort` + first adapter | 2.5 | NOT STARTED — **blocks door codes and all pricing** |
+| 3.2 | End to end on a real number | 1.0 | NOT STARTED |
+| P1 | Pick the first client | — | Open |
+| P2 | Read the PMS API docs, get sandbox keys | 0.5 | Open — start day one |
+| P3 | File Meta business verification | 1 hr | Open |
+| P4 | Graphify as a build aid | 0.5 | Optional |
 
-| # | Item | Status |
-|---|---|---|
-| 0.1 | Set default branch to `main` | **DONE** — remote HEAD is `refs/heads/main` |
-| 0.2 | Remove the client name from the golden set and fixtures | **DONE** — replaced with invented placeholders; eval still 87.5% |
-| 0.3 | Decide the receptionist intent vocabulary | **DONE** — `packages/intents`, 19 intents, 38 tests |
-| 0.4 | Merge the eval branch | **DONE** — PR #10, 101 tests, gate passing |
-| 0.5 | Delete the stale `nifty-johnson` branch | **DONE** |
-
-### Everything else
-
-Track 1: 1.1 de-WhatsApp the core (**NOT STARTED** — `test_boundary.py` defines done) ·
-1.2 port the four scaffold files (**DONE** — see §8) · 1.3 Python 3.12→3.13 (**NOT STARTED**)
-Track 2: 2.1 conversations/tasks/slot filling · 2.2 reply path · 2.3 autonomy gate ·
-2.4 knowledge base · 2.5 prompt v2 + golden set
-Track 3: 3.1 `PropertySystemPort` + first adapter · 3.2 end to end on a real number
-Parallel: P1 pick first client · P2 read PMS API docs · P3 file Meta verification ·
-P4 Graphify as a build aid (optional)
-
-**Remaining: ~14 engineering days.** Demo ~2 weeks, pilot ~3, phone ~4, at six days a week.
+**~13 engineering days remaining** by those numbers, but 2.1–2.3 are partly built now, so the
+true figure is lower — call it 11 to 12. Track 0 is fully closed.
 
 ---
 
 ## 3. Do these next, in this order
 
-> **Superseded by §8.** All of Track 0 is now done, and so is 1.2. The current list is at the end
-> of §8; this section is kept as written so the original reasoning is still legible.
+> **Superseded — see §9.** All of Track 0 is done, and so is 1.2. This section is kept as
+> written so the original reasoning stays legible.
 
 1. ~~**0.3 — decide the intent vocabulary.**~~ Done. One founder hour, blocked three items and the
    golden set. Cheapest and most blocking thing on the whole plan.
@@ -100,18 +111,21 @@ P4 Graphify as a build aid (optional)
 
 Each of these was found by reading the code, and each contradicts something a document claims.
 
-1. **`test_boundary.py` does not catch the bug it exists to prevent.** It bans the strings
+> **Status after session 2:** 1, 2, 3, 4 and 8 are resolved — see §8. 5, 6, 7 and 9 stand.
+> Trap 3 is resolved as a *design*, not as code: the plan is in §8, the build is blocked on 3.1.
+
+1. **[CLOSED]** **`test_boundary.py` does not catch the bug it exists to prevent.** It bans the strings
    `whatsapp`, `twilio` and so on. The actual leak is `wa_message_id` / `wa_chat_id`, and
    `whatsapp` never matches `wa_`. **Add the `wa_` prefix when porting it in 1.2**, or 1.1 can
    silently regress.
-2. **`test_envelope.py` contradicts `test_boundary.py`.** It caps replies at three quick-reply
+2. **[CLOSED]** **`test_envelope.py` contradicts `test_boundary.py`.** It caps replies at three quick-reply
    buttons — a *WhatsApp* limit sitting in the channel-neutral core, which is the exact mistake
    the boundary test exists to catch. Decide: cap in the WhatsApp adapter, or accept the core is
    permanently limited to the most restrictive channel.
-3. **`test_autonomy.py` needs something that does not exist.** It relies on `identity_verified`.
+3. **[CLOSED]** **`test_autonomy.py` needs something that does not exist.** It relies on `identity_verified`.
    The repo does identity *matching* ("same person as this record"), not *verification* ("has
    proved who they are"). Different thing; needs the verification-codes table.
-4. **`test_task.py` presumes the taxonomy decision.** It uses `booking_enquiry` and
+4. **[CLOSED]** **`test_task.py` presumes the taxonomy decision.** It uses `booking_enquiry` and
    `availability_check`, neither of which is among the six locked intents. Hence 0.3 first.
 5. **The delivery path is write-only.** `destinations/delivery.py` exposes exactly one operation,
    `WebhookTransport.post()`. Item 3.1 needs a **new read port**, not a tweak.
@@ -120,7 +134,7 @@ Each of these was found by reading the code, and each contradicts something a do
 7. **Mixed-language accuracy is 0.0%.** Per-language: `ar` 100%, `en` 100%, `mixed` 0%. Only 8
    golden examples, so probably one case — but it is the one category at zero. Watch it when the
    set grows to ~50 in 2.5.
-8. **The golden set still names a real client** (`packages/eval/golden/golden_set.jsonl`), in a
+8. **[CLOSED]** **The golden set still names a real client** (`packages/eval/golden/golden_set.jsonl`), in a
    public repo. That is item 0.2 and PR #10 did not touch it.
 9. **Python baseline is 3.12, not 3.10** — several older notes say otherwise. The 3.13 upgrade
    surface was checked and is clean (no removed stdlib, no `datetime.utcnow`). Do it *after* 1.1
@@ -186,7 +200,7 @@ a fast-forward; the Python baseline is 3.12 not 3.10; and Graphify is not Graphi
 
 ---
 
-## 8. Session 2 — 0.2, 0.3 and 1.2
+## 8. What session 2 did — 0.2, 0.3, 1.2
 
 Branch `claude/roadmap-handoff-setup-1faxg7`. **221 passing, 0 xfailed** (was 101). Ruff clean,
 strict mypy clean on 92 files, eval gate still 87.5%.
@@ -272,21 +286,73 @@ db/repository.py · orchestration/queue.py · schemas/enums.py · schemas/messag
 names the closed set of channels, because you cannot have a channel-neutral envelope without a
 channel field. A separate test stops that becoming a back door for `wa_`.
 
-### Do these next
+### Trap #3 — the door-code decision, taken but not built
 
-1. **1.1 — de-WhatsApp the core.** Now has an executable definition of done: empty `KNOWN_LEAKS`.
-   The scaffold's envelope is the target shape, and it is already in the repo to copy from.
-2. **2.1 — conversations, tasks, slot filling.** The state machine is in; what is left is
-   persistence, the conversations table, and the verification-codes table trap #3 needs.
-3. **2.2 / 2.3 — wire it up.** The envelope, the adapters and `decide_autonomy` all exist; what
-   is missing is the composer, the send-out, and a fourth outcome in `orchestration/worker.py`.
-4. **Decide on the history rewrite** left open by 0.2.
-5. **Decide what happens to `amahmoudosman96-lgtm-V2-scaffold`.** Its core is ported; the rest
-   (`receptionist.py`, `tools/registry.py`, `understanding.py`, the SQL migration, its own eval)
-   is not, and it is a second full tree that will drift. Either mine it deliberately or close it.
+Discussed and settled this session. **No code written; it is blocked on 3.1.**
 
-### Two environment mismatches spotted
+The repo does identity *matching*; it cannot prove anything. The fix is one inversion: **do not
+ask a guest for their registered mobile — check the number they are already messaging from.**
+Meta has verified they control that WhatsApp account, so it is possession-based proof and costs
+the guest nothing. Reservation ref stays as the *lookup key*, never the proof. The Meta profile
+**display name is user-set and worthless** — it must not appear in the check at all.
 
-The batch-2 artifacts were built on **Python 3.10** (`schema.cpython-310.pyc`) with **pytest
-9.1.1**. The repo is 3.12 everywhere and CI pins pytest 8.3.3. A green local run on that setup
-is not evidence of a green CI run. Worth reconciling before 1.3 moves the baseline to 3.13.
+Anything you *ask* for (ref, email, name) is knowledge, and knowledge is forwarded, screenshotted
+and sitting on cleaners' booking sheets. Anything you *send to* what is already on file is proof.
+
+**v1 releases a code only when all four hold; anything else hands off:**
+
+1. inbound `channel_identity` matches the booking contact — exact E.164, never fuzzy;
+2. the stay is live right now;
+3. the property's code is self-limiting (per-booking PIN), or explicitly opted in;
+4. sent only to the contact on the booking, never the asking number.
+
+Conditions 2 and 4 are already in the `access_code_request` never-list. **Condition 3 is the one
+that is easy to miss:** lock types vary by property, and a static key-box code cannot be
+un-leaked — one wrong recipient compromises every future guest until someone physically visits.
+So a silent match alone is not sufficient.
+
+**Deferred to before pilot:** the step-up flow (send a one-time code to the contact on file, guest
+reads it back). Bookings are roughly half OTA, and relay numbers break condition 1, so this is
+about half of all guests. `control_chat/tokens.py` already has the HMAC + TTL machinery.
+
+**Still open:** the booker is not always the arriver. The code goes to whoever booked; the person
+at the door may be their spouse.
+
+Full write-up: `/root/.claude/plans/okay-for-3-can-soft-cocoa.md` (not in the repo — copy it in if
+it matters).
+
+---
+
+## 9. Start here tomorrow
+
+1. **1.1 — de-WhatsApp the core (1.5 days).** The next real item, and it now has an executable
+   definition of done: `KNOWN_LEAKS` in `apps/api/tests/test_boundary.py` empty. Eight files:
+
+   ```
+   classifier/prompt.py · control_chat/state.py · core/config.py · db/models.py
+   db/repository.py · orchestration/queue.py · schemas/enums.py · schemas/message.py
+   ```
+
+   `wa_message_id` → `external_id`, `wa_chat_id` → `thread_id`, add a channel field.
+   **`apps/api/schemas/envelope.py` is already the target shape — copy from it.**
+
+2. **P2 — read the PMS API docs, get sandbox keys (0.5 days).** Not engineering, and it gates
+   3.1, which in turn gates all pricing, availability and door codes. Cheapest unblock available.
+
+3. **Then 2.1 → 2.2 → 2.3**, which are partly built. What is missing: persistence and the
+   conversations table; the composer and send-out; a fourth outcome in `orchestration/worker.py`.
+
+### Decisions still owed by you
+
+- **The git history rewrite** left open by 0.2. The old client name is still in history.
+- **What happens to `amahmoudosman96-lgtm-V2-scaffold`.** Its core is ported; `receptionist.py`,
+  `tools/registry.py`, `understanding.py`, the SQL migration and its own eval harness are not.
+  It is a second full tree that will drift — mine it deliberately or close it. Note
+  `understanding.py` is a *third* intent taxonomy, after `IntentType` and the vocabulary.
+- **Whether to open a PR** for `claude/roadmap-handoff-setup-1faxg7`. Six commits, none on `main`.
+
+### Environment mismatch worth fixing
+
+The build artifacts uploaded this session were made on **Python 3.10** (`schema.cpython-310.pyc`)
+with **pytest 9.1.1**. The repo is 3.12 everywhere and CI pins pytest 8.3.3. A green local run on
+that setup is not evidence of a green CI run. Reconcile before 1.3 moves the baseline to 3.13.
