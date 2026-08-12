@@ -1,34 +1,23 @@
-# An Egyptian holiday-homes operator. The narrow end of what the base file allows.
-#
-# Does not quote. Its rates live in a spreadsheet and are seasonal and negotiated, which is
-# normal in this market and not a shortcoming of the product — there is simply no API to ask and
-# no rate identifier to prove afterwards what the number was. So price questions go to a person,
-# which is what happens today anyway. The validator would refuse the file if it claimed
-# otherwise: `quote_prices: true` against a non-quotable system is the one combination that
-# fails the build.
-#
-# WhatsApp only. Franco-Arabic matters here more than anywhere: a large share of these guests
-# type Egyptian Arabic in Latin letters.
+# Example client: an Egyptian short-let operator, North Coast and Cairo.
+# WhatsApp only. Franco-Arabic is a first-class language here, not an edge case.
 
-client: egypt-holiday-homes
+client: egypt-operator-example
 market: EG
 currency: EGP
 timezone: Africa/Cairo
 channels: [whatsapp]
-
 languages: [ar-EG, ar-EG-latin, en]
-
 property_system: custom_sheet
 quote_prices: false
 
+# No phone line, so nothing spoken. Prices are seasonal and negotiated by a person here,
+# which is normal in this market, so price questions go to a human rather than being quoted.
 disabled_intents: []
 
-# Forced to a person, and each for its own reason.
-#   price_enquiry — required by the validator whenever quote_prices is off.
-#   extend_stay   — an extension is a new price, and this client cannot price anything live.
-force_hand_off: [price_enquiry, extend_stay]
+force_hand_off:
+  - price_enquiry
 
+# Egyptian bookings are often for a whole villa or chalet rather than a unit type,
+# and guests give a location rather than a building.
 slot_overrides:
-  # Addresses in the North Coast compounds are "compound, phase, villa number", which no single
-  # free-text field captures well, so directions collect where they are coming from.
-  directions: [coming_from]
+  booking_enquiry: [check_in, check_out, guests, area]

@@ -11,7 +11,7 @@ Lives at `packages/intents/`, run from the repo root like `packages/eval`.
 intents.yaml                       the vocabulary. This is the thing to review.
 schema.py                          loads and validates it.
 compile.py                         validates, then writes build/*.json. Run this in CI.
-tests/test_intents.py              35 tests. Most of them break the file on purpose.
+tests/test_intents.py              37 tests. Most of them break the file on purpose.
 clients/dubai-holiday-homes.yaml   a client that quotes prices, both channels
 clients/egypt-holiday-homes.yaml   a client that does not, WhatsApp only
 build/                             generated. Do not edit. Gitignored.
@@ -188,6 +188,12 @@ it just leaves it unhandled. The tests cover both.
 The two examples are deliberately different. The Dubai one quotes prices and runs both channels.
 The Egyptian one is WhatsApp only and forces price questions to a person, because rates there are
 seasonal and negotiated, which is normal in that market and not a limitation of the product.
+
+A client also cannot put a typed-only language on a voice channel. The Egyptian file explains why
+in its own comment — *"no phone line, so nothing spoken"* — and that is exactly the licence it
+needs to list Franco-Arabic at all. Give that client a voice channel without dropping
+`ar-EG-latin` and a speech model gets handed `3ayez ahgez`, which it can only read as noise. The
+base file already records which languages are spoken; a client may not contradict it.
 
 ---
 

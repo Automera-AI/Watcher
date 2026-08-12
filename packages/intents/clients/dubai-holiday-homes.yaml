@@ -1,29 +1,21 @@
-# A Dubai holiday-homes operator. The permissive end of what the base file allows.
-#
-# Quotes live prices, because its rates live in Hostaway: askable by API now, and every response
-# carries a rate identifier so a number can be re-checked three weeks later. Runs both channels,
-# so its examples have to hold up spoken as well as typed.
-#
-# Nothing here widens a rule in intents.yaml. A client can only narrow.
+# Example client: a Dubai holiday home operator, 40 to 150 units.
+# Both channels, quotes live prices, the full language set.
 
-client: dubai-holiday-homes
+client: dubai-operator-example
 market: AE
 currency: AED
 timezone: Asia/Dubai
-channels: [whatsapp, phone]
-
-# No ar-EG-latin: Franco-Arabic is Egyptian, and this client runs a phone channel where it has
-# no meaning. Gulf Arabic and English, plus the mix of the two that is normal here.
+channels: [whatsapp, voice]
 languages: [en, ar-AE, mixed]
-
 property_system: hostaway
 quote_prices: true
 
 disabled_intents: []
+
+# Nothing extra forced to a human. This operator has staff on shift and wants the
+# receptionist to carry as much as it safely can.
 force_hand_off: []
 
+# This operator's buildings have assigned parking, so the area matters when quoting.
 slot_overrides:
-  # Building access in most Dubai towers is by tower and unit, not a street address, so the
-  # unit is worth collecting up front rather than asking again at the door.
-  booking_enquiry: [check_in, check_out, guests, unit_type, area]
-  maintenance_issue: [issue_description, unit]
+  availability_check: [check_in, check_out, area]

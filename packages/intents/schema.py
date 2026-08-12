@@ -49,6 +49,10 @@ MUST_VERIFY: frozenset[str] = frozenset(
 #: Intents that touch money and must therefore carry an explicit no-discount rule.
 MONEY_INTENTS: frozenset[str] = frozenset({"price_enquiry", "extend_stay"})
 
+#: Channel names that reach a speech model. A client on one of these may only declare languages
+#: the base file marks ``spoken``.
+VOICE_CHANNELS: frozenset[str] = frozenset({"voice", "phone"})
+
 
 def _script_of(text: str) -> set[str]:
     """The alphabets a string is written in, ignoring digits, spaces and punctuation.
@@ -339,6 +343,18 @@ class ClientOverride(BaseModel):
 
         if bad := [lg for lg in self.languages if lg not in langs]:
             raise ValueError(f"{self.client}: undeclared languages {bad}")
+
+        # The Egyptian example says it out loud — "no phone line, so nothing spoken" — and that
+        # is the only reason it may list Franco-Arabic. Put a voice channel on a client that
+        # declares a typed-only language and the speech model gets handed "3ayez ahgez", which
+        # it will read as noise. The base file already knows which languages are spoken; this is
+        # just refusing to let a client contradict it.
+        if VOICE_CHANNELS & set(self.channels):
+            if typed_only := [lg for lg in self.languages if lg not in vocab.spoken_languages]:
+                raise ValueError(
+                    f"{self.client}: runs a voice channel but declares text-only languages "
+                    f"{typed_only}. Nobody says these out loud — drop them, or drop the channel."
+                )
 
         # A client may turn quoting off. A client may not turn it on where the base file
         # forbids it, and may not re-enable an intent the base file hands off.

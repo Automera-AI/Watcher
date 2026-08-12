@@ -207,6 +207,28 @@ def test_a_client_cannot_invent_an_intent() -> None:
         client.check_against(vocab)
 
 
+def test_a_client_with_a_voice_channel_cannot_declare_a_typed_only_language() -> None:
+    """The Dubai example runs voice and lists only spoken languages. Add Franco-Arabic to it
+    and a speech model gets handed "3ayez ahgez", which it has no way to read."""
+    vocab = schema.load(BASE)
+    client = schema.load_client(HERE / "clients" / "dubai-holiday-homes.yaml")
+    assert "voice" in client.channels
+    client.check_against(vocab)
+
+    client.languages = [*client.languages, "ar-EG-latin"]
+    with pytest.raises(ValueError, match="text-only languages"):
+        client.check_against(vocab)
+
+
+def test_the_egypt_example_may_list_franco_arabic_because_it_has_no_phone_line() -> None:
+    """The mirror of the test above: typed-only is fine precisely because there is no voice."""
+    vocab = schema.load(BASE)
+    client = schema.load_client(HERE / "clients" / "egypt-holiday-homes.yaml")
+    assert "ar-EG-latin" in client.languages
+    assert not schema.VOICE_CHANNELS & set(client.channels)
+    client.check_against(vocab)
+
+
 def test_a_client_may_force_more_things_to_a_human() -> None:
     """Narrowing is always allowed. The Egyptian example does exactly this for prices,
     because rates there are seasonal and negotiated by a person."""
