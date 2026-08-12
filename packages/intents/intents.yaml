@@ -1,0 +1,527 @@
+# Watcher v2 — receptionist intent vocabulary
+# Vertical: holiday homes (short stays).  Markets: Dubai and Egypt.  Speaks to: guests only.
+#
+# This file answers roadmap item 0.3.  Four items are blocked on it: 1.2, 2.4, 2.5 and the
+# golden set.  It is data, not code, so a client can differ without a deploy.  Because it is
+# data, `schema.py` validates it at start-up and in the build: a bad tool name, an intent that
+# points at nothing, or a money intent missing its guard all fail there rather than on a call.
+#
+# Per-client wording, currency, opening hours and required details live in clients/*.yaml.
+# Nothing in this file is client-specific.
+
+version: "1.0.0"
+vertical: holiday_homes
+markets: [AE, EG]
+audience: guests_only
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Languages.  Four, not three.
+#
+# `ar-EG-latin` is Franco-Arabic: Egyptian Arabic typed in Latin letters with digits standing
+# in for sounds Latin has no letter for (3 = ع, 7 = ح, 2 = ء).  A large share of Egyptian
+# WhatsApp is written this way, especially by younger guests.  A model that has only seen
+# Arabic script will read "3ayez ahgez" as noise.  It has to be its own language tag so the
+# per-language accuracy measure reports it separately and you can see it failing.
+#
+# `spoken` is what stops Franco-Arabic reaching a speech model.  Nobody says "3ayez ahgez" out
+# loud — they say the Arabic.  A phone test set built by filtering on this flag cannot pick up
+# a typed-only example by accident, and the validator refuses any acting intent whose examples
+# are *all* text-only, because that intent would have nothing to test on a call.
+# ─────────────────────────────────────────────────────────────────────────────
+languages:
+  - code: en
+    spoken: true
+    note: Most Dubai guests. International arrivals, often not first-language English.
+  - code: ar-AE
+    spoken: true
+    note: Gulf Arabic. Best understood of the dialects, about 16% of words misheard on calls.
+  - code: ar-EG
+    spoken: true
+    note: Egyptian Arabic in Arabic script. Weaker, about 30% of words misheard.
+  - code: ar-EG-latin
+    spoken: false
+    note: Franco-Arabic. Text only, never spoken. Do not send this to a speech model.
+  - code: mixed
+    spoken: true
+    note: One sentence, two languages. Common in Dubai and normal, not an error.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The nine things the receptionist can do.  `terminal_tool` on every intent below must be one
+# of these names.  The validator enforces it, which is the main reason a typo here cannot
+# reach production.
+# ─────────────────────────────────────────────────────────────────────────────
+tools:
+  - lookup_reservation
+  - check_availability
+  - quote_price
+  - hold_slot
+  - confirm_booking
+  - answer_from_knowledge
+  - create_ticket
+  - take_message
+  - handoff_to_human
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Emergencies.  Checked before intent, before confidence, before anything.
+#
+# A receptionist that files a gas leak as a maintenance ticket is worse than no receptionist.
+# These bypass the whole pipeline: reply immediately, alert a human by phone, do not attempt
+# to be useful beyond the safety line.
+# ─────────────────────────────────────────────────────────────────────────────
+emergency:
+  action: handoff_to_human
+  alert: phone_call_to_operator
+  reply_immediately: true
+  triggers:
+    - id: gas
+      any_of: ["smell of gas", "gas leak", "ريحة غاز", "re7et ghaz"]
+    - id: fire
+      any_of: ["fire", "smoke", "حريق", "7ari2", "دخان"]
+    - id: flood
+      any_of: ["flooding", "water everywhere", "burst pipe", "المياه غرقت", "ماسورة انفجرت"]
+    - id: medical
+      any_of: ["ambulance", "someone is hurt", "can't breathe", "إسعاف", "حد تعب"]
+    - id: security
+      any_of: ["someone broke in", "intruder", "being followed", "حد دخل الشقة", "سرقة"]
+    - id: locked_out_at_night
+      any_of: ["locked out"]
+      only_between: ["22:00", "07:00"]
+      note: Locked out at 2pm is a support request. At 2am it is a person on a street.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Defaults.  Any intent may override any of these.
+# ─────────────────────────────────────────────────────────────────────────────
+defaults:
+  confirm_before_acting: [check_in, check_out, guests, unit, reservation_ref, phone]
+  max_clarifying_turns: 3
+  on_max_turns: handoff_to_human
+  on_tool_failure: handoff_to_human
+  on_no_knowledge: handoff_to_human
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Property systems.
+#
+# A price may only be said out loud if it came from a system that can be asked, by an API, in
+# real time, and asked again afterwards to prove what it said. That second part matters as much
+# as the first: a number nobody can re-check is a number you cannot defend when a guest disputes
+# it three weeks later.
+#
+# A client whose rates live in a spreadsheet or a person's head is not quotable. Not because
+# spreadsheets are bad, but because there is no API to check against and no record to go back
+# to. Those clients get price questions handed to a person, which is what they do today anyway.
+#
+# The validator refuses any client that sets `quote_prices: true` against a system marked
+# `quotable: false`. That combination is the one way to get an invented price in front of a
+# guest, so it fails the build rather than being left to a code review.
+# ─────────────────────────────────────────────────────────────────────────────
+property_systems:
+  - id: hostaway
+    quotable: true
+    note: Public API, live rates and availability, rate identifiers on every response.
+  - id: guesty
+    quotable: true
+    note: Public API, same shape.
+  - id: cloudbeds
+    quotable: true
+    note: Public API.
+  - id: custom_sheet
+    quotable: false
+    note: >
+      A spreadsheet. No API, no rate identifier, no way to prove afterwards what the number was
+      when it was said. Price questions go to a person.
+  - id: none
+    quotable: false
+    note: No connected system yet. Common before the read path in roadmap item 3.1 lands.
+
+# Money and availability. You chose to quote both live, so these are the guards that make that
+# safe. Every one is enforced in code, not left to the prompt to remember.
+quoting:
+  source: property_system_only
+  requires_quotable_system: true
+  never_from_memory: true
+  never_from_knowledge_base: true
+  max_age_seconds: 300
+  on_stale_or_failed: handoff_to_human
+
+  # Written to the audit log before the number reaches the guest, never after. If any of these
+  # is missing the quote is not sent. This is what makes a price checkable later.
+  provenance_required:
+    - property_system_id
+    - rate_or_quote_id
+    - fetched_at
+    - valid_until
+    - currency
+    - the exact dates and guest count the number covers
+
+  always_state:
+    - the currency
+    - the exact dates the number covers
+    - that it is subject to availability until confirmed
+  never:
+    - offer a discount
+    - negotiate
+    - quote a total without saying what it includes
+    - quote for dates that were not read back and agreed
+    - repeat a price from earlier in the conversation without asking the system again
+    - state a price when the system did not answer
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Intents
+# ─────────────────────────────────────────────────────────────────────────────
+intents:
+
+  # ── Before they have booked ────────────────────────────────────────────────
+
+  - name: availability_check
+    means: >
+      Asking whether dates are free. Not yet asking to book. If they have named dates and
+      clearly want them, that is booking_enquiry.
+    required_slots: [check_in, check_out]
+    optional_slots: [guests, unit_type, area]
+    terminal_tool: check_availability
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - hold a unit without being asked
+      - state a price unless they asked for one
+    confusable_with: [booking_enquiry, price_enquiry]
+    examples:
+      - {lang: en, text: "Hi, is the 2 bed in Marina free from the 4th to the 9th of September?"}
+      - {lang: en, text: "do you have anything for 4 people end of sept"}
+      - {lang: ar-AE, text: "مساء الخير، عندكم شقة غرفتين في المارينا من ٤ الى ٩ سبتمبر؟"}
+      - {lang: ar-EG, text: "لو سمحت، فيه شقة فاضية في الساحل من ١٢ لـ ١٥؟"}
+      - {lang: ar-EG-latin, text: "salam, fe sha22a fadya men 12 le 15 el shahr da?"}
+      - {lang: mixed, text: "هاي, any 2 bedroom available next weekend?"}
+
+  - name: price_enquiry
+    means: >
+      Asking what it costs. Answerable from the property system, never from memory. If the
+      dates are not known yet, collect them first; a nightly rate without dates is a guess.
+    required_slots: [check_in, check_out, guests]
+    optional_slots: [unit_type, unit]
+    terminal_tool: quote_price
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - quote a rate from memory or from the knowledge base
+      - quote without the dates having been read back and agreed
+      - offer a discount, a deal, or a better price for a longer stay
+      - answer "can you do better than that"  # that is a negotiation, hand it off
+    confusable_with: [availability_check, booking_enquiry, billing_question]
+    examples:
+      - {lang: en, text: "how much for the 4th to the 9th, 4 adults?"}
+      - {lang: en, text: "whats your nightly rate"}
+      - {lang: ar-AE, text: "كم السعر لليلة من ٤ الى ٩ سبتمبر؟"}
+      - {lang: ar-EG, text: "الليلة بكام لو حجزت ٤ ليالي؟"}
+      - {lang: ar-EG-latin, text: "el leila b kam? we fe discount law 7agazt osbo3?"}
+
+  - name: booking_enquiry
+    means: >
+      Wants to stay and has not booked. Ends in a held unit, never a confirmed booking. The
+      hold expires on its own, so the worst case is a unit briefly off sale, not a bad booking.
+    required_slots: [check_in, check_out, guests, unit_type]
+    optional_slots: [area, guest_name]
+    terminal_tool: hold_slot
+    max_autonomy: act_and_notify
+    needs_verified_identity: false
+    never:
+      - confirm a booking
+      - take payment or card details
+      - promise a specific unit number before it is held
+    confusable_with: [availability_check, extend_stay]
+    examples:
+      - {lang: en, text: "Yes please book that for us, 4 nights from the 4th"}
+      - {lang: en, text: "we'll take the marina one"}
+      - {lang: ar-AE, text: "تمام، احجزلي الشقة من ٤ الى ٩ لو سمحت"}
+      - {lang: ar-EG, text: "ماشي، احجزهالي بقى"}
+      - {lang: ar-EG-latin, text: "tamam a7gezhaly men 4 le 9"}
+
+  - name: property_question
+    means: >
+      Anything about the place itself before or during a stay. Wifi, parking, pool, kitchen,
+      how many it sleeps, whether pets are allowed, whether there is a lift.
+    required_slots: []
+    optional_slots: [unit, topic]
+    terminal_tool: answer_from_knowledge
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - answer from general knowledge when the knowledge base has nothing
+      - guess at a rule, a policy or a number
+    confusable_with: [general_info, directions, check_in_support]
+    examples:
+      - {lang: en, text: "is there parking in the building?"}
+      - {lang: en, text: "does it have a washing machine"}
+      - {lang: ar-AE, text: "فيه موقف سيارات؟"}
+      - {lang: ar-EG, text: "الشقة فيها غسالة؟ وفيه أسانسير؟"}
+      - {lang: ar-EG-latin, text: "el sha22a feha wifi? we ghassala?"}
+
+  # ── They have booked, not arrived yet ──────────────────────────────────────
+
+  - name: modify_reservation
+    means: Change to an existing booking. Dates, guest count, or unit.
+    required_slots: [reservation_ref, change_requested]
+    optional_slots: [check_in, check_out, guests, unit]
+    confirm_before_acting: [reservation_ref, change_requested, check_in, check_out]
+    terminal_tool: lookup_reservation
+    max_autonomy: act_and_notify
+    needs_verified_identity: true
+    never:
+      - apply a change that alters the price without a person seeing it
+      - act before the identity check has passed
+    confusable_with: [cancel_reservation, extend_stay]
+    examples:
+      - {lang: en, text: "can we push our arrival to the 6th instead?"}
+      - {lang: en, text: "we're 5 now not 4, is that ok"}
+      - {lang: ar-AE, text: "ممكن نأجل الوصول ليوم ٦ بدل ٤؟"}
+      - {lang: ar-EG, text: "احنا بقينا ٥ مش ٤، ينفع؟"}
+      - {lang: ar-EG-latin, text: "momken n2akhar el wosool le youm 6?"}
+
+  - name: cancel_reservation
+    means: >
+      Wants to cancel. Always a person, whatever the confidence and whoever they are. A
+      cancellation is a refund, a refund is money, and the policy varies by rate and by
+      how close to arrival they are. Record the request, then fetch someone.
+    required_slots: [reservation_ref]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: true
+    never:
+      - state the refund amount
+      - state whether the cancellation is free
+      - process the cancellation
+    confusable_with: [modify_reservation]
+    examples:
+      - {lang: en, text: "we need to cancel, something's come up"}
+      - {lang: ar-AE, text: "نبي نلغي الحجز لو سمحت"}
+      - {lang: ar-EG, text: "للأسف محتاج ألغي الحجز"}
+      - {lang: ar-EG-latin, text: "me7tag alghy el 7agz please"}
+
+  - name: check_in_support
+    means: >
+      Arriving. What time, where to go, early arrival, luggage, who will meet them. Not the
+      door code itself, which is its own intent because it needs proof of identity.
+    required_slots: []
+    optional_slots: [reservation_ref, arrival_time]
+    terminal_tool: answer_from_knowledge
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - give out the door code, the key box code, or the unit number
+      - promise an early check-in without a person confirming it
+    confusable_with: [access_code_request, directions, property_question]
+    examples:
+      - {lang: en, text: "what time can we check in?"}
+      - {lang: en, text: "we land at 6am, can we drop bags early"}
+      - {lang: ar-AE, text: "متى وقت تسجيل الدخول؟"}
+      - {lang: ar-EG, text: "ممكن نوصل بدري ونسيب الشنط؟"}
+      - {lang: ar-EG-latin, text: "e7na hanwsal el sa3a 6 el sob7, momken nesib el shonat?"}
+
+  - name: access_code_request
+    means: >
+      The door code, the key box code, or the exact unit number. This is the intent that
+      decides whether the product is trustworthy. Anyone can ask; only a verified guest with
+      a live booking gets an answer.
+    required_slots: [reservation_ref]
+    confirm_before_acting: [reservation_ref]
+    terminal_tool: lookup_reservation
+    max_autonomy: act
+    needs_verified_identity: true
+    never:
+      - give any part of the code before the identity check has passed
+      - give the code for a stay that has not started or has already ended
+      - repeat the code into a voicemail or an unanswered call
+      - send the code to any number other than the one on the booking
+    confusable_with: [check_in_support]
+    examples:
+      - {lang: en, text: "what's the door code?"}
+      - {lang: en, text: "we're outside, the code isn't working"}
+      - {lang: ar-AE, text: "شنو رمز الباب؟"}
+      - {lang: ar-EG, text: "احنا تحت، الكود مش شغال"}
+      - {lang: ar-EG-latin, text: "e7na barra, el code msh shaghal"}
+
+  - name: directions
+    means: How to find the building, and getting there from the airport or a landmark.
+    required_slots: []
+    optional_slots: [coming_from]
+    terminal_tool: answer_from_knowledge
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - give the unit number or the floor to an unverified sender
+    confusable_with: [check_in_support, property_question]
+    examples:
+      - {lang: en, text: "how do we get there from DXB?"}
+      - {lang: ar-AE, text: "كيف نوصل من المطار؟"}
+      - {lang: ar-EG, text: "العنوان فين بالظبط؟"}
+      - {lang: ar-EG-latin, text: "el 3enwan fen bel zabt?"}
+
+  # ── They are staying now ───────────────────────────────────────────────────
+
+  - name: maintenance_issue
+    means: >
+      Something in the property is not working. Raise a ticket and tell someone. Note that the
+      emergency triggers at the top of this file are checked first, so a gas smell or a flood
+      never reaches this intent.
+    required_slots: [issue_description]
+    optional_slots: [unit, reservation_ref, urgency]
+    terminal_tool: create_ticket
+    max_autonomy: act_and_notify
+    needs_verified_identity: false
+    never:
+      - promise a time an engineer will arrive
+      - promise a refund, a discount or compensation
+      - tell a guest to attempt a repair
+    confusable_with: [complaint, property_question]
+    examples:
+      - {lang: en, text: "the aircon in 1204 has stopped working"}
+      - {lang: en, text: "no hot water since last night"}
+      - {lang: ar-AE, text: "المكيف ما يشتغل من امس"}
+      - {lang: ar-EG, text: "التكييف مش شغال، والدنيا حر"}
+      - {lang: ar-EG-latin, text: "el takyeef msh shaghal we el donya 7arr"}
+
+  - name: extend_stay
+    means: >
+      Already in the property and wants more nights. Both a question about availability and a
+      question about price, so it inherits the guards on both.
+    required_slots: [reservation_ref, new_check_out]
+    confirm_before_acting: [reservation_ref, new_check_out]
+    terminal_tool: check_availability
+    max_autonomy: act_and_notify
+    needs_verified_identity: true
+    never:
+      - confirm the extension
+      - quote the extension price from the original booking rate
+      - offer a discount or a better nightly rate for staying longer
+    confusable_with: [booking_enquiry, modify_reservation]
+    examples:
+      - {lang: en, text: "can we stay two more nights?"}
+      - {lang: ar-AE, text: "نبي نمدد ليلتين زيادة"}
+      - {lang: ar-EG, text: "ينفع نكمل يومين كمان؟"}
+      - {lang: ar-EG-latin, text: "yenfa3 nekammel yomein kaman?"}
+
+  - name: checkout_question
+    means: Leaving. What time, what to do with the keys, late checkout, where to leave rubbish.
+    required_slots: []
+    optional_slots: [reservation_ref]
+    terminal_tool: answer_from_knowledge
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - grant a late checkout without a person confirming it
+    confusable_with: [general_info, extend_stay]
+    examples:
+      - {lang: en, text: "what time do we need to be out?"}
+      - {lang: en, text: "where do we leave the keys"}
+      - {lang: ar-AE, text: "متى وقت المغادرة؟"}
+      - {lang: ar-EG, text: "نسيب المفتاح فين؟"}
+      - {lang: ar-EG-latin, text: "nesib el moftah fen?"}
+
+  # ── Always a person ────────────────────────────────────────────────────────
+
+  - name: billing_question
+    means: >
+      Deposits, charges, refunds, an amount they did not expect. Money after the fact is
+      always a person. Note this is different from price_enquiry, which is money before a
+      booking and is answerable live.
+    required_slots: []
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - state, confirm or dispute any amount
+      - explain why a charge was made
+    confusable_with: [price_enquiry, payment_question, complaint]
+    examples:
+      - {lang: en, text: "I've been charged twice, what's going on"}
+      - {lang: en, text: "when do I get my deposit back?"}
+      - {lang: ar-AE, text: "انخصم مني مرتين، وش السالفة؟"}
+      - {lang: ar-EG, text: "التأمين هيرجع إمتى؟"}
+      - {lang: ar-EG-latin, text: "el ta2meen haygy emta?"}
+
+  - name: payment_question
+    means: >
+      How to pay, and whether a method is accepted. Kept separate from billing_question
+      because in Egypt this is usually Instapay, Vodafone Cash or a bank transfer, and in
+      Dubai it is usually a card link. Never handled by the receptionist either way.
+    required_slots: []
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - send a payment link, an account number or a wallet number
+      - accept card details in any form
+      - confirm that a payment has been received
+    confusable_with: [billing_question, booking_enquiry]
+    examples:
+      - {lang: en, text: "can I pay by card on arrival?"}
+      - {lang: ar-EG, text: "ينفع أحول على إنستا باي؟"}
+      - {lang: ar-EG-latin, text: "yenfa3 a7awel 3ala instapay wala vodafone cash?"}
+      - {lang: ar-AE, text: "اقدر ادفع بالبطاقة عند الوصول؟"}
+
+  - name: complaint
+    means: >
+      Unhappy, rather than reporting a broken thing. The difference matters. "The aircon is
+      broken" is maintenance. "This is unacceptable, we want to leave" is a person, now.
+    required_slots: []
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - apologise on behalf of the company in a way that admits fault
+      - offer a refund, a discount, a free night or an upgrade
+      - argue, explain or defend
+    confusable_with: [maintenance_issue, billing_question]
+    examples:
+      - {lang: en, text: "this is not what we booked, absolutely unacceptable"}
+      - {lang: en, text: "we want to leave and get our money back"}
+      - {lang: ar-AE, text: "الشقة مو مثل الصور، هذا مو مقبول"}
+      - {lang: ar-EG, text: "الشقة مش زي الصور خالص، ده مش معقول"}
+      - {lang: ar-EG-latin, text: "el sha22a msh zay el sowar khales, da msh ma32ool"}
+
+  # ── Housekeeping ───────────────────────────────────────────────────────────
+
+  - name: general_info
+    means: Office hours, how to reach a person, company policies. Not about a specific property.
+    required_slots: []
+    terminal_tool: answer_from_knowledge
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - invent a policy that is not in the knowledge base
+    confusable_with: [property_question, checkout_question]
+    examples:
+      - {lang: en, text: "what are your office hours?"}
+      - {lang: ar-AE, text: "وش دوامكم؟"}
+      - {lang: ar-EG, text: "مواعيد الشغل عندكم إيه؟"}
+
+  - name: spam
+    means: Marketing, a wrong number, or an automated message. Do not reply. Do not engage.
+    required_slots: []
+    terminal_tool: take_message
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - reply
+      - unsubscribe, which confirms the number is live
+    confusable_with: [unclear]
+    examples:
+      - {lang: en, text: "Congratulations! You have won a free iPhone, click here"}
+      - {lang: ar-EG, text: "اربح الآن! اضغط على الرابط"}
+
+  - name: unclear
+    means: >
+      Genuinely cannot tell. The right answer, not a failure. Ask once, then fetch a person.
+      Never guess at an intent in order to appear helpful.
+    required_slots: []
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - pick the closest intent and act on it
+      - ask more than one clarifying question
+    confusable_with: []
+    examples:
+      - {lang: en, text: "?"}
+      - {lang: en, text: "the thing we discussed"}
+      - {lang: mixed, text: "بخصوص الموضوع ده, can you check"}
