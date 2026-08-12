@@ -20,6 +20,19 @@ One JSON object per line: the input message + the known-correct `expected` class
 **Status:** 8 seed examples covering EN / AR / mixed across all 6 intents. Grow to **50** (10 per intent,
 4 EN / 4 AR / 2 mixed) for the Phase-1 baseline, then to 150+ from promoted production corrections.
 
+**No real client names, addresses or numbers in here** (roadmap 0.2). This is a public repo. Every
+company, estate and area in the set is invented — Acme Trading, Cedar Realty, Northwind Residences,
+Riverside Quarter — and it stays that way when the set grows. `test_golden_set.py` checks the golden
+set and the fixtures still agree on message text, so anonymising one file and not the other fails a
+test instead of the eval runner.
+
+> The two files were anonymised together in the 0.2 pass, which means the `message` a fixture is
+> keyed on is no longer byte-identical to the text that was actually sent to the model when it was
+> recorded, and the brand strings inside `summary_one_line` were rewritten to match. No scored field
+> moved — the gate reads `intent`, `language`, `suggested_record_type`, name presence and confidence,
+> none of which the rename touched, and the run still reports 0.875. Re-record on the next live run
+> and this note goes away.
+
 ## Runner (`packages/eval`, §13)
 Run from the **repo root** (the harness imports the locked Pydantic schemas from `apps/api`):
 
