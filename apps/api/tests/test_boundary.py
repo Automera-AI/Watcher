@@ -32,7 +32,17 @@ API_ROOT = Path(__file__).resolve().parent.parent
 BANNED: tuple[str, ...] = ("wa_", "whatsapp", "twilio", "pywa", "telegram")
 
 #: Packages allowed to name a channel: they *are* the channel adapters. Everything else is core.
-ADAPTER_PACKAGES: frozenset[str] = frozenset({"ingestion"})
+ADAPTER_PACKAGES: frozenset[str] = frozenset({"ingestion", "channels"})
+
+#: A **permanent** exception, not 1.1 debt. ``schemas/envelope.py`` declares the closed set of
+#: channels a turn can arrive on, and you cannot have a channel-neutral envelope without a
+#: channel field. Naming the set is fine; *behaving* differently per channel is not, which is
+#: why the quick-reply cap was moved out of that file and into the WhatsApp adapter.
+#:
+#: Kept separate from KNOWN_LEAKS so the two never get confused: this one does not shrink.
+CHANNEL_REGISTRY: dict[str, set[str]] = {
+    "schemas/envelope.py": {"whatsapp"},
+}
 
 #: Core files that still leak, and what they still leak, pending 1.1. Delete entries as they are
 #: cleaned; the suite fails if an entry becomes untrue, so this cannot rot.
@@ -76,7 +86,7 @@ def _rel(path: Path) -> str:
 def test_no_new_channel_vocabulary_in_the_core(path: Path) -> None:
     """A core file may only carry the channel tokens 1.1 has not reached yet."""
     found = _tokens_in(path)
-    allowed = KNOWN_LEAKS.get(_rel(path), set())
+    allowed = KNOWN_LEAKS.get(_rel(path), set()) | CHANNEL_REGISTRY.get(_rel(path), set())
     assert found <= allowed, (
         f"{_rel(path)} names {sorted(found - allowed)}, which ties the core to one channel. "
         "A phone call has no chat id. Put this behind the ingestion adapter, or if it is part "
@@ -112,6 +122,39 @@ def test_the_wa_prefix_is_actually_banned() -> None:
     assert "wa_" in BANNED
     assert not any("wa_message_id".startswith(t) for t in BANNED if t != "wa_"), (
         "no token other than 'wa_' matches the real field names — do not remove it"
+    )
+
+
+def test_the_permanent_exception_never_covers_the_wa_prefix() -> None:
+    """Naming the set of channels is legitimate. Carrying WhatsApp's field names is not.
+
+    Without this, ``CHANNEL_REGISTRY`` becomes a back door for exactly the leak 1.1 is removing.
+    """
+    for rel, tokens in CHANNEL_REGISTRY.items():
+        assert "wa_" not in tokens, (
+            f"{rel} is permanently excused for {sorted(tokens)}, but 'wa_' is never a channel "
+            "name — it is the field prefix, and it belongs in KNOWN_LEAKS or nowhere"
+        )
+        assert (API_ROOT / rel).exists(), f"CHANNEL_REGISTRY names {rel}, which does not exist"
+
+
+def test_the_quick_reply_cap_lives_in_the_adapter_not_the_core() -> None:
+    """Trap #2, pinned structurally rather than by grepping prose.
+
+    The scaffold enforced this from the core and its own boundary test passed, because the
+    offence sat inside a string literal. Asserting on where the constant is *defined* cannot be
+    fooled by a docstring that merely talks about it.
+    """
+    from apps.api.channels import whatsapp
+
+    assert whatsapp.QUICK_REPLY_LIMIT == 3
+
+    core_defining_it = [
+        _rel(p) for p in _core_files() if "QUICK_REPLY_LIMIT" in p.read_text(encoding="utf-8")
+    ]
+    assert not core_defining_it, (
+        f"a per-channel rendering limit is defined in the core: {core_defining_it}. "
+        "It belongs in the adapter for the channel it is true of."
     )
 
 
