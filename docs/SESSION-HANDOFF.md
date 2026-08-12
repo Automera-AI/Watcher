@@ -41,14 +41,14 @@ Numbering matches `docs/Watcher_v2_Roadmap.pdf`.
 |---|---|---|
 | 0.1 | Set default branch to `main` | **DONE** — remote HEAD is `refs/heads/main` |
 | 0.2 | Remove the client name from the golden set and fixtures | **DONE** — replaced with invented placeholders; eval still 87.5% |
-| 0.3 | Decide the receptionist intent vocabulary | **DONE** — `packages/intents`, 18 intents, 37 tests |
+| 0.3 | Decide the receptionist intent vocabulary | **DONE** — `packages/intents`, 19 intents, 38 tests |
 | 0.4 | Merge the eval branch | **DONE** — PR #10, 101 tests, gate passing |
 | 0.5 | Delete the stale `nifty-johnson` branch | **DONE** |
 
 ### Everything else
 
-Track 1: 1.1 de-WhatsApp the core (**NOT STARTED**) · 1.2 port the four scaffold files
-(**DONE, with a caveat — see §8**) · 1.3 Python 3.12→3.13 (**NOT STARTED**)
+Track 1: 1.1 de-WhatsApp the core (**NOT STARTED** — `test_boundary.py` defines done) ·
+1.2 port the four scaffold files (**DONE** — see §8) · 1.3 Python 3.12→3.13 (**NOT STARTED**)
 Track 2: 2.1 conversations/tasks/slot filling · 2.2 reply path · 2.3 autonomy gate ·
 2.4 knowledge base · 2.5 prompt v2 + golden set
 Track 3: 3.1 `PropertySystemPort` + first adapter · 3.2 end to end on a real number
@@ -134,12 +134,14 @@ Nothing is pre-installed. To get to a green test run:
 
 ```
 pip install pytest pydantic fastapi sqlalchemy rapidfuzz alembic httpx pyyaml
-python3 -m pytest            # expect 194 passed, 14 xfailed
+python3 -m pytest            # expect 221 passed
 ```
 
-`pyyaml` is needed by `packages/intents` (build-time only — the application loads compiled JSON).
-The 14 xfails are the 1.2 specification tests waiting on items 2.1–2.3; they are `strict`, so
-they will start *failing* the moment those land, which is the intended prompt to unmark them.
+`pyyaml` is needed by `packages/intents`. It is a build dependency, not a runtime one — the
+application loads the compiled JSON and `schema.py` imports yaml lazily so the shipped image
+needs no parser. `default_vocabulary()` prefers `build/intents.json` but **ignores it if it is
+older than `intents.yaml`**, so editing the vocabulary in development takes effect without
+remembering to recompile.
 
 To reproduce the full CI locally:
 
@@ -186,8 +188,8 @@ a fast-forward; the Python baseline is 3.12 not 3.10; and Graphify is not Graphi
 
 ## 8. Session 2 — 0.2, 0.3 and 1.2
 
-Branch `claude/roadmap-handoff-setup-1faxg7`. **194 passing, 14 xfailed** (was 101). Ruff clean,
-strict mypy clean on 84 files, eval gate still 87.5%.
+Branch `claude/roadmap-handoff-setup-1faxg7`. **221 passing, 0 xfailed** (was 101). Ruff clean,
+strict mypy clean on 92 files, eval gate still 87.5%.
 
 **0.2 — done.** `FlexLiving` / `Notting Hill` / `Mayfair` are gone from the golden set and the
 fixtures, replaced with invented placeholders in the same style as the fictional Acme Trading
@@ -213,36 +215,75 @@ Two bugs came in with it, both of which had a check that could not fire:
    phone test set in 3.2 is empty. A client on a voice channel may not declare a typed-only
    language either.
 
-**1.2 — done, with a caveat worth reading.** The four scaffold files were not in this repo or
-its history, so they were written from the descriptions in §5 and NEXT-STEPS §13.3 rather than
-ported from source. All four traps are addressed:
+**1.2 — done, against the real scaffold.** The four files were not in this repo; they are on
+branch `amahmoudosman96-lgtm-V2-scaffold` under `watcher-v2-scaffold/`, which turned out to be a
+whole parallel tree carrying the *implementation* as well as the tests — and one that is already
+channel-neutral (`channel_thread_id`, not `wa_chat_id`). Its own suite: 14 passing.
 
-| File | State |
+All four tests are ported and **live, no xfail**, along with the minimum core they exercise:
+
+| Ported in | What |
 |---|---|
-| `test_boundary.py` | **Fully live, 43 cases.** Bans `wa_`, which is the leak `whatsapp` never matched |
-| `test_envelope.py` | 2 live, 4 spec. Decision taken: **cap in the channel adapter, not the core** |
-| `test_autonomy.py` | 4 live, 5 spec. Pins matching-is-not-verification |
-| `test_task.py` | 5 live, 5 spec. Carries the cancel-confirmation-on-date-change rule |
+| `apps/api/schemas/envelope.py` | `InboundTurn` / `OutboundAction`, minus the button cap |
+| `apps/api/channels/` | `base`, `whatsapp` (the cap lives here), `voice` |
+| `apps/api/conversations/task.py` | the task state machine, slots read from the vocabulary |
+| `apps/api/core/autonomy.py` | `decide_autonomy`, ceiling read from the vocabulary |
 
-The 14 "spec" cases are `xfail(strict=True)` against items 2.1–2.3, which do not exist yet.
-Strict is the point: when those land and the tests pass, XPASS **fails** the suite and forces
-the markers off, so the specification cannot drift out of date unnoticed.
+This is the scaffold's *core primitives*, not items 2.1–2.3. Still outstanding there:
+persistence and the conversations table (2.1), the composer and send-out (2.2), and wiring the
+gate into `orchestration/worker.py` (2.3).
 
-**`test_boundary.py` is the one to understand.** 1.1 has not happened, so the core still leaks.
-Rather than fail, it carries `KNOWN_LEAKS` — eight files and exactly which tokens each still
-has. A new leak fails immediately; a *stale* entry also fails, so 1.1 cannot half-land and be
-forgotten. The list only shrinks, and when it is empty 1.1 is done. That makes it a checklist:
+**Trap #2 is worse than the handoff recorded, and now demonstrated rather than argued.** The
+scaffold's `test_boundary.py` **passes** on `app/core/envelope.py` while that file raises
+`"WhatsApp allows at most 3 quick reply buttons"`. Its regex only catches provider names used as
+identifiers (`\bwhatsapp\b\s*[.(=]`), so both the string literal and
+`Channel = Literal["whatsapp", ...]` slip straight through. The boundary test greenlit the exact
+violation the envelope test enforced, in the same tree. **Decision taken: cap in the adapter.**
+The core composes freely, `channels/whatsapp.py` truncates to three and reports `truncated`, and
+`channels/voice.py` speaks the options instead — the case that proves the point, since on a call
+three is as wrong as six.
+
+**Two places the scaffold and the vocabulary disagreed, resolved for the vocabulary:**
+
+1. The scaffold let a **verified guest cancel autonomously** — `cancel_reservation` sat in its
+   `REQUIRES_VERIFIED_IDENTITY` set, not its always-human one. A refund is money going backwards.
+2. Its always-human list was `{billing_question, owner_enquiry}`; payment questions and
+   complaints were absent.
+
+`owner_enquiry` went the other way — the scaffold had it and 0.3 did not, so it was **added to
+the vocabulary as `hand_off`** (now 19 intents, 84 examples). Without it, half of "money and
+owner matters always reach a person" had nowhere to live. The scaffold's `viewing_request` was
+not taken: lettings traffic, not holiday-homes reception.
+
+**Trap #3 stands.** `identity_verified` is a parameter the caller supplies and nothing in this
+repo can produce it. `test_the_repo_still_cannot_prove_who_a_sender_is` fails the day that stops
+being true.
+
+**`test_boundary.py` is still the one to understand.** 1.1 has not happened, so it carries
+`KNOWN_LEAKS`: eight core files and exactly which tokens each still has. New leaks fail at once;
+*stale* entries fail too, so 1.1 cannot half-land. The list only shrinks, and empty means done:
 
 ```
 classifier/prompt.py · control_chat/state.py · core/config.py · db/models.py
 db/repository.py · orchestration/queue.py · schemas/enums.py · schemas/message.py
 ```
 
+`CHANNEL_REGISTRY` sits beside it for the one **permanent** exception — `schemas/envelope.py`
+names the closed set of channels, because you cannot have a channel-neutral envelope without a
+channel field. A separate test stops that becoming a back door for `wa_`.
+
 ### Do these next
 
 1. **1.1 — de-WhatsApp the core.** Now has an executable definition of done: empty `KNOWN_LEAKS`.
-2. **2.1 — conversations, tasks, slot filling.** 10 xfail cases are already waiting for it.
-3. **Decide on the history rewrite** left open by 0.2.
+   The scaffold's envelope is the target shape, and it is already in the repo to copy from.
+2. **2.1 — conversations, tasks, slot filling.** The state machine is in; what is left is
+   persistence, the conversations table, and the verification-codes table trap #3 needs.
+3. **2.2 / 2.3 — wire it up.** The envelope, the adapters and `decide_autonomy` all exist; what
+   is missing is the composer, the send-out, and a fourth outcome in `orchestration/worker.py`.
+4. **Decide on the history rewrite** left open by 0.2.
+5. **Decide what happens to `amahmoudosman96-lgtm-V2-scaffold`.** Its core is ported; the rest
+   (`receptionist.py`, `tools/registry.py`, `understanding.py`, the SQL migration, its own eval)
+   is not, and it is a second full tree that will drift. Either mine it deliberately or close it.
 
 ### Two environment mismatches spotted
 

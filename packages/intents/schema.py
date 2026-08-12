@@ -37,8 +37,19 @@ Autonomy = Literal["act", "act_and_notify", "hand_off"]
 
 #: Intents that must never act alone, whatever the file says. Belt and braces: the YAML sets
 #: these too, but a bad edit to the YAML should not be able to unset them.
+#:
+#: ``owner_enquiry`` is here for the second half of "money and owner matters always reach a
+#: person" (NEXT-STEPS §13.3). An owner is not a guest, and the receptionist has no business
+#: discussing payouts or who is staying in a unit.
 MUST_HAND_OFF: frozenset[str] = frozenset(
-    {"cancel_reservation", "billing_question", "payment_question", "complaint", "unclear"}
+    {
+        "cancel_reservation",
+        "billing_question",
+        "payment_question",
+        "complaint",
+        "owner_enquiry",
+        "unclear",
+    }
 )
 
 #: Intents that must require proof of identity before acting.
@@ -390,6 +401,36 @@ def load_compiled(path: Path) -> Vocabulary:
     than the milliseconds.
     """
     return Vocabulary.model_validate(json.loads(path.read_text(encoding="utf-8")))
+
+
+_DEFAULT_DIR = Path(__file__).resolve().parent
+_cached: Vocabulary | None = None
+
+
+def default_vocabulary() -> Vocabulary:
+    """The shipped vocabulary, loaded once and held in memory.
+
+    Prefers the compiled JSON and falls back to the YAML, which is the whole point of the
+    compile step: fast and provably valid in a deployed image, editable in development. Cached
+    because the vocabulary is read per turn and parsing it per turn is exactly the thing the
+    README says nothing should do.
+
+    A compiled file **older than the YAML is ignored**. Otherwise editing ``intents.yaml`` in
+    development changes nothing until you remember to recompile, and you debug against data you
+    are no longer looking at. In a deployed image there is no YAML to compare against, so the
+    JSON is used unconditionally.
+    """
+    global _cached
+    if _cached is None:
+        compiled = _DEFAULT_DIR / "build" / "intents.json"
+        source = _DEFAULT_DIR / "intents.yaml"
+        if compiled.exists() and (
+            not source.exists() or compiled.stat().st_mtime >= source.stat().st_mtime
+        ):
+            _cached = load_compiled(compiled)
+        else:
+            _cached = load(source)
+    return _cached
 
 
 def main(argv: list[str]) -> int:

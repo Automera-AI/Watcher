@@ -459,6 +459,27 @@ intents:
       - {lang: ar-EG-latin, text: "yenfa3 a7awel 3ala instapay wala vodafone cash?"}
       - {lang: ar-AE, text: "اقدر ادفع بالبطاقة عند الوصول؟"}
 
+  - name: owner_enquiry
+    means: >
+      Not a guest. The person who owns the unit, or someone acting for them, asking about
+      payouts, occupancy, their own booking of their own property, or anything to do with the
+      management agreement. They will message the guest line whether or not they are supposed
+      to, so the receptionist has to recognise them and stop, exactly as it does for spam.
+    required_slots: []
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - discuss occupancy, payouts or another guest's booking
+      - confirm who is staying in a unit, or when
+      - treat an owner as a guest and start filling slots
+    confusable_with: [billing_question, general_info]
+    examples:
+      - {lang: en, text: "Hi, I own 1204 — when is this month's payout going out?"}
+      - {lang: en, text: "This is the landlord, is my flat occupied next weekend?"}
+      - {lang: ar-AE, text: "انا صاحب الشقة، متى ينزل المستحق هذا الشهر؟"}
+      - {lang: ar-EG, text: "أنا مالك الوحدة، عايز أعرف الإيراد الشهر ده"}
+
   - name: complaint
     means: >
       Unhappy, rather than reporting a broken thing. The difference matters. "The aircon is

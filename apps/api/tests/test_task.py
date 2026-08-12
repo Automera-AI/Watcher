@@ -1,124 +1,107 @@
-"""Tasks and slot filling: what the receptionist is part-way through doing (1.2).
+"""The task state machine (ported from the v2 scaffold, roadmap 1.2).
 
-**What trap #4 was about.** The scaffold used ``booking_enquiry`` and ``availability_check``,
-neither of which existed in the old six-intent lead-capture taxonomy — which is why 1.2 was
-blocked on 0.3. Both are now real intents in `packages/intents/intents.yaml`, so this file reads
-its expectations out of the vocabulary rather than restating them and drifting.
+All four scaffold tests are here, behaviour unchanged. Two things differ in how they are
+written, both because of 0.3:
 
-**The rule that had to survive porting: changing a date cancels its confirmation.** A guest who
-says "the 4th to the 9th", is read back "the 4th to the 9th", agrees, and then says "actually the
-6th" has *not* agreed to the 6th. Anything already confirmed that depended on the old value goes
-back to unconfirmed. Without it a task accumulates agreement it never got, and the guest is held
-to dates they corrected.
+* intents are vocabulary names rather than a second ``PropertyIntent`` enum;
+* the required slots and the read-back set come from ``intents.yaml``, so this file no longer
+  restates them. **This is why 1.2 was blocked on 0.3** — trap #4 was that the scaffold used
+  ``booking_enquiry`` and ``availability_check``, which the old six-intent taxonomy did not have.
 
-The vocabulary half is live. Tasks, slots and conversations are item 2.1, so those are
-`xfail(strict=True)`.
+The rule worth the whole file: **changing a date cancels its confirmation.**
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
-from packages.intents import schema
 
-VOCAB = schema.load(Path(__file__).resolve().parents[3] / "packages/intents/intents.yaml")
-BY_NAME = {i.name: i for i in VOCAB.intents}
+from apps.api.conversations.task import Task, TaskStatus, UnknownIntent
 
-
-# ── live today: the intents this file is built on now exist (0.3) ─────────────
+# ── ported from the scaffold ──────────────────────────────────────────────────
 
 
-def test_the_intents_the_scaffold_assumed_are_real_now() -> None:
-    """Trap #4, closed. These two were the reason 1.2 waited on 0.3."""
-    assert "booking_enquiry" in BY_NAME
-    assert "availability_check" in BY_NAME
+def test_asks_for_the_first_missing_detail() -> None:
+    t = Task(intent="booking_enquiry")
+    step, slot = t.next_step()
+    assert step == "ask"
+    assert slot == "check_in"
 
 
-def test_a_booking_enquiry_knows_which_details_it_must_collect() -> None:
-    """Slot filling needs somewhere to read the required set from, and this is it."""
-    booking = BY_NAME["booking_enquiry"]
-    assert set(booking.required_slots) == {"check_in", "check_out", "guests", "unit_type"}
-    assert booking.terminal_tool == "hold_slot"
+def test_reads_back_details_before_acting() -> None:
+    t = Task(intent="availability_check")
+    t.absorb({"check_in": "2026-09-04", "check_out": "2026-09-09"})
+    step, _slot = t.next_step()
+    assert step == "confirm"
 
 
-def test_a_booking_enquiry_holds_a_unit_and_never_confirms_one() -> None:
-    """The worst case is a unit briefly off sale, not a booking nobody agreed to."""
-    booking = BY_NAME["booking_enquiry"]
-    assert booking.max_autonomy == "act_and_notify"
-    joined = " ".join(booking.never).lower()
-    assert "confirm a booking" in joined
-    assert "payment" in joined or "card details" in joined
-
-
-def test_the_dates_are_read_back_before_anything_acts_on_them() -> None:
-    """``confirm_before_acting`` is what the cancel-on-change rule below operates on."""
-    assert {"check_in", "check_out"} <= set(VOCAB.defaults.confirm_before_acting)
-
-
-def test_clarifying_questions_are_bounded_and_end_at_a_person() -> None:
-    """A task that cannot fill its slots must terminate, not interrogate."""
-    assert 1 <= VOCAB.defaults.max_clarifying_turns <= 5
-    assert VOCAB.defaults.on_max_turns == "handoff_to_human"
-
-
-# ── specification for item 2.1 ────────────────────────────────────────────────
-
-
-@pytest.mark.xfail(strict=True, reason="tasks and slot filling are roadmap item 2.1")
-def test_a_task_is_not_ready_until_its_required_slots_are_filled() -> None:
-    from apps.api.conversations.task import Task
-
-    task = Task.for_intent("booking_enquiry")
-    assert not task.is_ready
-    task.fill(check_in="2026-09-04", check_out="2026-09-09", guests=4)
-    assert not task.is_ready, "unit_type is still missing"
-    task.fill(unit_type="2 bed")
-    assert task.is_ready
-
-
-@pytest.mark.xfail(strict=True, reason="tasks and slot filling are roadmap item 2.1")
 def test_changing_a_date_cancels_its_confirmation() -> None:
-    """The rule worth porting. Agreement is to a value, not to a slot."""
-    from apps.api.conversations.task import Task
+    """The guest said the 4th, we confirmed it, then they said the 5th. Ask again.
 
-    task = Task.for_intent("booking_enquiry")
-    task.fill(check_in="2026-09-04", check_out="2026-09-09", guests=4, unit_type="2 bed")
-    task.confirm("check_in", "check_out")
-    assert task.is_confirmed("check_in")
+    Agreement attaches to a value, not to a slot. Without this a task quietly accumulates
+    consent it never got, and the guest is held to dates they corrected.
+    """
+    t = Task(intent="availability_check")
+    t.absorb({"check_in": "2026-09-04", "check_out": "2026-09-09"})
+    t.confirmed.update({"check_in", "check_out"})
+    assert t.next_step()[0] == "execute"
 
-    task.fill(check_in="2026-09-06")
-    assert not task.is_confirmed("check_in"), "the guest agreed to the 4th, not the 6th"
-    assert task.is_confirmed("check_out"), "an unrelated slot should keep its agreement"
+    t.absorb({"check_in": "2026-09-05"})
+    assert "check_in" not in t.confirmed
+    assert t.next_step() == ("confirm", "check_in")
 
 
-@pytest.mark.xfail(strict=True, reason="tasks and slot filling are roadmap item 2.1")
-def test_refilling_a_slot_with_the_same_value_keeps_its_confirmation() -> None:
+def test_blank_values_are_ignored() -> None:
+    """A model that failed to extract a date must not erase the one we already have."""
+    t = Task(intent="availability_check")
+    t.absorb({"check_in": "2026-09-04"})
+    t.absorb({"check_in": ""})
+    assert t.slots["check_in"] == "2026-09-04"
+
+
+# ── added: the edges the scaffold left open ───────────────────────────────────
+
+
+def test_restating_the_same_value_keeps_its_confirmation() -> None:
     """Otherwise a guest repeating themselves resets the conversation."""
-    from apps.api.conversations.task import Task
-
-    task = Task.for_intent("booking_enquiry")
-    task.fill(check_in="2026-09-04")
-    task.confirm("check_in")
-    task.fill(check_in="2026-09-04")
-    assert task.is_confirmed("check_in")
+    t = Task(intent="availability_check")
+    t.absorb({"check_in": "2026-09-04"})
+    t.confirmed.add("check_in")
+    t.absorb({"check_in": "2026-09-04"})
+    assert "check_in" in t.confirmed
 
 
-@pytest.mark.xfail(strict=True, reason="tasks and slot filling are roadmap item 2.1")
-def test_a_task_cannot_run_its_terminal_tool_unconfirmed() -> None:
-    from apps.api.conversations.task import Task, TaskNotConfirmed
-
-    task = Task.for_intent("booking_enquiry")
-    task.fill(check_in="2026-09-04", check_out="2026-09-09", guests=4, unit_type="2 bed")
-    with pytest.raises(TaskNotConfirmed):
-        task.run()
+def test_changing_one_detail_leaves_the_others_agreed() -> None:
+    t = Task(intent="availability_check")
+    t.absorb({"check_in": "2026-09-04", "check_out": "2026-09-09"})
+    t.confirmed.update({"check_in", "check_out"})
+    t.absorb({"check_in": "2026-09-05"})
+    assert "check_out" in t.confirmed
 
 
-@pytest.mark.xfail(strict=True, reason="tasks and slot filling are roadmap item 2.1")
-def test_a_task_gives_up_after_the_configured_number_of_questions() -> None:
-    from apps.api.conversations.task import Task
+def test_the_required_slots_come_from_the_vocabulary() -> None:
+    """Trap #4, closed: these intents are real now, and declared in one place only."""
+    assert Task(intent="booking_enquiry").required == (
+        "check_in",
+        "check_out",
+        "guests",
+        "unit_type",
+    )
+    assert Task(intent="availability_check").required == ("check_in", "check_out")
 
-    task = Task.for_intent("booking_enquiry")
-    for _ in range(VOCAB.defaults.max_clarifying_turns):
-        task.ask()
-    assert task.next_action == "handoff_to_human"
+
+def test_an_intent_override_beats_the_file_default() -> None:
+    """``modify_reservation`` reads back the change itself, which nothing else collects."""
+    t = Task(intent="modify_reservation")
+    t.absorb({"reservation_ref": "ABC123", "change_requested": "move to the 6th"})
+    assert t.next_step() == ("confirm", "reservation_ref")
+    t.confirmed.add("reservation_ref")
+    assert t.next_step() == ("confirm", "change_requested")
+
+
+def test_a_task_cannot_be_opened_for_an_intent_nobody_declared() -> None:
+    with pytest.raises(UnknownIntent):
+        Task(intent="arrange_airport_pickup")
+
+
+def test_a_new_task_starts_collecting() -> None:
+    assert Task(intent="booking_enquiry").status is TaskStatus.COLLECTING

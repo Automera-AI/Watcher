@@ -3,7 +3,7 @@
 Roadmap item **0.3**. Unblocks 1.2, 2.4, 2.5 and the golden set.
 
 Holiday homes, Dubai and Egypt, guests only. Quotes live availability and live prices from the
-property system. **18 intents, 80 example messages, 5 languages, 6 emergency triggers.**
+property system. **19 intents, 84 example messages, 5 languages, 6 emergency triggers.**
 
 Lives at `packages/intents/`, run from the repo root like `packages/eval`.
 
@@ -11,7 +11,7 @@ Lives at `packages/intents/`, run from the repo root like `packages/eval`.
 intents.yaml                       the vocabulary. This is the thing to review.
 schema.py                          loads and validates it.
 compile.py                         validates, then writes build/*.json. Run this in CI.
-tests/test_intents.py              37 tests. Most of them break the file on purpose.
+tests/test_intents.py              38 tests. Most of them break the file on purpose.
 clients/dubai-holiday-homes.yaml   a client that quotes prices, both channels
 clients/egypt-holiday-homes.yaml   a client that does not, WhatsApp only
 build/                             generated. Do not edit. Gitignored.
@@ -136,6 +136,14 @@ earlier in the same conversation without asking again, because a price from ten 
 price from memory. And it may not say a number when the system did not answer, which is the
 failure that produces a confident invented rate.
 
+**1b. `owner_enquiry` exists even though the audience is guests.**
+Added in 1.2, when the v2 scaffold turned out to carry it. Owners message the guest line whether
+or not they are supposed to, and the receptionist has to recognise one and stop — the same reason
+`spam` is in the list. It is `hand_off`, and it is the second half of *money and owner matters
+always reach a person*, which NEXT-STEPS §13.3 names as a rule that must survive porting. The
+scaffold's `viewing_request` was **not** taken: viewings are lettings traffic, not holiday-homes
+reception, and adding it would quietly turn `audience: guests_only` into a fiction.
+
 **2. Cancellations always reach a person, even a verified guest with a clear policy.**
 A cancellation is a refund and a refund is money going backwards. The receptionist records the
 request and fetches someone. This is the most likely rule you will want to relax once volume
@@ -170,7 +178,7 @@ in order to seem useful. `never: pick the closest intent and act on it` is doing
 |---|---|---|
 | Acts on its own | 9 | Availability, prices, property questions, directions, check-in, door codes, checkout, general info, spam |
 | Acts and tells someone | 4 | Booking holds, changes, extensions, maintenance |
-| Always a person | 5 | Cancellations, billing, payment, complaints, unclear |
+| Always a person | 6 | Cancellations, billing, payment, complaints, owner enquiries, unclear |
 
 `max_autonomy` is a **ceiling, not a decision**. The gate takes the lower of this and what the
 confidence band allows, so a low-confidence booking enquiry still fetches a human. Half confident
@@ -199,7 +207,7 @@ base file already records which languages are spoken; a client may not contradic
 
 ## Not done yet
 
-**80 examples, and roadmap item 2.5 wants about 60 *good* ones.** These are seeds, mine, written
+**84 examples, and roadmap item 2.5 wants about 60 *good* ones.** These are seeds, mine, written
 from the outside. Replace them with real guest messages as soon as you have any. The corrections
 table and its `promoted_to_golden` flag exist for exactly this: every time a human fixes the
 receptionist, that is a labelled example that cost you nothing.
