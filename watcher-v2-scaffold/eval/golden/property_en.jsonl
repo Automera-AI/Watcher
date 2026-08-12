@@ -1,0 +1,5 @@
+{"id":"prop-en-001","language":"en","text":"Hi, do you have a 2 bed free in Marina from the 4th to the 9th of September? There are 4 of us.","expect":{"intent":"availability_check","slots":{"check_in":"2026-09-04","check_out":"2026-09-09","guests":"4"}}}
+{"id":"prop-en-002","language":"en","text":"I can't get into the apartment, the code isn't working","expect":{"intent":"access_code_request","must_hand_off":true}}
+{"id":"prop-en-003","language":"en","text":"The aircon in 1204 has stopped working","expect":{"intent":"maintenance_issue","slots":{"unit":"1204"}}}
+{"id":"prop-en-004","language":"en","text":"Can you send me last month's invoice, I think I was overcharged","expect":{"intent":"billing_question","must_hand_off":true}}
+{"id":"prop-en-005","language":"en","text":"what time is check in","expect":{"intent":"general_info"}}

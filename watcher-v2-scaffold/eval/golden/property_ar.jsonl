@@ -1,0 +1,3 @@
+{"id":"prop-ar-001","language":"ar-AE","text":"مساء الخير، عندكم شقة غرفتين في المارينا من ٤ الى ٩ سبتمبر؟","expect":{"intent":"availability_check","slots":{"check_in":"2026-09-04","check_out":"2026-09-09"}}}
+{"id":"prop-ar-002","language":"ar-EG","text":"التكييف في الشقة مش شغال، ممكن حد يجي يشوفه؟","expect":{"intent":"maintenance_issue"}}
+{"id":"prop-ar-003","language":"mixed","text":"هاي، I want to cancel my booking reference DXB4471","expect":{"intent":"cancel_reservation","slots":{"reservation_ref":"DXB4471"},"must_hand_off":true}}
