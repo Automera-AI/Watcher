@@ -1,9 +1,8 @@
 # Session handoff — read this first
 
 **Updated:** end of session 2, 12 August 2026
-**Branch:** `claude/roadmap-handoff-setup-1faxg7` — all work pushed
-**PR:** [#12](https://github.com/amahmoudosman96-lgtm/Watcher/pull/12), open, not merged
-**`main` is at:** `b89eb06`, untouched
+**`main` is at:** `3feef0c` — [PR #12](https://github.com/amahmoudosman96-lgtm/Watcher/pull/12)
+**merged**, so 0.2, 0.3 and 1.2 are on `main`, not sitting on a branch.
 **Start at §2 for status, §9 for what to do first.**
 
 Purpose: let a new session pick up without re-deriving anything. Companion documents are
@@ -13,15 +12,15 @@ Purpose: let a new session pick up without re-deriving anything. Companion docum
 
 ## 1. Verified state right now
 
-Measured by running it, not read off a document. **Work is on the branch, not on `main`.**
+Measured by running it on `main` after the merge, not read off a document.
 
 | | |
 |---|---|
-| Branch | `claude/roadmap-handoff-setup-1faxg7` — 10 commits, all pushed |
-| `main` | **`b89eb06`, untouched.** PR #12 open against it |
-| Tests | **223 passing**, 0 xfailed (was 101 at the start of this session) |
-| Python files | 97 (was 79) |
+| `main` | **`3feef0c`** — PR #12 merged, 12 commits |
+| Tests | **228 passing**, 0 xfailed (was 101 at the start of this session) |
+| Python files | 98 (was 79) |
 | Lint / types | ruff clean; strict mypy clean on 93 files — **run via `python3 -m`, see §6** |
+| CI on `main` | green at merge |
 | Recorded baseline | **87.5%** intent accuracy, gate passing |
 | Python | 3.12 everywhere |
 
@@ -29,7 +28,7 @@ To get green in a fresh container:
 
 ```
 pip install pytest pydantic fastapi sqlalchemy rapidfuzz alembic httpx pyyaml
-python3 -m pytest            # expect 223 passed
+python3 -m pytest            # expect 228 passed
 ```
 
 **The product gap, unchanged:** the pipeline can listen and file, but it cannot reply.
@@ -149,7 +148,7 @@ Nothing is pre-installed. To get to a green test run:
 
 ```
 pip install pytest pydantic fastapi sqlalchemy rapidfuzz alembic httpx pyyaml
-python3 -m pytest            # expect 223 passed
+python3 -m pytest            # expect 228 passed
 ```
 
 `pyyaml` is needed by `packages/intents`. It is a build dependency, not a runtime one — the
@@ -380,7 +379,11 @@ vocabulary. Ported wholesale, you would have three.
 
 ### Decisions still owed by you
 
-- **The git history rewrite** left open by 0.2. The old client name is still in history.
+- **The git history rewrite** left open by 0.2. The working tree is clean and
+  `test_no_client_name.py` keeps it that way, but the strings are still in four commits of
+  history — now including the merge, so `main`'s history carries them. Rewriting means a
+  force-push to a public `main`, invalidated SHAs, broken clones, and a GitHub Support request
+  to purge cached objects; it deserves its own session rather than the tail of one.
 - **Tag the scaffold branch.** Decided: keep `amahmoudosman96-lgtm-V2-scaffold`, do not merge.
   The recommended course is `git tag -a v2-scaffold <sha> && git push origin v2-scaffold` — a
   branch is mutable and reads as forgotten work; a tag is immutable and reads as reference
