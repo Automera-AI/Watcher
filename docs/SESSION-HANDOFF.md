@@ -1,7 +1,8 @@
 # Session handoff — read this first
 
 **Updated:** end of session 2, 12 August 2026
-**Branch:** `claude/roadmap-handoff-setup-1faxg7` — all work pushed, no PR
+**Branch:** `claude/roadmap-handoff-setup-1faxg7` — all work pushed
+**PR:** [#12](https://github.com/amahmoudosman96-lgtm/Watcher/pull/12), open, not merged
 **`main` is at:** `b89eb06`, untouched
 **Start at §2 for status, §9 for what to do first.**
 
@@ -16,11 +17,11 @@ Measured by running it, not read off a document. **Work is on the branch, not on
 
 | | |
 |---|---|
-| Branch | `claude/roadmap-handoff-setup-1faxg7` — 6 commits, all pushed |
-| `main` | **`b89eb06`, untouched.** No PR opened |
-| Tests | **221 passing**, 0 xfailed (was 101 at the start of this session) |
+| Branch | `claude/roadmap-handoff-setup-1faxg7` — 10 commits, all pushed |
+| `main` | **`b89eb06`, untouched.** PR #12 open against it |
+| Tests | **223 passing**, 0 xfailed (was 101 at the start of this session) |
 | Python files | 97 (was 79) |
-| Lint / types | ruff clean; strict mypy clean on 92 files |
+| Lint / types | ruff clean; strict mypy clean on 93 files — **run via `python3 -m`, see §6** |
 | Recorded baseline | **87.5%** intent accuracy, gate passing |
 | Python | 3.12 everywhere |
 
@@ -28,7 +29,7 @@ To get green in a fresh container:
 
 ```
 pip install pytest pydantic fastapi sqlalchemy rapidfuzz alembic httpx pyyaml
-python3 -m pytest            # expect 221 passed
+python3 -m pytest            # expect 223 passed
 ```
 
 **The product gap, unchanged:** the pipeline can listen and file, but it cannot reply.
@@ -148,7 +149,7 @@ Nothing is pre-installed. To get to a green test run:
 
 ```
 pip install pytest pydantic fastapi sqlalchemy rapidfuzz alembic httpx pyyaml
-python3 -m pytest            # expect 221 passed
+python3 -m pytest            # expect 223 passed
 ```
 
 `pyyaml` is needed by `packages/intents`. It is a build dependency, not a runtime one — the
@@ -363,14 +364,27 @@ it matters).
 3. **Then 2.1 → 2.2 → 2.3**, which are partly built. What is missing: persistence and the
    conversations table; the composer and send-out; a fourth outcome in `orchestration/worker.py`.
 
+### The scaffold branch — keep, do not merge
+
+Decided. What is still unported is worth mining, not re-deriving:
+
+| Unported | Lines | Why it matters |
+|---|---|---|
+| `migrations/001_initial.sql` | 184 | `conversations`, `tasks`, `turns`, `understandings`, `corrections` — the persistence 2.1 is budgeted 2 days for, already designed |
+| `channels/whatsapp.py` | 107 | The real Meta adapter; only a render function was ported |
+| `core/receptionist.py` | 97 | The orchestration loop 2.2 needs |
+| `tools/registry.py` | 86 | The nine tools the vocabulary points at |
+
+**Hazard:** `understanding.py` is a *third* intent taxonomy, after `IntentType` and the
+vocabulary. Ported wholesale, you would have three.
+
 ### Decisions still owed by you
 
 - **The git history rewrite** left open by 0.2. The old client name is still in history.
-- **What happens to `amahmoudosman96-lgtm-V2-scaffold`.** Its core is ported; `receptionist.py`,
-  `tools/registry.py`, `understanding.py`, the SQL migration and its own eval harness are not.
-  It is a second full tree that will drift — mine it deliberately or close it. Note
-  `understanding.py` is a *third* intent taxonomy, after `IntentType` and the vocabulary.
-- **Whether to open a PR** for `claude/roadmap-handoff-setup-1faxg7`. Six commits, none on `main`.
+- **Tag the scaffold branch.** Decided: keep `amahmoudosman96-lgtm-V2-scaffold`, do not merge.
+  The recommended course is `git tag -a v2-scaffold <sha> && git push origin v2-scaffold` — a
+  branch is mutable and reads as forgotten work; a tag is immutable and reads as reference
+  material, after which the branch itself is optional. **Not done yet.**
 
 ### Environment mismatch worth fixing
 
