@@ -161,7 +161,7 @@ To reproduce the full CI locally:
 
 ```
 pip install ruff==0.6.9
-python3 -m pip install mypy==1.11.2      # NOT `pip install mypy` — see below
+python3 -m pip install mypy==1.11.2 types-PyYAML==6.0.12.20240917   # NOT `pip install mypy`
 ruff check . && ruff format --check . && python3 -m mypy && python3 -m pytest
 python3 -m packages.eval \
   --golden   packages/eval/golden/golden_set.jsonl \
