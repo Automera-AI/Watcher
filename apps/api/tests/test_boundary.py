@@ -120,9 +120,9 @@ def test_the_wa_prefix_is_actually_banned() -> None:
     If someone 'tidies' BANNED back down to channel names, this fails.
     """
     assert "wa_" in BANNED
-    assert not any("wa_message_id".startswith(t) for t in BANNED if t != "wa_"), (
-        "no token other than 'wa_' matches the real field names — do not remove it"
-    )
+    assert not any(
+        "wa_message_id".startswith(t) for t in BANNED if t != "wa_"
+    ), "no token other than 'wa_' matches the real field names — do not remove it"
 
 
 def test_the_permanent_exception_never_covers_the_wa_prefix() -> None:

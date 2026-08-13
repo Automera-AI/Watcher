@@ -438,7 +438,8 @@ def main(argv: list[str]) -> int:
         print("usage: python -m packages.intents intents.yaml [clients/*.yaml]")
         return 2
 
-    base_path, *client_paths = [Path(a) for a in argv]
+    paths = [Path(a) for a in argv]
+    base_path, client_paths = paths[0], paths[1:]
     try:
         vocab = load(base_path)
     except Exception as exc:

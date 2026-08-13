@@ -170,6 +170,21 @@ python3 -m packages.eval \
   --out-dir  eval-out
 ```
 
+**Gotcha, and it cost a red CI run this session:** `pip install ruff==0.6.9` can leave a *newer*
+`ruff` earlier on `PATH`, so bare `ruff check .` silently runs the wrong version. 0.15.8 and 0.6.9
+disagree — 0.6.9 flags `UP027`, which newer versions removed, and the two format differently. Use
+**`python3 -m ruff`**, never bare `ruff`, and check each command's exit code separately:
+
+```
+for c in "python3 -m ruff check ." "python3 -m ruff format --check ." "python3 -m mypy" "python3 -m pytest"; do
+  $c >/dev/null 2>&1; echo "rc=$? <- $c"
+done
+```
+
+Chaining these with `&&` hides failures: a failed early command short-circuits the rest, and the
+last line you see may be a *later* command's success. That is exactly how a red CI run got
+reported as green here.
+
 **Gotcha:** installing mypy as a standalone tool puts it in its own environment where
 `pydantic.mypy` is not importable, and it fails with a misleading "No module named 'pydantic'"
 plugin error. Install it into the *same* interpreter that has pydantic (`python3 -m pip install`).
