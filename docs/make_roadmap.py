@@ -116,7 +116,7 @@ story = []
 story.append(Paragraph("Watcher v2 &mdash; Build Roadmap", H1))
 story.append(Paragraph(
     "From a message&nbsp;filer to a receptionist. Every item scored for urgency and ease. "
-    "&nbsp;&bull;&nbsp; 3 August 2026", LEAD))
+    "&nbsp;&bull;&nbsp; 13 August 2026 &nbsp;&bull;&nbsp; v1.12", LEAD))
 story.append(Spacer(1, 10))
 
 hdr = Table([[Paragraph(
@@ -138,17 +138,21 @@ story.append(Paragraph("Where we stand today", H2))
 stand = Table([
     [Paragraph("<b>Built and tested</b>", CELL), Paragraph("<b>Missing</b>", CELL)],
     [Paragraph(
-        "101 passing tests, no DB or network needed<br/>"
-        "79 Python files, 10 modules<br/>"
+        "228 passing tests, no DB or network needed<br/>"
+        "98 Python files, 13 modules<br/>"
         "11 DB tables + migration<br/>"
         "Every external system behind a swappable seam<br/>"
-        "Eval runner + job queue, with a CI accuracy gate", CELL),
+        "Eval runner + job queue, with a CI accuracy gate<br/>"
+        "<b>Receptionist vocabulary: 19 intents, data not code</b><br/>"
+        "<b>Channel-neutral envelope + WhatsApp/voice adapters</b><br/>"
+        "<b>Task state machine and the autonomy gate</b>", CELL),
      Paragraph(
-        "A reply path &mdash; it cannot talk back<br/>"
-        "Memory across turns &mdash; each message judged alone<br/>"
+        "A reply path &mdash; the pieces exist, nothing is wired<br/>"
+        "Persistence &mdash; tasks live in memory, not a table<br/>"
         "Knowledge &mdash; zero tables, zero rows<br/>"
-        "A channel-neutral core &mdash; it still speaks WhatsApp<br/>"
-        "Live availability &mdash; no read path to any PMS", CELL)],
+        "A channel-neutral core &mdash; 8 files still say <font name='Courier'>wa_</font><br/>"
+        "Live availability &mdash; no read path to any PMS<br/>"
+        "Proof of identity &mdash; matching is not verifying", CELL)],
 ], colWidths=[228, 228], hAlign="LEFT")
 stand.setStyle(TableStyle([
     ("BACKGROUND", (0, 0), (-1, 0), BAND),
@@ -182,10 +186,7 @@ story.append(leg)
 
 story.append(Spacer(1, 10))
 story.append(Paragraph(
-    "<b>Totals:</b> ~14 engineering days remaining (0.1 and 0.4 are done). At six days a week "
-    "that is a demo in about two weeks "
-    "and a real client's guests on it in about three. Meta verification no longer sets the date "
-    "&mdash; they allow starting unverified &mdash; so <b>engineering is the critical path</b>.", BODY))
+    "<b>Totals:</b> ~13 engineering days remaining by the numbers below &mdash; realistically 11 to 12, because 1.2 landed the core primitives that 2.1, 2.2 and 2.3 were each budgeted to build. <b>All of Track 0 is done, and so is 1.2.</b> At six days a week that is a demo in about two weeks and a real client's guests on it in about three. <b>Engineering is the critical path</b>, and inside it <b>3.1 is the bottleneck</b>: no read path means no pricing, no availability and no door codes.", BODY))
 
 # ---------------------------------------------------------------- page 2
 story.extend(section(
@@ -196,34 +197,32 @@ story.extend(section(
         ("0.1", done("Set default branch to <font name='Courier'>main</font>"),
          "NOW", "Trivial", "1 min",
          "Anyone cloning today lands on a feature branch. Harmless now, confusing the moment branches drift."),
-        ("0.2", "Remove the client name from the golden set and fixtures",
+        ("0.2", done("Remove the client name from the golden set and fixtures"),
          "NOW", "Easy", "0.25",
-         "A real client and address sit in a public repo, breaking your own anonymisation rule. Decide separately whether to rewrite history."),
-        ("0.3", "Decide the receptionist intent vocabulary",
+         "Replaced with invented placeholders; eval still 87.5%. A hashed guard test now scans the whole repo, docs included &mdash; the name came back once in a sentence saying it had been removed. <b>History rewrite still open.</b>"),
+        ("0.3", done("Decide the receptionist intent vocabulary"),
          "NOW", "Easy", "1 hr",
-         "A founder call, not code. <b>Blocks four items</b> (1.2, 2.4, 2.5, and the golden set). Cheapest and most blocking thing on this page."),
+         "19 intents, 84 examples, 5 languages, 38 tests, in <font name='Courier'>packages/intents</font>. Two bugs fixed on the way in: the fire trigger carried a Cyrillic lookalike and could never match, and the Franco-Arabic guard was dead code."),
         ("0.4", done("Merge the eval branch"),
          "NOW", "Trivial", "0.25",
          "Verified conflict-free and green: +15 tests, 86 to 101, all passing. Runner, five measures, reports, recorded fixtures, plus the job queue. A merge commit, not a fast-forward &mdash; main has moved since."),
-        ("0.5", "Delete the stale <font name='Courier'>nifty-johnson</font> branch",
+        ("0.5", done("Delete the stale <font name='Courier'>nifty-johnson</font> branch"),
          "LOW", "Trivial", "1 min",
-         "Housekeeping your own roadmap already flags."),
+         "Housekeeping your own roadmap already flagged."),
     ]))
 
 story.extend(section(
     "Track 1 &mdash; Foundations. Week 1.",
     "Do 1.1 before anything else is built. Every week it waits adds more call sites to change.",
     [
-        ("1.1", "Stop the core speaking WhatsApp",
+        ("1.1", "Stop the core speaking WhatsApp &mdash; <b>next up</b>",
          "NOW", "Moderate", "1.5",
          "<font name='Courier'>wa_message_id</font> to <font name='Courier'>external_id</font>, "
          "<font name='Courier'>wa_chat_id</font> to <font name='Courier'>thread_id</font>, add a channel field. "
-         "A phone call has no chat id. Strict typing plus 101 tests point at every site, so this is a rename, not a rewrite."),
-        ("1.2", "Port the four kept scaffold files",
+         "A phone call has no chat id. <b>Now has an executable definition of done:</b> <font name='Courier'>KNOWN_LEAKS</font> in test_boundary.py lists the 8 remaining files and fails on a stale entry. The ported envelope is the target shape to copy."),
+        ("1.2", done("Port the four kept scaffold files"),
          "HIGH", "Moderate", "1.0",
-         "<b>Not a copy-paste.</b> They import the wrong package root, and the boundary test bans the word "
-         "&ldquo;whatsapp&rdquo; while the actual leak is the <font name='Courier'>wa_</font> prefix &mdash; "
-         "so the test meant to prevent this bug would not catch it. Needs 0.3 first."),
+         "All four live, no xfail, plus the core they exercise. All four traps closed. The boundary test now bans <font name='Courier'>wa_</font>, which is the leak &ldquo;whatsapp&rdquo; never matched. Quick-reply cap moved to the adapter &mdash; the scaffold's own boundary test passed while its core enforced a WhatsApp limit."),
         ("1.3", "Python 3.12 to 3.13",
          "LOW", "Easy", "0.5",
          "Baseline corrected: the repo is on 3.12, not 3.10. Upgrade surface checked and clean &mdash; no removed stdlib, no deprecated datetime calls. Do it after 1.1 so a breakage has one suspect, not two."),
@@ -234,21 +233,21 @@ story.extend(section(
     "Track 2 &mdash; Make it a receptionist. Week 2.",
     "This is the product. 2.1 is the only item with nothing in the repo to copy from.",
     [
-        ("2.1", "Conversations, tasks and slot filling",
+        ("2.1", "Conversations, tasks and slot filling &mdash; <b>part done</b>",
          "HIGH", "Hard", "2.0",
-         "Hold a goal across several messages instead of judging each alone. New tables, new migration, wired into the orchestrator. The one genuinely new piece of domain work."),
-        ("2.2", "The reply path",
+          "<b>The state machine landed with 1.2</b>, reading its slots from the vocabulary. What is left: persistence, the conversations table, and the verification-codes table a door code needs. The v2 scaffold's SQL already designs all of it."),
+        ("2.2", "The reply path &mdash; <b>part done</b>",
          "HIGH", "Moderate", "1.5",
-         "A fourth outcome, a composer, and sending back out through the connector. Retries and dead-lettering already exist for CRM writes &mdash; this adds the direction, not the machinery."),
-        ("2.3", "Autonomy gate, and raise the acting floor",
+          "<b>Envelope and channel adapters landed with 1.2.</b> What is left: the composer, sending back out, and a fourth outcome in the orchestrator. Retries and dead-lettering already exist for CRM writes."),
+        ("2.3", "Autonomy gate &mdash; <b>part done</b>",
          "HIGH", "Easy", "1.0",
-         "Small code, important thinking. High acts, medium acts and tells someone, low fetches a human. Half-confident is fine for filing, not for holding a booking. Money and owner matters always reach a person, checked <i>before</i> confidence."),
+          "<b><font name='Courier'>decide_autonomy</font> landed with 1.2</b>, reading the ceiling from the vocabulary; money and owner matters are checked before confidence. What is left: wiring it into the orchestrator, and something that can actually prove identity."),
         ("2.4", "Knowledge base",
          "HIGH", "Moderate", "2.0",
          "Facts table with sensitivity flags, prose in pgvector, and a real &ldquo;I don't know&rdquo; that fetches a human. Door codes are not ordinary facts. For the demo, one property's facts fit in the prompt &mdash; no retrieval needed."),
         ("2.5", "Prompt v2 and rewrite the golden set",
          "MED", "Moderate", "1.0",
-         "Receptionist vocabulary, 8 cases rewritten and ~50 added. The runner from 0.4 already exists to score them. Needs 0.3."),
+          "<b>Unblocked: 0.3 is done.</b> Receptionist vocabulary, 8 cases rewritten and ~50 added. The runner from 0.4 already exists to score them. Watch the mixed-language number &mdash; it is 0% on the current 8."),
     ]))
 
 story.extend(section(
@@ -257,12 +256,9 @@ story.extend(section(
     "base is closed to us. Hostaway, Guesty and Cloudbeds all publish APIs, so the capability is "
     "available without the strategic cost.",
     [
-        ("3.1", "<font name='Courier'>PropertySystemPort</font> plus the first adapter",
+        ("3.1", "<font name='Courier'>PropertySystemPort</font> plus the first adapter &mdash; <b>the bottleneck</b>",
          "MED", "Moderate", "2.5",
-         "<b>Build the port, not a Hostaway integration.</b> Verified: <font name='Courier'>crm_cache</font> "
-         "already has <font name='Courier'>external_record_id</font> and <font name='Courier'>last_synced_at</font>, "
-         "but delivery exposes only <font name='Courier'>post()</font> &mdash; write-only, so this needs a new read port. "
-         "Cache facts; never cache availability."),
+          "<b>Build the port, not a Hostaway integration.</b> Blocks pricing, availability <i>and</i> door codes: with no way to look up a booking, the identity check cannot run. <font name='Courier'>crm_cache</font> is the right shape; delivery is write-only, so this needs a new read port. Cache facts; never cache availability."),
         ("3.2", "End to end on a real number, then measure",
          "HIGH", "Moderate", "1.0",
          "The point at which the eval number becomes real rather than recorded."),
