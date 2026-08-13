@@ -36,11 +36,11 @@ def test_parses_text_message() -> None:
         }
     )
     [msg] = parse_webhook(payload)
-    assert msg.wa_message_id == "wamid.A"
+    assert msg.external_id == "wamid.A"
     assert msg.type is MessageType.TEXT
     assert msg.body_text == "Need a quote"
     assert msg.sender_phone_e164 == "+966500000000"  # bare wa_id rendered E.164
-    assert msg.sender_wa_name == "Sara"
+    assert msg.sender_display_name == "Sara"
 
 
 def test_status_events_are_ignored() -> None:

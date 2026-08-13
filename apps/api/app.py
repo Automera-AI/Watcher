@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from apps.api.core.config import MetaSettings
+from apps.api.channels import MetaSettings
 from apps.api.ingestion.ports import ClassificationQueue, MessageRepository
 from apps.api.ingestion.router import TenantResolver, build_router
 from apps.api.ingestion.service import IngestionService

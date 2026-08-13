@@ -1,6 +1,6 @@
 """Ingestion service — the reliability core of the webhook path (addendum §5).
 
-Per message: dedup on ``wa_message_id`` (Meta re-delivers and can duplicate), then
+Per message: dedup on ``external_id`` (channels may re-deliver and duplicate), then
 **persist before enqueue** so a worker crash never loses a message (at-least-once + idempotency
 ≈ exactly once). The HTTP handler returns 200 quickly *after* this runs, before classification.
 """
@@ -32,11 +32,10 @@ class IngestionService:
         accepted = 0
         duplicates = 0
         for message in messages:
-            if self._repository.exists(tenant_id, message.wa_message_id):
+            if self._repository.exists(tenant_id, message.external_id):
                 duplicates += 1
                 continue
-            # Order matters: durable write first, enqueue second (§5).
             self._repository.save(tenant_id, message)
-            self._queue.enqueue(tenant_id, message.wa_message_id)
+            self._queue.enqueue(tenant_id, message.external_id)
             accepted += 1
         return IngestResult(accepted=accepted, duplicates=duplicates)

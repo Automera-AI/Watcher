@@ -1,6 +1,6 @@
 """Control-chat button encoding and the pending-action state machine (addendum §10).
 
-A medium-confidence item sends a WhatsApp interactive message with Confirm / Change / Skip buttons.
+A medium-confidence item sends an interactive message with Confirm / Change / Skip buttons.
 Each button id encodes the action, the inbox item, and a signed token. An inbound reply is honored
 only when the token verifies *and* the sender is the bound control-chat number — no action from an
 unbound number (addendum §2, §10).

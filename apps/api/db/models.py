@@ -26,34 +26,45 @@ class Tenant(Base):
     name: Mapped[str] = mapped_column(String(255))
     tier: Mapped[str] = mapped_column(String(32))  # TenantTier value
     control_chat_phone_e164: Mapped[str | None] = mapped_column(String(20), default=None)
-    waba_id: Mapped[str | None] = mapped_column(String(64), default=None)
-    phone_number_id: Mapped[str | None] = mapped_column(String(64), default=None)
+
+
+class ChannelConfig(TimestampedTenantBase):
+    """Per-tenant channel configuration (per-channel credentials and settings)."""
+
+    __tablename__ = "channel_configs"
+    __table_args__ = (UniqueConstraint("kind", "external_id", name="uq_channel_kind_extid"),)
+
+    kind: Mapped[str] = mapped_column(String(32))
+    external_id: Mapped[str] = mapped_column(String(128))
+    config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    enabled: Mapped[bool] = mapped_column(default=True)
 
 
 class Source(TimestampedTenantBase):
-    """A watched WhatsApp conversation; opt-out model via ``excluded`` (addendum §4)."""
+    """A watched conversation thread; opt-out model via ``excluded`` (addendum §4)."""
 
     __tablename__ = "sources"
-    __table_args__ = (UniqueConstraint("tenant_id", "wa_chat_id", name="uq_sources_tenant_chat"),)
+    __table_args__ = (UniqueConstraint("tenant_id", "thread_id", name="uq_sources_tenant_thread"),)
 
-    wa_chat_id: Mapped[str] = mapped_column(String(64))
+    thread_id: Mapped[str] = mapped_column(String(64))
     kind: Mapped[str] = mapped_column(String(16))  # SourceKind value
     display_name: Mapped[str | None] = mapped_column(String(255), default=None)
     excluded: Mapped[bool] = mapped_column(default=False)
 
 
 class Message(TimestampedTenantBase):
-    """A raw inbound/outbound message; ``wa_message_id`` is unique per tenant (idempotency, §5)."""
+    """A raw inbound/outbound message; ``external_id`` is unique per tenant (idempotency, §5)."""
 
     __tablename__ = "messages"
     __table_args__ = (
-        UniqueConstraint("tenant_id", "wa_message_id", name="uq_messages_tenant_wamid"),
+        UniqueConstraint("tenant_id", "external_id", name="uq_messages_tenant_extid"),
     )
 
-    wa_message_id: Mapped[str] = mapped_column(String(128))
-    wa_chat_id: Mapped[str] = mapped_column(String(64), index=True)
+    external_id: Mapped[str] = mapped_column(String(128))
+    thread_id: Mapped[str] = mapped_column(String(64), index=True)
+    channel: Mapped[str] = mapped_column(String(32), default="whatsapp")
     sender_phone_e164: Mapped[str] = mapped_column(String(20))
-    sender_wa_name: Mapped[str | None] = mapped_column(String(255), default=None)
+    sender_display_name: Mapped[str | None] = mapped_column(String(255), default=None)
     direction: Mapped[str] = mapped_column(String(16))  # MessageDirection value
     type: Mapped[str] = mapped_column(String(16))  # MessageType value
     body_text: Mapped[str | None] = mapped_column(Text, default=None)

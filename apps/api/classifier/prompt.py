@@ -20,7 +20,7 @@ PROMPT_VERSION = "v1"
 CLASSIFICATION_TOOL_SCHEMA: dict[str, Any] = ClassificationResult.model_json_schema()
 
 SYSTEM_PROMPT = (
-    "You classify inbound business WhatsApp messages for a CRM. Read the conversation history and "
+    "You classify inbound business messages for a CRM. Read the conversation history and "
     "the latest message, then return ONLY the structured fields. Messages may be Arabic, English, "
     "or mixed. Report calibrated confidences in [0,1]; lower them when a message is noisy."
 )

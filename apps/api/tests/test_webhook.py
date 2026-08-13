@@ -8,7 +8,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from apps.api.app import create_app
-from apps.api.core.config import MetaSettings
+from apps.api.channels.whatsapp import MetaSettings
 from apps.api.ingestion.security import SIGNATURE_HEADER, expected_signature
 from apps.api.tests.fakes import InMemoryRepository, RecordingQueue
 
@@ -82,7 +82,7 @@ def test_post_with_valid_signature_ingests() -> None:
     resp = client.post("/webhook", content=body, headers=headers)
 
     assert resp.status_code == 200
-    assert [m.wa_message_id for _t, m in repo.saved] == ["wamid.A"]
+    assert [m.external_id for _t, m in repo.saved] == ["wamid.A"]
     assert queue.enqueued == [("PNID", "wamid.A")]  # tenant resolved from phone_number_id
 
 

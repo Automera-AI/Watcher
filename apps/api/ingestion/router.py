@@ -16,7 +16,7 @@ from collections.abc import Callable
 from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import PlainTextResponse
 
-from apps.api.core.config import MetaSettings
+from apps.api.channels.whatsapp import MetaSettings
 from apps.api.ingestion.parser import iter_change_values, parse_value
 from apps.api.ingestion.security import SIGNATURE_HEADER, verify_signature
 from apps.api.ingestion.service import IngestionService

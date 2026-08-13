@@ -37,8 +37,8 @@ def _pipeline() -> tuple[MediaPipeline, _Downloader]:
 
 def _message(msg_type: MessageType, *, media_id: str | None) -> MessageEnvelope:
     return MessageEnvelope(
-        wa_message_id="wamid.A",
-        wa_chat_id="966500000000",
+        external_id="wamid.A",
+        thread_id="966500000000",
         source_kind=SourceKind.DIRECT,
         sender_phone_e164="+966500000000",
         type=msg_type,

@@ -42,6 +42,8 @@ ADAPTER_PACKAGES: frozenset[str] = frozenset({"ingestion", "channels"})
 #: Kept separate from KNOWN_LEAKS so the two never get confused: this one does not shrink.
 CHANNEL_REGISTRY: dict[str, set[str]] = {
     "schemas/envelope.py": {"whatsapp"},
+    "schemas/message.py": {"whatsapp"},
+    "db/models.py": {"whatsapp"},
 }
 
 #: Core files that still leak, and what they still leak, pending 1.1. Delete entries as they are
@@ -50,16 +52,7 @@ CHANNEL_REGISTRY: dict[str, set[str]] = {
 #: ``wa_message_id`` → ``external_id``, ``wa_chat_id`` → ``thread_id``, plus a channel field.
 #: The ``whatsapp`` hits are prose in docstrings and one prompt string, cheaper to fix in the
 #: same pass than to argue about separately.
-KNOWN_LEAKS: dict[str, set[str]] = {
-    "classifier/prompt.py": {"whatsapp"},
-    "control_chat/state.py": {"whatsapp"},
-    "core/config.py": {"whatsapp"},
-    "db/models.py": {"wa_", "whatsapp"},
-    "db/repository.py": {"wa_"},
-    "orchestration/queue.py": {"wa_"},
-    "schemas/enums.py": {"whatsapp"},
-    "schemas/message.py": {"wa_", "whatsapp"},
-}
+KNOWN_LEAKS: dict[str, set[str]] = {}
 
 
 def _core_files() -> list[Path]:

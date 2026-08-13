@@ -12,10 +12,10 @@ from apps.api.tests.fakes import InMemoryRepository, RecordingQueue
 TENANT = "tenant-1"
 
 
-def _message(wa_message_id: str) -> MessageEnvelope:
+def _message(external_id: str) -> MessageEnvelope:
     return MessageEnvelope(
-        wa_message_id=wa_message_id,
-        wa_chat_id="966500000000",
+        external_id=external_id,
+        thread_id="966500000000",
         source_kind=SourceKind.DIRECT,
         sender_phone_e164="+966500000000",
         type=MessageType.TEXT,

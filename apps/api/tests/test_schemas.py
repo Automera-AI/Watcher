@@ -90,8 +90,8 @@ def test_classification_keeps_model_used_field_name() -> None:
 
 def test_message_envelope_classifiable_text_prefers_body_then_transcript() -> None:
     base = {
-        "wa_message_id": "wamid.1",
-        "wa_chat_id": "chat.1",
+        "external_id": "wamid.1",
+        "thread_id": "chat.1",
         "source_kind": SourceKind.DIRECT,
         "sender_phone_e164": "+966500000000",
         "type": MessageType.TEXT,
@@ -110,8 +110,8 @@ def test_message_envelope_classifiable_text_prefers_body_then_transcript() -> No
 def test_message_envelope_rejects_bad_phone() -> None:
     with pytest.raises(ValidationError):
         MessageEnvelope(
-            wa_message_id="wamid.2",
-            wa_chat_id="chat.2",
+            external_id="wamid.2",
+            thread_id="chat.2",
             source_kind=SourceKind.DIRECT,
             sender_phone_e164="not-a-phone",
             type=MessageType.TEXT,
