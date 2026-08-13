@@ -1,8 +1,9 @@
 # Session handoff — read this first
 
 **Updated:** end of session 2, 12 August 2026
-**`main` is at:** `3feef0c` — [PR #12](https://github.com/amahmoudosman96-lgtm/Watcher/pull/12)
-**merged**, so 0.2, 0.3 and 1.2 are on `main`, not sitting on a branch.
+**`main` is at:** `30fd845` — [PR #12](https://github.com/amahmoudosman96-lgtm/Watcher/pull/12)
+**merged**, so 0.2, 0.3 and 1.2 are on `main`. **History was rewritten after that merge**, so
+every SHA below the tip changed — see §10, and resync any clone before touching anything.
 **Start at §2 for status, §9 for what to do first.**
 
 Purpose: let a new session pick up without re-deriving anything. Companion documents are
@@ -16,7 +17,7 @@ Measured by running it on `main` after the merge, not read off a document.
 
 | | |
 |---|---|
-| `main` | **`3feef0c`** — PR #12 merged, 12 commits |
+| `main` | **`30fd845`** — PR #12 merged, then history rewritten (§10) |
 | Tests | **228 passing**, 0 xfailed (was 101 at the start of this session) |
 | Python files | 98 (was 79) |
 | Lint / types | ruff clean; strict mypy clean on 93 files — **run via `python3 -m`, see §6** |
@@ -379,11 +380,7 @@ vocabulary. Ported wholesale, you would have three.
 
 ### Decisions still owed by you
 
-- **The git history rewrite** left open by 0.2. The working tree is clean and
-  `test_no_client_name.py` keeps it that way, but the strings are still in four commits of
-  history — now including the merge, so `main`'s history carries them. Rewriting means a
-  force-push to a public `main`, invalidated SHAs, broken clones, and a GitHub Support request
-  to purge cached objects; it deserves its own session rather than the tail of one.
+- **Finish the history rewrite — one step left, and it is not optional.** See §10.
 - **Tag the scaffold branch.** Decided: keep `amahmoudosman96-lgtm-V2-scaffold`, do not merge.
   The recommended course is `git tag -a v2-scaffold <sha> && git push origin v2-scaffold` — a
   branch is mutable and reads as forgotten work; a tag is immutable and reads as reference
@@ -394,3 +391,59 @@ vocabulary. Ported wholesale, you would have three.
 The build artifacts uploaded this session were made on **Python 3.10** (`schema.cpython-310.pyc`)
 with **pytest 9.1.1**. The repo is 3.12 everywhere and CI pins pytest 8.3.3. A green local run on
 that setup is not evidence of a green CI run. Reconcile before 1.3 moves the baseline to 3.13.
+
+
+---
+
+## 10. The history rewrite — done, with one step left
+
+**Done.** All six branches were rewritten with `git filter-repo` and force-pushed. `main` is now
+`30fd845`. Verified three ways before pushing: a fresh clone from GitHub contains the strings on
+no branch; the rewritten tip tree is **byte-identical** to the pre-rewrite tip (`dca01c8`), so no
+content changed, only history; and the commit count is unchanged at 49, so nothing was dropped.
+
+All six needed it, not just `main` — the strings were reachable from every branch, and a rewrite
+that leaves one dirty ref accomplishes nothing:
+
+```
+main · amahmoudosman96-lgtm-V2-scaffold · claude/roadmap-handoff-setup-1faxg7
+claude/confident-albattani-1Ybz6 · claude/dazzling-gates-iepkxa
+claude/strategy-shift-review-roadmap-i9zkwe
+```
+
+### Still exposed — ask GitHub Support to purge
+
+**The old objects are still live.** This was tested, not assumed: `901f03d`, the pre-rewrite
+commit that introduced the golden set, is **still served by the GitHub API** after the force-push.
+Unreferenced objects survive until GitHub garbage-collects, and `refs/pull/*` are GitHub-managed
+refs that a push cannot rewrite, so several pull requests still pin the old history.
+
+Until that is purged, the rewrite has reduced the exposure — nothing is reachable by browsing —
+but has not ended it. **Open a GitHub Support request** asking them to garbage-collect
+unreachable objects and stale pull-request refs on this repository, quoting the repo and the fact
+that history was rewritten to remove data published in error. It is a routine request.
+
+### Anyone holding a clone must resync
+
+A plain `git pull` will not do it and may re-introduce the old commits by merging them back:
+
+```
+git fetch --all --prune
+git checkout main && git reset --hard origin/main
+```
+
+Or simply delete the clone and clone again, which is the safer instruction to give anyone else.
+
+### The scaffold tag could not be pushed
+
+Decided and prepared, but **this session's GitHub credentials rejected the tag push with a 403**
+while branch pushes succeeded, so it is not on the remote. One command from a machine with normal
+push rights, after resyncing:
+
+```
+git tag -a v2-scaffold -m "v2 reference tree; core ported in PR #12, rest unported" \
+  origin/amahmoudosman96-lgtm-V2-scaffold
+git push origin v2-scaffold
+```
+
+The branch itself is preserved and now carries clean history, so nothing is lost by delaying this.
