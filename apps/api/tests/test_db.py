@@ -58,6 +58,13 @@ def test_all_tables_create() -> None:
         "rules",
         "audit_log",
         "eval_runs",
+        "contacts",
+        "conversations",
+        "turns",
+        "task_rows",
+        "understandings",
+        "corrections",
+        "usage_events",
     }
     assert expected <= set(Base.metadata.tables)
 

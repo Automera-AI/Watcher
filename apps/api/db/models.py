@@ -11,7 +11,20 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from apps.api.db.base import Base, TimestampedTenantBase, _utcnow
@@ -192,4 +205,131 @@ class EvalRun(Base):
     calibration: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     per_language: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     confusion: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class Contact(TimestampedTenantBase):
+    """A known person the system has interacted with."""
+
+    __tablename__ = "contacts"
+    __table_args__ = (UniqueConstraint("tenant_id", "phone_e164", name="uq_contacts_tenant_phone"),)
+
+    full_name: Mapped[str | None] = mapped_column(String(255), default=None)
+    phone_e164: Mapped[str] = mapped_column(String(20))
+    email: Mapped[str | None] = mapped_column(String(255), default=None)
+    alternate_phones: Mapped[list[str]] = mapped_column(JSON, default=list)
+    external_system: Mapped[str | None] = mapped_column(String(64), default=None)
+    external_id: Mapped[str | None] = mapped_column(String(128), default=None)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class Conversation(TimestampedTenantBase):
+    """An active or completed conversation thread."""
+
+    __tablename__ = "conversations"
+
+    channel: Mapped[str] = mapped_column(String(32))
+    channel_thread_id: Mapped[str] = mapped_column(String(128))
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("contacts.id"),
+        default=None,
+    )
+    identity_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    language: Mapped[str | None] = mapped_column(String(8), default=None)
+    status: Mapped[str] = mapped_column(String(16), default="open")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_turn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class Turn(TimestampedTenantBase):
+    """One inbound or outbound turn in a conversation."""
+
+    __tablename__ = "turns"
+    __table_args__ = (UniqueConstraint("idempotency_key", name="uq_turns_idempotency"),)
+
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("conversations.id"),
+        index=True,
+    )
+    direction: Mapped[str] = mapped_column(String(16))
+    channel: Mapped[str] = mapped_column(String(32))
+    modality: Mapped[str] = mapped_column(String(16))
+    body_text: Mapped[str | None] = mapped_column(Text, default=None)
+    speech_confidence: Mapped[float | None] = mapped_column(Float, default=None)
+    idempotency_key: Mapped[str] = mapped_column(String(128))
+    raw_payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class TaskRow(TimestampedTenantBase):
+    """Persisted task state; named TaskRow to avoid collision with the in-memory Task dataclass."""
+
+    __tablename__ = "task_rows"
+
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("conversations.id"),
+        index=True,
+    )
+    intent: Mapped[str] = mapped_column(String(64))
+    slots: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
+    slots_confirmed: Mapped[list[str]] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(16), default="collecting")
+    outcome_ref: Mapped[str | None] = mapped_column(String(255), default=None)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class UnderstandingRow(TimestampedTenantBase):
+    """The LLM's parse of a single turn."""
+
+    __tablename__ = "understandings"
+
+    turn_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("turns.id"), index=True)
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("task_rows.id"),
+        default=None,
+    )
+    intent: Mapped[str] = mapped_column(String(64))
+    slots: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    confidence_overall: Mapped[float] = mapped_column()
+    confidence_intent: Mapped[float] = mapped_column()
+    confidence_person: Mapped[float] = mapped_column()
+    confidence_company: Mapped[float] = mapped_column()
+    autonomy: Mapped[str | None] = mapped_column(String(16), default=None)
+    model_used: Mapped[str] = mapped_column(String(64))
+    prompt_version: Mapped[str] = mapped_column(String(32))
+    latency_ms: Mapped[int] = mapped_column(Integer)
+    raw_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class CorrectionRow(TimestampedTenantBase):
+    """A human correction applied to an understanding."""
+
+    __tablename__ = "corrections"
+
+    understanding_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("understandings.id"),
+    )
+    original_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    corrected_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    corrected_via: Mapped[str | None] = mapped_column(String(64), default=None)
+    promoted_to_golden: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class UsageEvent(Base):
+    """Metered usage event; not tenant-scoped via the base class (uses BIGSERIAL PK)."""
+
+    __tablename__ = "usage_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, index=True)
+    period: Mapped[datetime] = mapped_column(Date)
+    metric: Mapped[str] = mapped_column(String(64))
+    quantity: Mapped[int] = mapped_column(Integer)
+    unit_cost: Mapped[float | None] = mapped_column(Float, default=None)
+    ref_id: Mapped[str | None] = mapped_column(String(128), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
