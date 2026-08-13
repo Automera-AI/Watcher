@@ -7,6 +7,8 @@ from typing import Any
 
 from apps.api.audit.log import AuditEntry
 from apps.api.classifier.service import Classifier
+from apps.api.classifier.types import ClassificationOutcome
+from apps.api.conversations.receptionist import handle as receptionist_handle
 from apps.api.identity.models import CrmRecord
 from apps.api.identity.resolver import IncomingContact
 from apps.api.orchestration.ports import InboxItemDraft
@@ -22,6 +24,7 @@ from apps.api.schemas.enums import (
 from apps.api.schemas.message import MessageEnvelope
 
 TENANT = "tenant-1"
+TENANT_UUID = "00000000-0000-0000-0000-000000000001"
 MSG_ID = "msg-1"
 
 
@@ -237,3 +240,96 @@ def test_incoming_contact_built_from_classification() -> None:
     assert captured[0].name == "Sara"
     assert captured[0].company == "Acme"
     assert captured[0].phone_e164 == "+966500000000"
+
+
+class _VocabResult:
+    """A classification result whose intent is a vocabulary name (not an IntentType enum)."""
+
+    def __init__(self, intent: str, confidence: float) -> None:
+        self.intent = intent
+        self.summary_one_line = "summary"
+        self.language = "en"
+        self.person_name = "Sara"
+        self.company_name = "Acme"
+        self.confidence_overall = confidence
+        self.confidence_intent = confidence
+        self.confidence_person = confidence
+        self.confidence_company = confidence
+
+    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "intent": self.intent,
+            "summary_one_line": self.summary_one_line,
+            "language": self.language,
+            "person_name": self.person_name,
+            "company_name": self.company_name,
+            "confidence_overall": self.confidence_overall,
+            "confidence_intent": self.confidence_intent,
+            "confidence_person": self.confidence_person,
+            "confidence_company": self.confidence_company,
+        }
+
+
+class _FixedClassifier:
+    """A classifier that returns a fixed outcome without calling any LLM provider."""
+
+    def __init__(self, result: _VocabResult) -> None:
+        self._result = result
+
+    def classify(self, value: Any) -> ClassificationOutcome:
+        return ClassificationOutcome(
+            result=self._result,  # type: ignore[arg-type]
+            model_used="test",
+            escalated=False,
+            attempts=1,
+        )
+
+
+def _orchestrator_with_receptionist(
+    intent: str,
+    confidence: float,
+) -> tuple[Orchestrator, _FakeAudit, _FakeInbox]:
+    classifier = _FixedClassifier(_VocabResult(intent, confidence))
+    audit = _FakeAudit()
+    inbox = _FakeInbox()
+    orch = Orchestrator(
+        classifier,  # type: ignore[arg-type]
+        audit,
+        inbox,
+        rules_provider=lambda _t: [],
+        crm_lookup=lambda _t, _c: [],
+        receptionist=receptionist_handle,
+    )
+    return orch, audit, inbox
+
+
+def test_acting_intent_returns_receptionist_reply() -> None:
+    orch, audit, inbox = _orchestrator_with_receptionist("property_question", 0.95)
+    outcome = orch.process(TENANT_UUID, MSG_ID, _message())
+    assert outcome.action is RoutingAction.RECEPTIONIST_REPLY
+    assert outcome.autonomy == "act"
+    assert outcome.outbound_action is not None
+    assert audit.entries[0].action == "receptionist_reply"
+
+
+def test_act_and_notify_returns_receptionist_reply_with_notify() -> None:
+    orch, audit, inbox = _orchestrator_with_receptionist("booking_enquiry", 0.95)
+    outcome = orch.process(TENANT_UUID, MSG_ID, _message())
+    assert outcome.action is RoutingAction.RECEPTIONIST_REPLY
+    assert outcome.autonomy == "act_and_notify"
+    assert outcome.outbound_action is not None
+
+
+def test_hand_off_intent_falls_through_to_routing() -> None:
+    orch, audit, inbox = _orchestrator_with_receptionist("cancel_reservation", 0.95)
+    outcome = orch.process(TENANT_UUID, MSG_ID, _message())
+    assert outcome.action is not RoutingAction.RECEPTIONIST_REPLY
+    assert outcome.autonomy is None
+
+
+def test_no_receptionist_uses_old_path() -> None:
+    orch, _audit, _inbox = _orchestrator(0.95)
+    outcome = orch.process(TENANT, MSG_ID, _message())
+    assert outcome.action is RoutingAction.AUTO_ROUTE
+    assert outcome.autonomy is None
+    assert outcome.outbound_action is None
