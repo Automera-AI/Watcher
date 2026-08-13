@@ -101,6 +101,6 @@ def test_the_repo_still_cannot_prove_who_a_sender_is() -> None:
     assert hasattr(resolver, "decide"), "identity matching should still exist"
     assert resolver.__file__ is not None
     source = Path(resolver.__file__).read_text(encoding="utf-8").lower()
-    assert "identity_verified" not in source, (
-        "verification appears to have landed — retire this test and wire the gate to it"
-    )
+    assert (
+        "identity_verified" not in source
+    ), "verification appears to have landed — retire this test and wire the gate to it"

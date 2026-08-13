@@ -8,11 +8,12 @@ name back into the repo — the exact thing it exists to prevent. It happened on
 handoff document, in a sentence saying the name had been removed: writing "X is gone" puts X back.
 So the terms live here only as SHA-256 digests. The scanner hashes what it finds and compares.
 
-To add a term without ever committing it:
+To add a term without ever committing it, hash it in a throwaway shell — not in a file::
 
-    python3 -c "import hashlib,sys; print(hashlib.sha256(sys.argv[1].lower().encode()).hexdigest())" "the term"
+    python3 -c "import hashlib,sys; \\
+        print(hashlib.sha256(sys.argv[1].lower().encode()).hexdigest())" "the term"
 
-Then paste the digest into ``FORBIDDEN`` with a comment saying what *kind* of thing it is — never
+Then paste the digest into ``FORBIDDEN`` with a label saying what *kind* of thing it is — never
 what it is.
 """
 
@@ -25,10 +26,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 #: SHA-256 of lowercased terms that must not appear. Never store the plaintext.
+#: Labels say what kind of thing the term is, never what it is.
 FORBIDDEN: dict[str, str] = {
-    "8d8b9eea6077c5a34390a01c831e38930ff3bdfe208c62834138ddb4b1713fe1": "a real client's name",
-    "e066308dfb48afa4c98ee56a9b437b62b66c661149a728a271e87bae8b97ceca": "a real address (two words)",
-    "4f3fb37b1fbd45a2253bef575164de1709c8718cda2100330f946b7df66acabb": "a real address (one word)",
+    "8d8b9eea6077c5a34390a01c831e38930ff3bdfe208c62834138ddb4b1713fe1": "a client name",
+    "e066308dfb48afa4c98ee56a9b437b62b66c661149a728a271e87bae8b97ceca": "an address (2 words)",
+    "4f3fb37b1fbd45a2253bef575164de1709c8718cda2100330f946b7df66acabb": "an address (1 word)",
 }
 
 SCANNED_SUFFIXES = frozenset({".py", ".md", ".yaml", ".yml", ".json", ".jsonl", ".toml", ".txt"})
