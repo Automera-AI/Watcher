@@ -205,12 +205,18 @@ a fast-forward; the Python baseline is 3.12 not 3.10; and Graphify is not Graphi
 Branch `claude/roadmap-handoff-setup-1faxg7`. **221 passing, 0 xfailed** (was 101). Ruff clean,
 strict mypy clean on 92 files, eval gate still 87.5%.
 
-**0.2 — done.** `Northwind Residences` / `Riverside Quarter` / `Riverside Quarter` are gone from the golden set and the
-fixtures, replaced with invented placeholders in the same style as the fictional Acme Trading
-already there. Both files were rewritten together because the recorded predictor keys on message
-text. No scored field moved, so the baseline still holds. New test
-`test_every_golden_message_has_a_recorded_prediction` makes a one-sided edit fail a test rather
-than the runner. **Still open:** whether to rewrite git history — the old strings remain in it.
+**0.2 — done.** The client name, and the two London areas that identified it alongside the name,
+are gone from the golden set and the fixtures — replaced with invented placeholders in the same
+style as the fictional Acme Trading already there. Both files were rewritten together because the
+recorded predictor keys on message text. No scored field moved, so the baseline still holds. New
+test `test_every_golden_message_has_a_recorded_prediction` makes a one-sided edit fail a test
+rather than the runner.
+
+Note this document must not name the strings either, which it briefly did — writing "X is gone"
+puts X back. `test_no_client_name_in_the_repo` now covers the whole tree, docs included, so the
+same mistake fails a test instead of shipping.
+
+**Still open:** whether to rewrite git history. The old strings remain in four commits.
 
 **0.3 — done.** `packages/intents/`: 18 intents, 80 examples, 5 languages, 6 emergency triggers,
 2 client overrides, 37 tests. Adapted to the repo rather than dropped in — package-qualified
