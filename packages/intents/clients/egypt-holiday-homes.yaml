@@ -1,0 +1,23 @@
+# Example client: an Egyptian short-let operator, North Coast and Cairo.
+# WhatsApp only. Franco-Arabic is a first-class language here, not an edge case.
+
+client: egypt-operator-example
+market: EG
+currency: EGP
+timezone: Africa/Cairo
+channels: [whatsapp]
+languages: [ar-EG, ar-EG-latin, en]
+property_system: custom_sheet
+quote_prices: false
+
+# No phone line, so nothing spoken. Prices are seasonal and negotiated by a person here,
+# which is normal in this market, so price questions go to a human rather than being quoted.
+disabled_intents: []
+
+force_hand_off:
+  - price_enquiry
+
+# Egyptian bookings are often for a whole villa or chalet rather than a unit type,
+# and guests give a location rather than a building.
+slot_overrides:
+  booking_enquiry: [check_in, check_out, guests, area]

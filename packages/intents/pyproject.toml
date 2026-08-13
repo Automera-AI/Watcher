@@ -1,0 +1,28 @@
+# Watcher receptionist intent vocabulary (packages/intents) — roadmap item 0.3.
+#
+# The vocabulary is data, not code: `intents.yaml` plus a file per client, validated by
+# `schema.py` and compiled to JSON by `compile.py`. Like `packages/eval`, it is exercised from
+# the repo root (`python -m packages.intents.compile`) rather than installed standalone.
+#
+# PyYAML is a runtime dependency, not a build-only one. The intended fast path is the compiled
+# JSON via `schema.load_compiled`, and `schema` imports yaml lazily so that path never parses YAML
+# — but `build/` is gitignored, so any image without a compile step falls back to the YAML and
+# needs a parser present. Treating it as build-only made that fallback a ModuleNotFoundError.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "watcher-intents"
+version = "1.0.0"
+description = "Watcher receptionist intent vocabulary — holiday homes, Dubai and Egypt."
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.8,<3",
+    "pyyaml>=6,<7",
+]
+
+[tool.setuptools]
+# Run from the repo root alongside `apps`; not packaged for distribution.
+packages = []

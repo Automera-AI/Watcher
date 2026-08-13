@@ -59,10 +59,18 @@ SUBT = st("subt", fontSize=8, leading=10.5, keepWithNext=1)
 LEAD = st("lead", fontSize=9.6, leading=13.6, textColor=MUTED)
 
 
+DONE = colors.HexColor("#1e8449")
+
+
 def chip(text, palette):
     return Paragraph(
         f'<font color="{palette[text].hexval()}"><b>{text}</b></font>', CELL
     )
+
+
+def done(title):
+    """Mark a work item as shipped, under its title."""
+    return f'{title}<br/><font color="{DONE.hexval()}"><b>[DONE]</b></font>'
 
 
 def track_table(rows):
@@ -130,11 +138,11 @@ story.append(Paragraph("Where we stand today", H2))
 stand = Table([
     [Paragraph("<b>Built and tested</b>", CELL), Paragraph("<b>Missing</b>", CELL)],
     [Paragraph(
-        "86 passing tests, no DB or network needed<br/>"
-        "66 Python files, 10 modules<br/>"
+        "101 passing tests, no DB or network needed<br/>"
+        "79 Python files, 10 modules<br/>"
         "11 DB tables + migration<br/>"
         "Every external system behind a swappable seam<br/>"
-        "Eval runner + job queue (unmerged branch)", CELL),
+        "Eval runner + job queue, with a CI accuracy gate", CELL),
      Paragraph(
         "A reply path &mdash; it cannot talk back<br/>"
         "Memory across turns &mdash; each message judged alone<br/>"
@@ -174,7 +182,8 @@ story.append(leg)
 
 story.append(Spacer(1, 10))
 story.append(Paragraph(
-    "<b>Totals:</b> ~14.5 engineering days. At six days a week that is a demo in about two weeks "
+    "<b>Totals:</b> ~14 engineering days remaining (0.1 and 0.4 are done). At six days a week "
+    "that is a demo in about two weeks "
     "and a real client's guests on it in about three. Meta verification no longer sets the date "
     "&mdash; they allow starting unverified &mdash; so <b>engineering is the critical path</b>.", BODY))
 
@@ -184,7 +193,7 @@ story.extend(section(
     "Nothing here takes a full day, and three of the five unblock everything downstream. "
     "If only one thing happens today, make it 0.3.",
     [
-        ("0.1", "Set default branch to <font name='Courier'>main</font>",
+        ("0.1", done("Set default branch to <font name='Courier'>main</font>"),
          "NOW", "Trivial", "1 min",
          "Anyone cloning today lands on a feature branch. Harmless now, confusing the moment branches drift."),
         ("0.2", "Remove the client name from the golden set and fixtures",
@@ -193,7 +202,7 @@ story.extend(section(
         ("0.3", "Decide the receptionist intent vocabulary",
          "NOW", "Easy", "1 hr",
          "A founder call, not code. <b>Blocks four items</b> (1.2, 2.4, 2.5, and the golden set). Cheapest and most blocking thing on this page."),
-        ("0.4", "Merge the eval branch",
+        ("0.4", done("Merge the eval branch"),
          "NOW", "Trivial", "0.25",
          "Verified conflict-free and green: +15 tests, 86 to 101, all passing. Runner, five measures, reports, recorded fixtures, plus the job queue. A merge commit, not a fast-forward &mdash; main has moved since."),
         ("0.5", "Delete the stale <font name='Courier'>nifty-johnson</font> branch",
@@ -209,7 +218,7 @@ story.extend(section(
          "NOW", "Moderate", "1.5",
          "<font name='Courier'>wa_message_id</font> to <font name='Courier'>external_id</font>, "
          "<font name='Courier'>wa_chat_id</font> to <font name='Courier'>thread_id</font>, add a channel field. "
-         "A phone call has no chat id. Strict typing plus 86 tests point at every site, so this is a rename, not a rewrite."),
+         "A phone call has no chat id. Strict typing plus 101 tests point at every site, so this is a rename, not a rewrite."),
         ("1.2", "Port the four kept scaffold files",
          "HIGH", "Moderate", "1.0",
          "<b>Not a copy-paste.</b> They import the wrong package root, and the boundary test bans the word "

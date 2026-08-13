@@ -29,9 +29,12 @@ jobs:
           python -m pip install --upgrade pip
           # Lint/type/test tooling + runtime deps mypy & pytest need to resolve imports.
           # httpx is required by FastAPI's TestClient.
+          # types-PyYAML: PyYAML ships no inline types, and `ignore_missing_imports` does not
+          # cover import-untyped — the package resolves, it just has no stubs. Without this,
+          # strict mypy fails on packages/intents even though the import works fine.
           python -m pip install ruff==0.6.9 mypy==1.11.2 pytest==8.3.3 \
             pydantic==2.9.2 fastapi==0.115.0 httpx==0.27.2 rapidfuzz==3.10.1 \
-            sqlalchemy==2.0.50 alembic==1.13.3
+            sqlalchemy==2.0.50 alembic==1.13.3 pyyaml==6.0.2 types-PyYAML==6.0.12.20240917
 
       - name: Ruff lint
         run: ruff check .
