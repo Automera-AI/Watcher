@@ -4,8 +4,10 @@
 # `schema.py` and compiled to JSON by `compile.py`. Like `packages/eval`, it is exercised from
 # the repo root (`python -m packages.intents.compile`) rather than installed standalone.
 #
-# PyYAML is a *build* dependency, not a runtime one. The application loads the compiled JSON via
-# `schema.load_compiled`, and `schema` imports yaml lazily so the shipped image needs no parser.
+# PyYAML is a runtime dependency, not a build-only one. The intended fast path is the compiled
+# JSON via `schema.load_compiled`, and `schema` imports yaml lazily so that path never parses YAML
+# — but `build/` is gitignored, so any image without a compile step falls back to the YAML and
+# needs a parser present. Treating it as build-only made that fallback a ModuleNotFoundError.
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -18,10 +20,8 @@ description = "Watcher receptionist intent vocabulary — holiday homes, Dubai a
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.8,<3",
+    "pyyaml>=6,<7",
 ]
-
-[project.optional-dependencies]
-build = ["pyyaml>=6,<7"]
 
 [tool.setuptools]
 # Run from the repo root alongside `apps`; not packaged for distribution.

@@ -23,10 +23,14 @@ python -m packages.intents.compile   # the same checks, then writes the JSON. No
 python -m pytest packages/intents
 ```
 
-PyYAML is a **build** dependency, not a runtime one. `schema.py` imports `yaml` lazily inside the
-two functions that parse it, so an application loading `build/intents.json` through
-`load_compiled` never needs a YAML parser in the image. That is the pipeline below made literal
-rather than just described.
+`schema.py` imports `yaml` lazily, inside the two functions that parse it, so the compiled-JSON
+path never pays for a parser it does not use.
+
+PyYAML is still a **runtime** dependency, and calling it build-only was a bug worth recording.
+`build/` is gitignored, so an image built from the project dependencies has no compiled artifact,
+`default_vocabulary()` falls back to the YAML, and a missing parser turns the first `Task(...)` or
+`decide_autonomy(...)` into a `ModuleNotFoundError` rather than a slower load. The compiled JSON
+is a speed optimisation; it is not the only supported path unless a deploy step guarantees it.
 
 ---
 

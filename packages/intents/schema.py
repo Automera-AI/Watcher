@@ -20,8 +20,11 @@ What it catches that a human review will not:
     built from it would be empty
   * an emergency trigger that mixes alphabets, which is how a lookalike character gets in
 
-``yaml`` is imported lazily, inside the two functions that parse it. The application loads the
-compiled JSON (``load_compiled``) and must not need a YAML parser installed to do it.
+``yaml`` is imported lazily, inside the two functions that parse it, so the compiled-JSON path
+never pays for a parser it does not use. It is still a **runtime** dependency, not a build-only
+one: ``build/`` is gitignored, so any image without a compile step falls back to the YAML, and
+treating the parser as optional turns that fallback into a ``ModuleNotFoundError`` on the first
+turn rather than a slower load.
 """
 
 from __future__ import annotations

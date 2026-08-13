@@ -13,6 +13,10 @@ dependencies = [
     "rapidfuzz>=3.9,<4",
     "sqlalchemy>=2.0,<2.1",
     "alembic>=1.13,<2",
+    # Runtime, not build-only. The intent vocabulary prefers the compiled JSON, but `build/` is
+    # gitignored, so an image built from this file alone has no artifact and falls back to the
+    # YAML. Without this the fallback is a ModuleNotFoundError on the first turn.
+    "pyyaml>=6,<7",
 ]
 
 [tool.ruff]

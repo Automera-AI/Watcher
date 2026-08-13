@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from apps.api.channels import voice, whatsapp
 from apps.api.schemas.envelope import InboundTurn, OutboundAction
@@ -97,3 +98,46 @@ def test_a_template_action_still_validates_in_the_core() -> None:
     everywhere, so that one stays."""
     with pytest.raises(ValueError, match="template_name"):
         OutboundAction(kind="send_template", text="hi")
+
+
+# ── the boundary actually validates (PR #12 review) ───────────────────────────
+
+
+def test_a_typo_in_the_channel_is_rejected() -> None:
+    """These were frozen dataclasses, ported straight from the scaffold. A ``Literal`` on a
+    dataclass is a hint to the type checker and nothing whatsoever at runtime, so an adapter
+    could normalise a webhook into ``channel="whatsap"`` and everything downstream would trust
+    it. This is the provider boundary; it is the one place that must validate."""
+    with pytest.raises(ValidationError):
+        InboundTurn(
+            tenant_id=uuid4(),
+            channel="whatsap",
+            channel_thread_id="x",
+            channel_identity="+971500000000",
+            modality="text",
+            text="hi",
+            received_at=datetime.now(UTC),
+            idempotency_key="k",
+        )
+
+
+def test_a_tenant_id_that_is_not_a_uuid_is_rejected() -> None:
+    """Multi-tenancy is non-negotiable (AGENTS.md), so an unvalidated tenant id is the worst of
+    the fields that used to pass unchecked."""
+    with pytest.raises(ValidationError):
+        InboundTurn(
+            tenant_id="not-a-uuid",
+            channel="whatsapp",
+            channel_thread_id="x",
+            channel_identity="+971500000000",
+            modality="text",
+            text="hi",
+            received_at=datetime.now(UTC),
+            idempotency_key="k",
+        )
+
+
+def test_an_unmodelled_field_is_rejected_rather_than_dropped() -> None:
+    """Silently dropping it is how a channel-specific detail leaks into the core unnoticed."""
+    with pytest.raises(ValidationError):
+        OutboundAction(kind="say", text="hi", channel_specific_thing=1)  # type: ignore[call-arg]

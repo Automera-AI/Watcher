@@ -10,6 +10,7 @@ These tests are what stops that reaching a guest.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -314,3 +315,34 @@ def test_compiled_json_matches_the_yaml() -> None:
     from_yaml = schema.load(BASE)
     from_json = schema.load_compiled(HERE / "build" / "intents.json")
     assert from_json.model_dump() == from_yaml.model_dump()
+
+
+def test_the_runtime_can_load_the_vocabulary_without_a_compiled_artifact() -> None:
+    """``build/`` is gitignored, so a deployed image may have no compiled JSON and will fall back
+    to the YAML. PyYAML was declared build-only, which made that fallback a ModuleNotFoundError
+    on the first turn rather than a slower load. It is a runtime dependency (PR #12 review)."""
+    import tomllib
+
+    for pyproject in (REPO_ROOT / "pyproject.toml", HERE / "pyproject.toml"):
+        deps = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["dependencies"]
+        assert any(d.lower().startswith("pyyaml") for d in deps), (
+            f"{pyproject.name} does not require pyyaml at runtime, so default_vocabulary()'s "
+            "fallback to intents.yaml would fail in an image built from these dependencies"
+        )
+
+
+def test_a_stale_compiled_artifact_is_ignored() -> None:
+    """Editing the YAML must take effect without remembering to recompile, or you debug against
+    data you are no longer looking at."""
+    build = HERE / "build" / "intents.json"
+    if not build.exists():
+        pytest.skip("nothing compiled yet")
+    schema._cached = None
+    stale = BASE.stat().st_mtime + 60
+    original = (build.stat().st_atime, build.stat().st_mtime)
+    try:
+        os.utime(build, (original[0], stale - 120))  # older than the YAML
+        assert schema.default_vocabulary().version
+    finally:
+        os.utime(build, original)
+        schema._cached = None
