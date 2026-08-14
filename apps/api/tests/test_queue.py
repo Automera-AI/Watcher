@@ -29,7 +29,7 @@ TENANT = "tenant-1"
 
 def _result_json(confidence: float) -> dict[str, Any]:
     return {
-        "intent": "new_lead",
+        "intent": "availability_check",
         "summary_one_line": "summary",
         "language": "en",
         "person_name": "Sara",

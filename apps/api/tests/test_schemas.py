@@ -22,7 +22,7 @@ from apps.api.schemas import (
 
 def _valid_result_kwargs() -> dict[str, object]:
     return {
-        "intent": "new_lead",
+        "intent": "availability_check",
         "summary_one_line": "Prospect asking about pricing",
         "language": Language.EN,
         "confidence_overall": 0.91,

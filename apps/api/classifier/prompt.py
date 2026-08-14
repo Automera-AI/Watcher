@@ -14,15 +14,18 @@ from apps.api.schemas.classification import ClassificationResult
 from apps.api.schemas.enums import MessageType
 
 # Bump on any prompt-text or output-schema change (§8).
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
 
 # JSON Schema of the required structured output; providers bind this as the tool/response schema.
 CLASSIFICATION_TOOL_SCHEMA: dict[str, Any] = ClassificationResult.model_json_schema()
 
 SYSTEM_PROMPT = (
-    "You classify inbound business messages for a CRM. Read the conversation history and "
-    "the latest message, then return ONLY the structured fields. Messages may be Arabic, English, "
-    "or mixed. Report calibrated confidences in [0,1]; lower them when a message is noisy."
+    "You classify inbound guest messages for a holiday-home property management system. "
+    "Read the conversation history and the latest message, then return ONLY the structured "
+    "fields. Messages may be Arabic, English, or mixed. The intent taxonomy covers "
+    "availability, pricing, bookings, property questions, reservations, check-in/checkout, "
+    "maintenance, billing, complaints, and more — pick the most specific match. "
+    "Report calibrated confidences in [0,1]; lower them when a message is ambiguous or noisy."
 )
 
 # Non-text messages arrive as transcribed/OCR'd text (§6); tell the model so it calibrates.

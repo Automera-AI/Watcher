@@ -7,7 +7,6 @@ from typing import Any
 
 from apps.api.audit.log import AuditEntry
 from apps.api.classifier.service import Classifier
-from apps.api.classifier.types import ClassificationOutcome
 from apps.api.conversations.receptionist import handle as receptionist_handle
 from apps.api.identity.models import CrmRecord
 from apps.api.identity.resolver import IncomingContact
@@ -30,7 +29,7 @@ MSG_ID = "msg-1"
 
 def _result_json(confidence: float) -> dict[str, Any]:
     return {
-        "intent": "new_lead",
+        "intent": "availability_check",
         "summary_one_line": "summary",
         "language": "en",
         "person_name": "Sara",
@@ -242,58 +241,18 @@ def test_incoming_contact_built_from_classification() -> None:
     assert captured[0].phone_e164 == "+966500000000"
 
 
-class _VocabResult:
-    """A classification result whose intent is a vocabulary name (not an IntentType enum)."""
-
-    def __init__(self, intent: str, confidence: float) -> None:
-        self.intent = intent
-        self.summary_one_line = "summary"
-        self.language = "en"
-        self.person_name = "Sara"
-        self.company_name = "Acme"
-        self.confidence_overall = confidence
-        self.confidence_intent = confidence
-        self.confidence_person = confidence
-        self.confidence_company = confidence
-
-    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
-        return {
-            "intent": self.intent,
-            "summary_one_line": self.summary_one_line,
-            "language": self.language,
-            "person_name": self.person_name,
-            "company_name": self.company_name,
-            "confidence_overall": self.confidence_overall,
-            "confidence_intent": self.confidence_intent,
-            "confidence_person": self.confidence_person,
-            "confidence_company": self.confidence_company,
-        }
-
-
-class _FixedClassifier:
-    """A classifier that returns a fixed outcome without calling any LLM provider."""
-
-    def __init__(self, result: _VocabResult) -> None:
-        self._result = result
-
-    def classify(self, value: Any) -> ClassificationOutcome:
-        return ClassificationOutcome(
-            result=self._result,  # type: ignore[arg-type]
-            model_used="test",
-            escalated=False,
-            attempts=1,
-        )
-
-
 def _orchestrator_with_receptionist(
     intent: str,
     confidence: float,
 ) -> tuple[Orchestrator, _FakeAudit, _FakeInbox]:
-    classifier = _FixedClassifier(_VocabResult(intent, confidence))
+    classifier = Classifier(
+        _ScriptedProvider("cheap", [_result_json_intent(intent, confidence)]),
+        _ScriptedProvider("big", [_result_json_intent(intent, confidence)]),
+    )
     audit = _FakeAudit()
     inbox = _FakeInbox()
     orch = Orchestrator(
-        classifier,  # type: ignore[arg-type]
+        classifier,
         audit,
         inbox,
         rules_provider=lambda _t: [],
@@ -301,6 +260,20 @@ def _orchestrator_with_receptionist(
         receptionist=receptionist_handle,
     )
     return orch, audit, inbox
+
+
+def _result_json_intent(intent: str, confidence: float) -> dict[str, Any]:
+    return {
+        "intent": intent,
+        "summary_one_line": "summary",
+        "language": "en",
+        "person_name": "Sara",
+        "company_name": "Acme",
+        "confidence_overall": confidence,
+        "confidence_intent": confidence,
+        "confidence_person": confidence,
+        "confidence_company": confidence,
+    }
 
 
 def test_acting_intent_returns_receptionist_reply() -> None:
