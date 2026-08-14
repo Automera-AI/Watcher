@@ -16,7 +16,7 @@ from apps.api.schemas.enums import MessageType, SourceKind
 from apps.api.schemas.message import MessageEnvelope
 
 
-def _result_json(confidence: float, intent: str = "new_lead") -> dict[str, Any]:
+def _result_json(confidence: float, intent: str = "availability_check") -> dict[str, Any]:
     return {
         "intent": intent,
         "summary_one_line": "summary",
@@ -57,13 +57,13 @@ def test_high_confidence_first_pass_does_not_escalate() -> None:
 
 
 def test_low_confidence_escalates_and_takes_larger_model_result() -> None:
-    first = ScriptedProvider("cheap", [_result_json(0.50, intent="existing_contact_reply")])
-    escalation = ScriptedProvider("big", [_result_json(0.97, intent="new_lead")])
+    first = ScriptedProvider("cheap", [_result_json(0.50, intent="maintenance_issue")])
+    escalation = ScriptedProvider("big", [_result_json(0.97, intent="availability_check")])
     outcome = Classifier(first, escalation).classify(_INPUT)
 
     assert outcome.escalated is True
     assert outcome.model_used == "big"
-    assert outcome.result is not None and outcome.result.intent == "new_lead"
+    assert outcome.result is not None and outcome.result.intent == "availability_check"
     assert escalation.calls == 1
 
 

@@ -19,7 +19,7 @@ from apps.api.schemas.classification import Classification
 
 def _classification() -> Classification:
     return Classification(
-        intent="new_lead",
+        intent="availability_check",
         summary_one_line="Prospect asking about pricing",
         language="en",
         person_name="Sara",

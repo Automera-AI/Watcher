@@ -32,13 +32,30 @@ class MessageDirection(StrEnum):
 
 
 class IntentType(StrEnum):
-    """Why an inbound message exists — locked taxonomy (DECISIONS.md / role guide §1.1)."""
+    """Unified intent taxonomy — aligned with the receptionist vocabulary (intents.yaml).
 
-    NEW_LEAD = "new_lead"
-    EXISTING_CONTACT_REPLY = "existing_contact_reply"
-    SUPPORT_ISSUE = "support_issue"
-    INTERNAL_TEAM = "internal_team"
-    SPAM_OR_NOISE = "spam_or_noise"
+    The classifier and the receptionist now share one taxonomy so decide_autonomy()
+    recognises classified intents and the receptionist fires on real messages.
+    """
+
+    AVAILABILITY_CHECK = "availability_check"
+    PRICE_ENQUIRY = "price_enquiry"
+    BOOKING_ENQUIRY = "booking_enquiry"
+    PROPERTY_QUESTION = "property_question"
+    MODIFY_RESERVATION = "modify_reservation"
+    CANCEL_RESERVATION = "cancel_reservation"
+    CHECK_IN_SUPPORT = "check_in_support"
+    ACCESS_CODE_REQUEST = "access_code_request"
+    DIRECTIONS = "directions"
+    MAINTENANCE_ISSUE = "maintenance_issue"
+    EXTEND_STAY = "extend_stay"
+    CHECKOUT_QUESTION = "checkout_question"
+    BILLING_QUESTION = "billing_question"
+    PAYMENT_QUESTION = "payment_question"
+    OWNER_ENQUIRY = "owner_enquiry"
+    COMPLAINT = "complaint"
+    GENERAL_INFO = "general_info"
+    SPAM = "spam"
     UNCLEAR = "unclear"
 
 
