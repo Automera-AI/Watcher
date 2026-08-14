@@ -82,7 +82,12 @@ def test_openapi_exposes_vendor_neutral_contract() -> None:
     assert "AvailabilityQuery" in schema["components"]["schemas"]
     assert schema["info"]["version"] == "1.0.0"
     security = schema["components"]["securitySchemes"]["PropertySystemApiKey"]
-    assert security == {"type": "apiKey", "in": "header", "name": "X-API-Key"}
+    assert security == {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "Tenant-scoped Watcher integration credential.",
+    }
     availability = schema["paths"]["/v1/property-system/availability/check"]["post"]
     assert availability["operationId"] == "checkPropertyAvailability"
     assert availability["security"] == [{"PropertySystemApiKey": []}]
