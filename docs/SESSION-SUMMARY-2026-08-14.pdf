@@ -1,0 +1,242 @@
+%PDF-1.4
+%
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>
+endobj
+5 0 obj
+<< /Length 3415 >>
+stream
+BT
+/F1 10 Tf
+50 790 Td
+/F1 14 Tf
+(Watcher session summary) Tj
+0 -16 Td
+/F1 10 Tf
+() Tj
+0 -13 Td
+/F1 10 Tf
+(Date: 14 August 2026) Tj
+0 -13 Td
+/F1 10 Tf
+(Branch: fix/property-system-review) Tj
+0 -13 Td
+/F1 10 Tf
+(Base commit: e69dcba \(merge of PR #13\)) Tj
+0 -13 Td
+/F1 10 Tf
+() Tj
+0 -13 Td
+/F1 14 Tf
+(Objective) Tj
+0 -16 Td
+/F1 10 Tf
+() Tj
+0 -13 Td
+/F1 10 Tf
+(Create a channel-neutral and vendor-neutral property-system integration boundary, exposed as) Tj
+0 -13 Td
+/F1 10 Tf
+(  an) Tj
+0 -13 Td
+/F1 10 Tf
+(OpenAPI HTTP contract implemented and maintained with FastAPI and canonical Pydantic v2) Tj
+0 -13 Td
+/F1 10 Tf
+(  schemas.) Tj
+0 -13 Td
+/F1 10 Tf
+() Tj
+0 -13 Td
+/F1 14 Tf
+(Delivered) Tj
+0 -16 Td
+/F1 10 Tf
+() Tj
+0 -13 Td
+/F1 10 Tf
+(- Added PropertySystemPort for property facts, live availability, and reservation reads.) Tj
+0 -13 Td
+/F1 10 Tf
+(- Added Pydantic v2 schemas for facts, availability, prices, reservations, and API principals.) Tj
+0 -13 Td
+/F1 10 Tf
+(- Added versioned FastAPI routes under /v1/property-system.) Tj
+0 -13 Td
+/F1 10 Tf
+(- Published OpenAPI 3 at /openapi.json, Swagger UI at /docs, and ReDoc at /redoc.) Tj
+0 -13 Td
+/F1 10 Tf
+(- Added stable operation IDs for generated clients: getPropertyFacts,) Tj
+0 -13 Td
+/F1 10 Tf
+(checkPropertyAvailability, and getReservation.) Tj
+0 -13 Td
+/F1 10 Tf
+(- Published the PropertySystemApiKey OpenAPI security scheme using X-API-Key.) Tj
+0 -13 Td
+/F1 10 Tf
+(- Enforced server-side tenant resolution and server-resolved identity verification.) Tj
+0 -13 Td
+/F1 10 Tf
+(- Mapped authentication, authorization, missing-data, and upstream failures to) Tj
+0 -13 Td
+/F1 10 Tf
+(401, 403, 404, and 503 responses.) Tj
+0 -13 Td
+/F1 10 Tf
+(- Added tests for OpenAPI metadata, tenant isolation, live availability, failure behavior,) Tj
+0 -13 Td
+/F1 10 Tf
+(identity gating, schema validation, and application configuration.) Tj
+0 -13 Td
+/F1 10 Tf
+(- Added the delivery specification at docs/specs/open-property-system-api.md.) Tj
+0 -13 Td
+/F1 10 Tf
+() Tj
+0 -13 Td
+/F1 14 Tf
+(Architecture) Tj
+0 -16 Td
+/F1 10 Tf
+() Tj
+0 -13 Td
+/F1 10 Tf
+(External platforms integrate through the OpenAPI 3 HTTP contract. FastAPI is the maintained) Tj
+0 -13 Td
+/F1 10 Tf
+(  Python) Tj
+0 -13 Td
+/F1 10 Tf
+(implementation. Pydantic v2 models remain the schema source of truth. FastAPI delegates) Tj
+0 -13 Td
+/F1 10 Tf
+(  domain reads) Tj
+0 -13 Td
+/F1 10 Tf
+(through PropertySystemPort, keeping channel and property-vendor SDKs outside the core.) Tj
+0 -13 Td
+/F1 10 Tf
+() Tj
+0 -13 Td
+/F1 14 Tf
+(Commits) Tj
+0 -16 Td
+/F1 10 Tf
+() Tj
+0 -13 Td
+/F1 10 Tf
+(- 5654ff4 ? Add the vendor-neutral property-system port, schemas, router, tests, and) Tj
+0 -13 Td
+/F1 10 Tf
+(  specification.) Tj
+0 -13 Td
+/F1 10 Tf
+(- 6bb106d ? Harden tenant and identity authorization and validate configuration/date) Tj
+0 -13 Td
+/F1 10 Tf
+(  invariants.) Tj
+0 -13 Td
+/F1 10 Tf
+(- 88456ac ? Publish the versioned FastAPI/OpenAPI contract, security metadata, documentation) Tj
+0 -13 Td
+/F1 10 Tf
+(  UIs,) Tj
+0 -13 Td
+/F1 10 Tf
+(stable operation IDs, and documented responses.) Tj
+0 -13 Td
+/F1 10 Tf
+() Tj
+0 -13 Td
+/F1 14 Tf
+(Verification) Tj
+0 -16 Td
+/F1 10 Tf
+() Tj
+0 -13 Td
+/F1 10 Tf
+(- Ruff lint and targeted formatting passed.) Tj
+0 -13 Td
+/F1 10 Tf
+(- Strict mypy checks passed for the new and modified modules.) Tj
+0 -13 Td
+/F1 10 Tf
+(- Focused domain, intent, and eval tests passed: 86 tests.) Tj
+0 -13 Td
+ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>
+endobj
+7 0 obj
+<< /Length 823 >>
+stream
+BT
+/F1 10 Tf
+50 790 Td
+/F1 10 Tf
+(- Recorded classifier eval gate passed at the existing 87.5% baseline.) Tj
+0 -13 Td
+/F1 10 Tf
+(- Programmatic OpenAPI generation produced OpenAPI 3.1.0 with five paths and verified the API-) Tj
+0 -13 Td
+/F1 10 Tf
+(  key) Tj
+0 -13 Td
+/F1 10 Tf
+(security scheme and stable operation IDs.) Tj
+0 -13 Td
+/F1 10 Tf
+() Tj
+0 -13 Td
+/F1 14 Tf
+(Repository state) Tj
+0 -16 Td
+/F1 10 Tf
+() Tj
+0 -13 Td
+/F1 10 Tf
+(The work is committed locally on fix/property-system-review. The working tree was clean when) Tj
+0 -13 Td
+/F1 10 Tf
+(  this) Tj
+0 -13 Td
+/F1 10 Tf
+(summary was generated. Earlier push attempts were blocked by the environment's GitHub HTTPS) Tj
+0 -13 Td
+/F1 10 Tf
+(  tunnel,) Tj
+0 -13 Td
+/F1 10 Tf
+(so the branch may still need to be pushed before opening the pull request.) Tj
+0 -13 Td
+ET
+endstream
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000127 00000 n 
+0000000197 00000 n 
+0000000323 00000 n 
+0000003790 00000 n 
+0000003916 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+4790
+%%EOF
