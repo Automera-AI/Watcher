@@ -3,9 +3,9 @@
 **Status:** Planning artifact. Sequences every track/point from the architecture review into a
 build order with owners, dependencies, and a Day‑0 board. Updated 2026‑06‑10.
 
-**Where we are:** ~30% of the MVP is built — clean, tested domain logic (10 backend modules, 68 tests)
-with every external dependency behind a swappable port. What's missing is the orchestrator, the concrete
-adapters (LLM providers, pywa, gspread, httpx), the eval tool, most of the DB, and the entire frontend.
+**Where we are:** ~45% of the MVP is built — 248 backend tests green, full conversation layer ported,
+receptionist reply path wired as fourth orchestrator outcome. What's missing is the concrete adapters
+(LLM providers, pywa, gspread, httpx), intent taxonomy unification, REST API, and the entire frontend.
 
 **The one thing that gates the calendar:** Meta WABA verification is 1–4 weeks of *waiting*. It does not
 block engineering (use the dev test number), but it blocks the first real pilot. **Start it on Day 0.**
@@ -168,14 +168,13 @@ Each numbered item is one PR‑sized slice. Items map 1:1 to the review's Tracks
 
 ---
 
-## 7. Progress log — RESUME HERE (updated 2026‑06‑15)
+## 7. Progress log — RESUME HERE (updated 2026‑08‑14)
 
-> A fresh session has no chat memory; this section + `DECISIONS.md` + `AGENTS.md` are the handoff.
+> A fresh session has no chat memory; this section + `DECISIONS.md` + `AGENTS.md` + `docs/HANDOFF.md` are the handoff.
 
-**Repo state:** Unmerged work in flight: the **orchestration worker** (PR #9,
-`claude/confident-albattani-1Ybz6`) and the **eval runner + queue/worker wiring** on
-`claude/dazzling-gates-iepkxa` (builds on #9). **101 backend tests green**; `ruff` + `ruff format` +
-`mypy --strict` all clean.
+**Repo state:** PR [#13](https://github.com/amahmoudosman96-lgtm/Watcher/pull/13) on
+`claude/file-review-planning-dcyb2g` — 5 commits (Items 1.1, 1.3, 2.1, 2.2, 2.3). **248 backend
+tests green**; `ruff` + `ruff format` + `mypy --strict` all clean.
 
 **Done (all behind ports, fully unit‑tested):**
 - Schemas · ingestion/webhook · classifier tiering (slices 1–3) — *merged*
@@ -184,23 +183,32 @@ Each numbered item is one PR‑sized slice. Items map 1:1 to the review's Tracks
 - Media pipeline — *merged*
 - Lane‑A decisions applied: taxonomy enums, band 0.5, `core/policy.py::TenantPolicy` — *merged*
 - Eval golden‑set seed (8 examples) + frontend design tokens — *merged*
-- **Orchestration worker** (`apps/api/orchestration/`) — end‑to‑end routing keystone — *in PR #9*
-- **Eval runner** (`packages/eval`) — 5 metrics + recorded‑fixture CI gate (baseline **0.875**) — *on this branch*
-- **Queue/worker wiring** (`apps/api/orchestration/queue.py`) — BackgroundTasks consumer reloads the
-  persisted row → orchestrator; ingestion→orchestration tested end‑to‑end — *on this branch*
+- **Orchestration worker** (`apps/api/orchestration/`) — end‑to‑end routing keystone — *merged*
+- **Eval runner** (`packages/eval`) — 5 metrics + recorded‑fixture CI gate (baseline **0.875**) — *merged*
+- **Queue/worker wiring** (`apps/api/orchestration/queue.py`) — BackgroundTasks consumer — *merged*
+- **De‑WhatsApp the core** (Item 1.1) — channel‑neutral renames, `KNOWN_LEAKS = {}`, Alembic 002 — *in PR #13*
+- **Python 3.13** (Item 1.3) — 7 version pins bumped — *in PR #13*
+- **Conversation layer** (Item 2.1) — 7 new tables (Alembic 003), ORM models, `ConversationRepository` — *in PR #13*
+- **Receptionist reply path** (Item 2.2) — tool registry, `receptionist.py`, `ChannelSender` protocol — *in PR #13*
+- **Autonomy gate wiring** (Item 2.3) — `RECEPTIONIST_REPLY` fourth outcome, `decide_autonomy()` before rules — *in PR #13*
 
-**Next up (Sprint‑1 finish → Phase‑1 "done‑when"):**
-1. **Concrete LLM providers** (Anthropic/OpenAI) against the `LLMProvider` seam — *needs API keys*.
-   Then a live `Predictor` (wrapping `Classifier`) plugs into the eval `run_eval` for nightly drift.
-2. **Grow golden set 8 → 50** (10/intent, EN/AR/mixed) and re‑record fixtures → lock the real
-   **baseline accuracy number** (current 0.875 is the 8‑example seed).
-3. **DB‑backed `MessageLoader`** for `orchestration/queue.py` (load row + assemble history §7) +
-   wire `BackgroundTasksQueue` into the webhook route (per‑request `BackgroundTasks`).
-   Then Sprint 2: REST API + Inbox view.
+**Known design gap:** `IntentType` (classification enum) and vocabulary intents (receptionist taxonomy)
+are separate. The autonomy gate returns `hand_off` for any intent not in the vocabulary, so the
+receptionist path only fires when the classifier produces a vocabulary‑recognized intent. Unifying
+the two taxonomies is prerequisite to the receptionist handling real traffic.
+
+**Next up:**
+1. **Intent taxonomy unification** — merge `IntentType` with vocabulary intents so `decide_autonomy()`
+   recognises classified intents and the receptionist fires on real messages.
+2. **Concrete LLM providers** (Anthropic/OpenAI) against the `LLMProvider` seam — *needs API keys*.
+3. **Grow golden set 8 → 50** (10/intent, EN/AR/mixed) → lock the real baseline accuracy number.
+4. **DB‑backed `MessageLoader`** for `orchestration/queue.py` + wire into webhook route.
+5. **Real `ChannelSender`** for WhatsApp (Meta Cloud API outbound).
+6. **REST API** for control page + Inbox view.
 
 **Build‑loop working agreement (match this style):** Python‑only backend; each slice = ports + Pydantic v2,
 fully unit‑tested; `ruff` + `ruff format` + `mypy --strict` + `pytest` all green before commit; line‑length
 100; one slice per commit; open a PR when asked; CI installs deps explicitly in `ci.yml`.
 
 **External / founder carry‑over:** start Meta WABA verification (longest pole), Anthropic + OpenAI keys,
-Render Postgres URL, confirm ≥1 pilot LOI, delete the stale `nifty-johnson` branch via the GitHub UI.
+Render Postgres URL, confirm ≥1 pilot LOI.
