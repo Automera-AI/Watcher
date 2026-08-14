@@ -22,11 +22,19 @@ class HistoryTurn:
 
 @dataclass(frozen=True, slots=True)
 class ClassificationInput:
-    """What the model needs to classify one message: its text, modality, and recent history."""
+    """What the model needs to classify one message: text, modality, history, and who sent it.
+
+    The sender fields come from the channel rather than the message body. ``ClassificationResult``
+    scores ``person_name`` and ``phone_e164``, and the golden set expects both to match the
+    sender — which was unanswerable while the model was shown only the text. They are optional
+    because a group thread or a withheld number legitimately has neither.
+    """
 
     text: str
     modality: MessageType
     history: tuple[HistoryTurn, ...] = field(default_factory=tuple)
+    sender_display_name: str | None = None
+    sender_phone: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,4 +71,6 @@ def input_from(
         text=message.classifiable_text or "",
         modality=message.type,
         history=turns,
+        sender_display_name=message.sender_display_name,
+        sender_phone=message.sender_phone_e164,
     )

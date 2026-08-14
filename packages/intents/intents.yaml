@@ -361,8 +361,8 @@ intents:
   - name: maintenance_issue
     means: >
       Something in the property is not working. Raise a ticket and tell someone. Note that the
-      emergency triggers at the top of this file are checked first, so a gas smell or a flood
-      never reaches this intent.
+      emergency triggers are checked before any intent is chosen, so a gas smell or a flood
+      never reaches this one.
     required_slots: [issue_description]
     optional_slots: [unit, reservation_ref, urgency]
     terminal_tool: create_ticket
