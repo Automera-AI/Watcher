@@ -15,8 +15,8 @@ from apps.api.schemas.message import MessageEnvelope
 class MessageRepository(Protocol):
     """Durable storage for raw inbound messages, scoped to a tenant."""
 
-    def exists(self, tenant_id: str, wa_message_id: str) -> bool:
-        """True if this message was already stored (idempotency on ``wa_message_id``, §5)."""
+    def exists(self, tenant_id: str, external_id: str) -> bool:
+        """True if this message was already stored (idempotency on ``external_id``, §5)."""
         ...
 
     def save(self, tenant_id: str, message: MessageEnvelope) -> None:
@@ -27,6 +27,6 @@ class MessageRepository(Protocol):
 class ClassificationQueue(Protocol):
     """Hand a stored message off for asynchronous classification."""
 
-    def enqueue(self, tenant_id: str, wa_message_id: str) -> None:
+    def enqueue(self, tenant_id: str, external_id: str) -> None:
         """Enqueue by id only; the worker reloads the persisted row (§5)."""
         ...

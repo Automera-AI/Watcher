@@ -27,10 +27,13 @@ most restrictive one. So the cap moved to `channels/whatsapp.py`, where it is tr
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+if TYPE_CHECKING:
+    from apps.api.schemas.message import MessageEnvelope
 
 Channel = Literal["whatsapp", "voice", "web", "email", "instagram"]
 Modality = Literal["text", "audio", "keypad", "button"]
@@ -95,3 +98,28 @@ class OutboundAction(BaseModel):
         if self.kind == "send_template" and not self.template_name:
             raise ValueError("send_template needs template_name")
         return self
+
+
+_MODALITY_MAP: dict[str, Modality] = {
+    "text": "text",
+    "audio": "audio",
+    "image": "text",
+    "document": "text",
+    "other": "text",
+}
+
+
+def to_inbound_turn(tenant_id: UUID, message: MessageEnvelope) -> InboundTurn:
+    """Convert a ``MessageEnvelope`` into an ``InboundTurn`` for the receptionist path."""
+    modality: Modality = _MODALITY_MAP.get(message.type.value, "text")
+    return InboundTurn(
+        tenant_id=tenant_id,
+        channel=message.channel,
+        channel_thread_id=message.thread_id,
+        channel_identity=message.sender_phone_e164,
+        modality=modality,
+        text=message.classifiable_text,
+        received_at=message.received_at,
+        idempotency_key=message.external_id,
+        raw=message.raw_payload,
+    )

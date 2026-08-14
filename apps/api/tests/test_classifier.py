@@ -100,8 +100,8 @@ def test_failed_escalation_falls_back_to_first_pass_result() -> None:
 def test_input_from_message_builds_history_oldest_first() -> None:
     def msg(text: str) -> MessageEnvelope:
         return MessageEnvelope(
-            wa_message_id=f"wamid.{text}",
-            wa_chat_id="966500000000",
+            external_id=f"wamid.{text}",
+            thread_id="966500000000",
             source_kind=SourceKind.DIRECT,
             sender_phone_e164="+966500000000",
             type=MessageType.TEXT,

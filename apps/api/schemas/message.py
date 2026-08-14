@@ -1,4 +1,4 @@
-"""Inbound message envelope — the normalized form of a Meta webhook payload (addendum §4, §5)."""
+"""Inbound message envelope — the normalized form of a channel webhook payload (addendum §4, §5)."""
 
 from __future__ import annotations
 
@@ -12,27 +12,28 @@ from apps.api.schemas.enums import MessageDirection, MessageType, SourceKind
 
 
 class MessageEnvelope(BaseModel):
-    """A single WhatsApp message, normalized from the raw Meta payload before classification.
+    """A single inbound message, normalized from the raw channel payload before classification.
 
     Persisted to ``messages`` *before* enqueuing so a worker crash never loses a message
-    (at-least-once + idempotency on ``wa_message_id`` ≈ exactly once — addendum §5).
+    (at-least-once + idempotency on ``external_id`` ≈ exactly once — addendum §5).
     """
 
-    # The raw Meta payload carries many fields we don't model; ignore extras rather than reject.
+    # The raw payload carries many fields we don't model; ignore extras rather than reject.
     model_config = ConfigDict(extra="ignore")
 
-    wa_message_id: str = Field(
-        description="Meta's message id; unique per tenant (idempotency key, §5)."
+    external_id: str = Field(
+        description="Channel message id; unique per tenant (idempotency key, §5)."
     )
-    wa_chat_id: str = Field(description="Conversation id used to assemble history (addendum §7).")
+    thread_id: str = Field(description="Conversation id used to assemble history (addendum §7).")
     source_kind: SourceKind
     sender_phone_e164: PhoneE164
-    sender_wa_name: str | None = None
+    sender_display_name: str | None = None
+    channel: str = Field(default="whatsapp", description="Originating channel identifier.")
     direction: MessageDirection = MessageDirection.INBOUND
     type: MessageType
     body_text: str | None = Field(default=None, description="Text content for text messages.")
     media_id: str | None = Field(
-        default=None, description="Meta media id for audio/image/document (§6)."
+        default=None, description="Channel media id for audio/image/document (§6)."
     )
     media_mime: str | None = None
     transcript_text: str | None = Field(
@@ -41,7 +42,7 @@ class MessageEnvelope(BaseModel):
     )
     received_at: datetime
     raw_payload: dict[str, Any] = Field(
-        default_factory=dict, description="Original Meta envelope (jsonb)."
+        default_factory=dict, description="Original channel envelope (jsonb)."
     )
 
     @property

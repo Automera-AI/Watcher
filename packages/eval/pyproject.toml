@@ -13,7 +13,7 @@ build-backend = "setuptools.build_meta"
 name = "watcher-eval"
 version = "0.0.0"
 description = "Watcher classifier eval harness — golden set, metrics, and the CI accuracy gate."
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
     "pydantic>=2.8,<3",
 ]

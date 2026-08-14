@@ -41,7 +41,7 @@ class LoadedMessage:
 class MessageLoader(Protocol):
     """Reloads a persisted message (and its history) by the ingest key. ``None`` if it's gone."""
 
-    def load(self, tenant_id: str, wa_message_id: str) -> LoadedMessage | None: ...
+    def load(self, tenant_id: str, external_id: str) -> LoadedMessage | None: ...
 
 
 class MessageConsumer:
@@ -58,13 +58,12 @@ class MessageConsumer:
         self._orchestrator = orchestrator
         self._logger = logger
 
-    def consume(self, tenant_id: str, wa_message_id: str) -> ProcessOutcome | None:
+    def consume(self, tenant_id: str, external_id: str) -> ProcessOutcome | None:
         """Process one enqueued message; returns ``None`` (and logs) if the row is missing."""
-        loaded = self._loader.load(tenant_id, wa_message_id)
+        loaded = self._loader.load(tenant_id, external_id)
         if loaded is None:
-            # Enqueued but not loadable — a bug or a lost write; never silently drop it.
             self._logger.warning(
-                "enqueued message not found: tenant=%s wa_message_id=%s", tenant_id, wa_message_id
+                "enqueued message not found: tenant=%s external_id=%s", tenant_id, external_id
             )
             return None
         return self._orchestrator.process(
@@ -79,9 +78,8 @@ class BackgroundTasksQueue:
         self._consumer = consumer
         self._background_tasks = background_tasks
 
-    def enqueue(self, tenant_id: str, wa_message_id: str) -> None:
-        # Runs after the 200 is sent, so Meta isn't kept waiting on the LLM (§5).
-        self._background_tasks.add_task(self._consumer.consume, tenant_id, wa_message_id)
+    def enqueue(self, tenant_id: str, external_id: str) -> None:
+        self._background_tasks.add_task(self._consumer.consume, tenant_id, external_id)
 
 
 class InlineClassificationQueue:
@@ -90,5 +88,5 @@ class InlineClassificationQueue:
     def __init__(self, consumer: MessageConsumer) -> None:
         self._consumer = consumer
 
-    def enqueue(self, tenant_id: str, wa_message_id: str) -> None:
-        self._consumer.consume(tenant_id, wa_message_id)
+    def enqueue(self, tenant_id: str, external_id: str) -> None:
+        self._consumer.consume(tenant_id, external_id)

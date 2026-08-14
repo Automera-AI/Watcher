@@ -18,7 +18,7 @@ class TenantTier(StrEnum):
 
 
 class SourceKind(StrEnum):
-    """Whether a watched WhatsApp conversation is 1:1 or a group (addendum §4 ``sources``)."""
+    """Whether a watched conversation is 1:1 or a group (addendum §4 ``sources``)."""
 
     DIRECT = "direct"
     GROUP = "group"
@@ -51,7 +51,7 @@ class RecordType(StrEnum):
 
 
 class MessageType(StrEnum):
-    """WhatsApp message modality (addendum §4 ``messages.type``)."""
+    """Message modality (addendum §4 ``messages.type``)."""
 
     TEXT = "text"
     AUDIO = "audio"

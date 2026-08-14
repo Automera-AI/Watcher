@@ -64,11 +64,12 @@ def _parse_message(raw: dict[str, Any], names: dict[str, str]) -> MessageEnvelop
         body_text = media.get("caption")  # images/documents may carry a caption
 
     return MessageEnvelope(
-        wa_message_id=wa_message_id,
-        wa_chat_id=sender,  # Cloud API delivers 1:1 chats; group support is its own spec (§17.12)
+        external_id=wa_message_id,
+        thread_id=sender,
         source_kind=SourceKind.DIRECT,
         sender_phone_e164=_to_e164(sender),
-        sender_wa_name=names.get(sender),
+        sender_display_name=names.get(sender),
+        channel="whatsapp",
         direction=MessageDirection.INBOUND,
         type=msg_type,
         body_text=body_text,

@@ -1,7 +1,7 @@
 """SQLAlchemy implementation of the ingestion ``MessageRepository`` port (addendum §4, §5).
 
 Closes the persistence seam left open in the webhook slice: ``exists``/``save`` against the
-``messages`` table, scoped by ``tenant_id``, with the unique ``(tenant_id, wa_message_id)``
+``messages`` table, scoped by ``tenant_id``, with the unique ``(tenant_id, external_id)``
 constraint providing idempotency at the database level too.
 """
 
@@ -22,20 +22,21 @@ class SqlAlchemyMessageRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def exists(self, tenant_id: str, wa_message_id: str) -> bool:
+    def exists(self, tenant_id: str, external_id: str) -> bool:
         stmt = select(Message.id).where(
             Message.tenant_id == uuid.UUID(tenant_id),
-            Message.wa_message_id == wa_message_id,
+            Message.external_id == external_id,
         )
         return self._session.execute(stmt).first() is not None
 
     def save(self, tenant_id: str, message: MessageEnvelope) -> None:
         row = Message(
             tenant_id=uuid.UUID(tenant_id),
-            wa_message_id=message.wa_message_id,
-            wa_chat_id=message.wa_chat_id,
+            external_id=message.external_id,
+            thread_id=message.thread_id,
+            channel=message.channel,
             sender_phone_e164=message.sender_phone_e164,
-            sender_wa_name=message.sender_wa_name,
+            sender_display_name=message.sender_display_name,
             direction=message.direction.value,
             type=message.type.value,
             body_text=message.body_text,

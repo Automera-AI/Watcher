@@ -72,22 +72,22 @@ class _MemoryStore:
     def __init__(self) -> None:
         self._rows: dict[tuple[str, str], LoadedMessage] = {}
 
-    def exists(self, tenant_id: str, wa_message_id: str) -> bool:
-        return (tenant_id, wa_message_id) in self._rows
+    def exists(self, tenant_id: str, external_id: str) -> bool:
+        return (tenant_id, external_id) in self._rows
 
     def save(self, tenant_id: str, message: MessageEnvelope) -> None:
-        self._rows[(tenant_id, message.wa_message_id)] = LoadedMessage(
+        self._rows[(tenant_id, message.external_id)] = LoadedMessage(
             message_id=str(uuid.uuid4()), message=message
         )
 
-    def load(self, tenant_id: str, wa_message_id: str) -> LoadedMessage | None:
-        return self._rows.get((tenant_id, wa_message_id))
+    def load(self, tenant_id: str, external_id: str) -> LoadedMessage | None:
+        return self._rows.get((tenant_id, external_id))
 
 
-def _message(wa_id: str = "wamid.A") -> MessageEnvelope:
+def _message(ext_id: str = "wamid.A") -> MessageEnvelope:
     return MessageEnvelope(
-        wa_message_id=wa_id,
-        wa_chat_id="966500000000",
+        external_id=ext_id,
+        thread_id="966500000000",
         source_kind=SourceKind.DIRECT,
         sender_phone_e164="+966500000000",
         type=MessageType.TEXT,

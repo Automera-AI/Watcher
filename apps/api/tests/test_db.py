@@ -29,10 +29,10 @@ def session() -> Iterator[Session]:
         yield session
 
 
-def _message(wa_message_id: str) -> MessageEnvelope:
+def _message(external_id: str) -> MessageEnvelope:
     return MessageEnvelope(
-        wa_message_id=wa_message_id,
-        wa_chat_id="966500000000",
+        external_id=external_id,
+        thread_id="966500000000",
         source_kind=SourceKind.DIRECT,
         sender_phone_e164="+966500000000",
         type=MessageType.TEXT,
@@ -47,6 +47,7 @@ def test_all_tables_create() -> None:
     Base.metadata.create_all(engine)
     expected = {
         "tenants",
+        "channel_configs",
         "sources",
         "messages",
         "classifications",
@@ -57,6 +58,13 @@ def test_all_tables_create() -> None:
         "rules",
         "audit_log",
         "eval_runs",
+        "contacts",
+        "conversations",
+        "turns",
+        "task_rows",
+        "understandings",
+        "corrections",
+        "usage_events",
     }
     assert expected <= set(Base.metadata.tables)
 
@@ -91,7 +99,7 @@ def test_persisted_fields_round_trip(session: Session) -> None:
 
     from apps.api.db.models import Message
 
-    row = session.query(Message).filter_by(wa_message_id="wamid.A").one()
+    row = session.query(Message).filter_by(external_id="wamid.A").one()
     assert row.sender_phone_e164 == "+966500000000"
     assert row.type == MessageType.TEXT.value
     assert row.body_text == "hello"
