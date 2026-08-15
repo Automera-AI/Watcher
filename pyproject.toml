@@ -9,7 +9,13 @@ description = "Watcher — the WhatsApp intelligence layer that turns conversati
 requires-python = ">=3.13"
 dependencies = [
     "pydantic>=2.8,<3",
+    # Typed configuration over .env (apps/api/core/config.py) — the composition root reads the
+    # process environment through this and nothing else parses os.environ by hand.
+    "pydantic-settings>=2.4,<3",
     "fastapi>=0.115,<1",
+    # Runtime dep, not test-only: the concrete LLM providers call the Anthropic and OpenAI HTTP
+    # APIs directly rather than pulling in two vendor SDKs for one POST each.
+    "httpx>=0.27,<1",
     "rapidfuzz>=3.9,<4",
     "sqlalchemy>=2.0,<2.1",
     "alembic>=1.13,<2",

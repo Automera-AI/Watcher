@@ -42,8 +42,8 @@ single source of truth for engineering; supersedes the open `🔲 NEEDS INPUT` i
 
 - [ ] Replace open‑string `intent` / `suggested_record_type` with the locked **enums** (`schemas/enums.py`, `classification.py`).
 - [ ] Change `MEDIUM_CONFIDENCE_THRESHOLD` **0.60 → 0.5** (`schemas/common.py`); converge `band_for()` with the classifier's `escalation_threshold`.
-- [ ] Implement **AnthropicProvider** + **OpenAIProvider** behind the `LLMProvider` seam, reading the pinned model IDs from config.
-- [ ] Add a typed **Settings** object in `core/` (extend `MetaSettings`) reading the pinned model/ASR config.
+- [x] Implement **AnthropicProvider** + **OpenAIProvider** behind the `LLMProvider` seam, reading the pinned model IDs from config. *(roadmap A3 — `classifier/anthropic.py`, `classifier/openai.py`, wired by `classifier/factory.py`; the OpenAI provider doubles as the vLLM/Qwen path)*
+- [x] Add a typed **Settings** object in `core/` (extend `MetaSettings`) reading the pinned model/ASR config. *(roadmap A1 — `core/config.py`; `Settings.meta()` returns the existing `MetaSettings`)*
 - [ ] Alembic target + Render Postgres URL wired in deploy.
 
 ---

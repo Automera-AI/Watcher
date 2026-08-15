@@ -10,7 +10,6 @@ The core is free to compose as many options as it likes. Rendering is where real
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 
 from apps.api.schemas.envelope import OutboundAction
@@ -30,16 +29,10 @@ class MetaSettings:
     webhook_verify_token: str
     """Echoed back during Meta's GET subscription handshake."""
 
-    @classmethod
-    def from_env(cls, env: dict[str, str] | None = None) -> MetaSettings:
-        source = os.environ if env is None else env
-        try:
-            return cls(
-                app_secret=source["META_APP_SECRET"],
-                webhook_verify_token=source["META_WEBHOOK_VERIFY_TOKEN"],
-            )
-        except KeyError as exc:
-            raise ConfigError(f"Missing required environment variable: {exc.args[0]}") from exc
+    # Built by `Settings.meta()` (apps/api/core/config.py), which is the only thing that reads the
+    # environment. The `from_env` classmethod that used to live here was the last hand-rolled
+    # os.environ lookup in the tree, and it bypassed the placeholder handling A1 added — two ways
+    # to read the same two variables, disagreeing about what `<META_APP_SECRET>` means.
 
 
 #: WhatsApp interactive messages carry at most three quick-reply buttons.

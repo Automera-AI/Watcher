@@ -47,6 +47,16 @@ PROMPT_VERSION = "v3"
 # JSON Schema of the required structured output; providers bind this as the tool/response schema.
 CLASSIFICATION_TOOL_SCHEMA: dict[str, Any] = ClassificationResult.model_json_schema()
 
+#: Name and description of the tool the model is forced to call. Both are prompt surface — the
+#: model reads them — so they live here with the rest of the prompt rather than in a provider,
+#: where the two providers would inevitably end up wording them differently and the cross-provider
+#: eval would be comparing two prompts instead of two models.
+CLASSIFICATION_TOOL_NAME = "record_classification"
+CLASSIFICATION_TOOL_DESCRIPTION = (
+    "Record the classification of the message in <message>. Call this exactly once, with every "
+    "field populated; fields you have no evidence for are explicitly null."
+)
+
 #: Examples per intent lifted from the vocabulary into the catalogue. Three is enough to anchor
 #: the intent in more than one language without turning the prompt into the whole YAML file.
 _EXAMPLES_PER_INTENT = 3

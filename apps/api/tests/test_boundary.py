@@ -40,10 +40,17 @@ ADAPTER_PACKAGES: frozenset[str] = frozenset({"ingestion", "channels"})
 #: why the quick-reply cap was moved out of that file and into the WhatsApp adapter.
 #:
 #: Kept separate from KNOWN_LEAKS so the two never get confused: this one does not shrink.
+#: ``core/config.py`` is the fourth entry and the least obvious one. A deployment's environment
+#: names the channels that deployment speaks — ``WHATSAPP_ACCESS_TOKEN`` is a credential for a
+#: specific vendor and there is no channel-neutral spelling of it — and DECISIONS.md puts the
+#: typed settings object in ``core/`` deliberately. What the rule actually forbids is *behaviour*
+#: that assumes a channel; holding a token in a field is not that, and the settings object has no
+#: branches. When the phone line lands, ``twilio`` joins this entry rather than KNOWN_LEAKS.
 CHANNEL_REGISTRY: dict[str, set[str]] = {
     "schemas/envelope.py": {"whatsapp"},
     "schemas/message.py": {"whatsapp"},
     "db/models.py": {"whatsapp"},
+    "core/config.py": {"whatsapp"},
 }
 
 #: Core files that still leak, and what they still leak, pending 1.1. Delete entries as they are

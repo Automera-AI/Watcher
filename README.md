@@ -28,6 +28,13 @@ Python 3.12+ end-to-end server-side (FastAPI, Pydantic v2, SQLAlchemy 2.0 + Alem
 WhatsApp Business Cloud API ingestion via `pywa`. Anthropic Claude primary / OpenAI secondary; Qwen via
 vLLM for the self-hosted tier. Next.js 15 + TypeScript + Tailwind for the control page.
 
+## Configuration
+
+Copy `.env.example` to `.env` and fill it in. Every variable there is read by `Settings`
+(`apps/api/core/config.py`); a value left as a `<PLACEHOLDER>` counts as unset, so a subsystem that
+needs one it hasn't got fails at startup naming the variable. Nothing else in the tree parses
+`os.environ`. See `docs/specs/a1-configuration-and-a3-llm-providers.md`.
+
 ## CI/CD
 
 GitHub Actions pipeline lives in `.github/workflows/` and is scaffolded ahead of the backend:
