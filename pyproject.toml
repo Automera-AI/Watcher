@@ -19,6 +19,14 @@ dependencies = [
     "rapidfuzz>=3.9,<4",
     "sqlalchemy>=2.0,<2.1",
     "alembic>=1.13,<2",
+    # The Postgres driver a bare `postgresql://` URI is rewritten onto (apps/api/db/engine.py).
+    # Runtime only: the tests run on SQLite, so CI does not install it — the pooling policy is a
+    # pure function of the URL precisely so it can be asserted without a driver or a database.
+    "psycopg[binary]>=3.2,<4",
+    # The ASGI server the composition root is run by:
+    #   uvicorn apps.api.main:create_application --factory --host 0.0.0.0 --port 8000
+    # Nothing imports it, so it is also absent from CI's install list.
+    "uvicorn[standard]>=0.30,<1",
     # Runtime, not build-only. The intent vocabulary prefers the compiled JSON, but `build/` is
     # gitignored, so an image built from this file alone has no artifact and falls back to the
     # YAML. Without this the fallback is a ModuleNotFoundError on the first turn.

@@ -35,6 +35,23 @@ Copy `.env.example` to `.env` and fill it in. Every variable there is read by `S
 needs one it hasn't got fails at startup naming the variable. Nothing else in the tree parses
 `os.environ`. See `docs/specs/a1-configuration-and-a3-llm-providers.md`.
 
+## Running the API
+
+```bash
+alembic upgrade head                                    # once, against DATABASE_URL
+uvicorn apps.api.main:create_application --factory --host 0.0.0.0 --port 8000
+```
+
+`apps/api/main.py` is the composition root and the only place that reads configuration, opens a
+database, or chooses a classifier. `--factory` is not optional: the application is built when the
+factory is called, so importing the module has no side effects. A missing variable fails the start
+naming every one of them.
+
+Inbound messages are attributed to a tenant through the `channel_configs` table — one enabled row
+per configured endpoint, carrying the channel's own identifier for it. Without that row the webhook
+answers 500 and the platform retries; nothing is written to a tenant we had to guess at. See
+`docs/specs/a2-database-and-a4-composition-root.md`.
+
 ## CI/CD
 
 GitHub Actions pipeline lives in `.github/workflows/` and is scaffolded ahead of the backend:

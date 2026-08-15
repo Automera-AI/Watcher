@@ -37,6 +37,7 @@ from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from apps.api.channels import ConfigError, MetaSettings
+from apps.api.core.policy import TenantPolicy
 from apps.api.schemas.common import HIGH_CONFIDENCE_THRESHOLD, PhoneE164
 
 
@@ -127,8 +128,16 @@ class Settings(BaseSettings):
     asr_provider: Literal["whisper-api", "faster-whisper"] = "whisper-api"
     asr_model: str = "whisper-1"
 
-    # ── Persistence (A2 consumes this; alembic/env.py already reads the raw variable) ──────
+    # ── Persistence (A2; alembic/env.py reads the raw variable for migrations) ─────────────
     database_url: SecretStr | None = None
+
+    # Supabase's application URI (port 6543) is pgbouncer in transaction mode, where server-side
+    # prepared statements do not survive between transactions. `transaction` is the connection
+    # policy that is safe there and merely slower anywhere else, so it is the default; set
+    # `session` when connecting directly to Postgres. See apps/api/db/engine.py for what each
+    # mode actually changes — this is the one fact about the connection path that cannot be
+    # derived from the URL, since a pooler can be put in front of any host on any port.
+    database_pool_mode: Literal["transaction", "session"] = "transaction"
 
     @model_validator(mode="before")
     @classmethod
@@ -170,6 +179,36 @@ class Settings(BaseSettings):
             WHATSAPP_PHONE_NUMBER_ID=self.whatsapp_phone_number_id,
         )
         return token, phone_number_id
+
+    def tenant_policy(self) -> TenantPolicy:
+        """The default routing policy, with the one knob the environment can move applied.
+
+        ``core/policy.py`` exists to keep the classifier's escalation cutoff and the routing
+        bands converged: a message is escalated because it is not confident enough to act on, and
+        the band that decides whether to auto-route says the same thing about the same number.
+        Configuring one and not the other reintroduces exactly the split that module was written
+        to remove, so the configured threshold is applied to both here — the composition root
+        being where a constant becomes a deployment's value.
+
+        Per-*tenant* overrides are a different thing and land with the control page; this is the
+        process default for every tenant it serves.
+        """
+        return TenantPolicy(
+            high_confidence_threshold=self.classifier_confidence_escalation_threshold
+        )
+
+    def database_dsn(self) -> str:
+        """The connection string, or :class:`ConfigError` — A2's point of use for ``DATABASE_URL``.
+
+        Returned as a plain string because that is what SQLAlchemy takes. It carries the password,
+        so it is unwrapped here and nowhere else; never log the return value.
+        """
+        (dsn,) = self._require(DATABASE_URL=self.database_url)
+        return dsn
+
+    def pool_mode(self) -> Literal["transaction", "session"]:
+        """The connection-path policy. Always answerable — it has a safe default (see the field)."""
+        return self.database_pool_mode
 
     def llm_credentials(self, model_id: str) -> LLMCredentials:
         """Credentials for whichever provider owns ``model_id`` (see ``classifier/factory``).
