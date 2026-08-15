@@ -124,14 +124,42 @@ def test_meta_settings_round_trip(_settings: SettingsFactory) -> None:
     assert meta.webhook_verify_token == "echo-me"
 
 
-def test_whatsapp_send_credentials_require_both_halves(_settings: SettingsFactory) -> None:
+def test_send_credentials_require_both_halves(_settings: SettingsFactory) -> None:
     with pytest.raises(ConfigError, match="WHATSAPP_PHONE_NUMBER_ID"):
-        _settings(WHATSAPP_ACCESS_TOKEN="wa-token").whatsapp_send_credentials()
+        _settings(WHATSAPP_ACCESS_TOKEN="wa-token").send_credentials()
 
-    token, phone_number_id = _settings(
+    credentials = _settings(
         WHATSAPP_ACCESS_TOKEN="wa-token", WHATSAPP_PHONE_NUMBER_ID="pn-1"
-    ).whatsapp_send_credentials()
-    assert (token, phone_number_id) == ("wa-token", "pn-1")
+    ).send_credentials()
+    assert (credentials.access_token, credentials.phone_number_id) == ("wa-token", "pn-1")
+    assert credentials.graph_api_version == "v21.0"  # the pinned version replies go out on
+
+
+def test_can_send_is_false_until_both_halves_are_configured(_settings: SettingsFactory) -> None:
+    """What the composition root asks before deciding whether this process can reply at all."""
+    assert _settings().can_send() is False
+    assert _settings(WHATSAPP_ACCESS_TOKEN="wa-token").can_send() is False
+    assert (
+        _settings(WHATSAPP_ACCESS_TOKEN="wa-token", WHATSAPP_PHONE_NUMBER_ID="pn-1").can_send()
+        is True
+    )
+
+
+def test_the_channel_credential_fields_are_declared_by_the_adapter(
+    _settings: SettingsFactory,
+) -> None:
+    """A6's boundary move, asserted structurally rather than by grepping the core.
+
+    ``Settings`` still reads one environment and exposes one object; what changed is which module
+    declares that a send needs a token and a number. If someone moves the fields back onto the
+    core object this passes-by-accident check fails, and so does ``test_boundary.py``.
+    """
+    from apps.api.channels.config import ChannelCredentials
+
+    assert issubclass(Settings, ChannelCredentials)
+    for field in ("whatsapp_access_token", "whatsapp_phone_number_id", "meta_app_secret"):
+        assert field in ChannelCredentials.model_fields
+        assert field not in Settings.__annotations__
 
 
 def test_secrets_do_not_appear_in_repr(_settings: SettingsFactory) -> None:

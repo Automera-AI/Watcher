@@ -1,18 +1,30 @@
-"""Tests for the orchestrator decision tree (addendum §5 → §12)."""
+"""Tests for the orchestrator decision tree (addendum §5 → §12, roadmap A5/A6).
+
+Two things changed shape here in A5 and the tests changed with them. Rules and destinations are
+gone from this path — the assertions that a matching rule auto-routed a message went with them,
+because there is nothing left to route to — and the receptionist path is no longer a special case
+that a few tests poke at, but the ordinary way a classified message is handled.
+"""
 
 from __future__ import annotations
 
+import asyncio
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 from apps.api.audit.log import AuditEntry
 from apps.api.classifier.service import Classifier
 from apps.api.conversations.receptionist import handle as receptionist_handle
+from apps.api.conversations.task import Task, TaskStatus
 from apps.api.identity.models import CrmRecord
 from apps.api.identity.resolver import IncomingContact
-from apps.api.orchestration.ports import InboxItemDraft
-from apps.api.orchestration.worker import Orchestrator, RoutingAction
-from apps.api.rules.models import Rule, RuleAction, SenderIsNew
+from apps.api.orchestration.ports import (
+    ClassificationDraft,
+    ConversationState,
+    InboxItemDraft,
+)
+from apps.api.orchestration.worker import Orchestrator, ProcessOutcome, RoutingAction
 from apps.api.schemas.enums import (
     ConfidenceBand,
     IdentityDecision,
@@ -20,6 +32,7 @@ from apps.api.schemas.enums import (
     MessageType,
     SourceKind,
 )
+from apps.api.schemas.envelope import InboundTurn, OutboundAction
 from apps.api.schemas.message import MessageEnvelope
 
 TENANT = "tenant-1"
@@ -27,9 +40,9 @@ TENANT_UUID = "00000000-0000-0000-0000-000000000001"
 MSG_ID = "msg-1"
 
 
-def _result_json(confidence: float) -> dict[str, Any]:
+def _result_json(confidence: float, intent: str = "availability_check") -> dict[str, Any]:
     return {
-        "intent": "availability_check",
+        "intent": intent,
         "summary_one_line": "summary",
         "language": "en",
         "person_name": "Sara",
@@ -48,7 +61,7 @@ class _ScriptedProvider:
         self._i = 0
 
     def complete_json(self, value: Any) -> dict[str, Any]:
-        r = self._responses[self._i]
+        r = self._responses[min(self._i, len(self._responses) - 1)]
         self._i += 1
         return r
 
@@ -69,14 +82,64 @@ class _FakeInbox:
         self.drafts.append(draft)
 
 
-def _message() -> MessageEnvelope:
+class _FakeClassifications:
+    def __init__(self) -> None:
+        self.drafts: list[ClassificationDraft] = []
+
+    def record(self, draft: ClassificationDraft) -> str | None:
+        self.drafts.append(draft)
+        return f"classification-{len(self.drafts)}"
+
+
+class _FakeConversations:
+    """An in-memory conversation store: one conversation, one task, a count of replies."""
+
+    def __init__(self, task: Task | None = None, replies_sent: int = 0) -> None:
+        self.task = task
+        self.replies_sent = replies_sent
+        self.inbound: list[InboundTurn] = []
+        self.replies: list[OutboundAction] = []
+
+    def begin(self, turn: InboundTurn) -> ConversationState:
+        self.inbound.append(turn)
+        return ConversationState(
+            conversation_id="conversation-1", task=self.task, replies_sent=self.replies_sent
+        )
+
+    def record_reply(
+        self,
+        state: ConversationState,
+        turn: InboundTurn,
+        task: Task,
+        action: OutboundAction,
+    ) -> None:
+        self.task = task
+        self.replies.append(action)
+        self.replies_sent += 1
+
+
+class _FakeSender:
+    def __init__(self, *, fails: bool = False) -> None:
+        self.sent: list[tuple[OutboundAction, InboundTurn]] = []
+        self._fails = fails
+
+    async def send(self, action: OutboundAction, turn: InboundTurn) -> None:
+        if self._fails:
+            raise RuntimeError("channel unreachable")
+        self.sent.append((action, turn))
+
+    def close(self) -> None:
+        return None
+
+
+def _message(text: str = "Need a quote") -> MessageEnvelope:
     return MessageEnvelope(
         external_id="wamid.A",
         thread_id="966500000000",
         source_kind=SourceKind.DIRECT,
         sender_phone_e164="+966500000000",
         type=MessageType.TEXT,
-        body_text="Need a quote",
+        body_text=text,
         received_at=datetime.now(UTC),
     )
 
@@ -84,10 +147,11 @@ def _message() -> MessageEnvelope:
 def _orchestrator(
     confidence: float,
     *,
-    rules: list[Rule] | None = None,
     candidates: list[CrmRecord] | None = None,
     invalid_twice: bool = False,
+    classifications: _FakeClassifications | None = None,
 ) -> tuple[Orchestrator, _FakeAudit, _FakeInbox]:
+    """An orchestrator with no receptionist — the degraded, file-only pipeline."""
     responses = [{"bad": 1}, {"bad": 2}] if invalid_twice else [_result_json(confidence)]
     classifier = Classifier(
         _ScriptedProvider("cheap", responses),
@@ -99,75 +163,78 @@ def _orchestrator(
         classifier,
         audit,
         inbox,
-        rules_provider=lambda _t: rules or [],
         crm_lookup=lambda _t, _c: candidates or [],
+        classifications=classifications,
     )
     return orch, audit, inbox
 
 
-def test_high_confidence_auto_routes() -> None:
-    orch, audit, inbox = _orchestrator(0.95)
-    outcome = orch.process(TENANT, MSG_ID, _message())
-    assert outcome.action is RoutingAction.AUTO_ROUTE
-    assert outcome.band is ConfidenceBand.HIGH
-    assert inbox.drafts[0].status is InboxStatus.AUTO_ROUTED
-    assert audit.entries[0].action == "auto_routed"
-    assert audit.entries[0].actor == "bot"
+def _run(orch: Orchestrator, tenant: str = TENANT, message: MessageEnvelope | None = None) -> Any:
+    return asyncio.run(orch.process(tenant, MSG_ID, message or _message()))
 
 
 def test_medium_confidence_pings_control_chat() -> None:
     orch, _audit, inbox = _orchestrator(0.6)
-    outcome = orch.process(TENANT, MSG_ID, _message())
+    outcome = _run(orch)
     assert outcome.action is RoutingAction.CONTROL_PING
+    assert inbox.drafts[0].status is InboxStatus.PENDING
+
+
+def test_high_confidence_without_a_receptionist_still_only_pings() -> None:
+    """A5's excision, asserted: confidence is not a destination.
+
+    This used to auto-route to whatever the rules said. With the v1 filer gone there is nothing to
+    route *to*, so a message nobody is going to answer reaches a person instead.
+    """
+    orch, audit, inbox = _orchestrator(0.95)
+    outcome = _run(orch)
+    assert outcome.action is RoutingAction.CONTROL_PING
+    assert outcome.band is ConfidenceBand.HIGH
+    assert audit.entries[0].action == "control_ping"
+    assert audit.entries[0].actor == "bot"
     assert inbox.drafts[0].status is InboxStatus.PENDING
 
 
 def test_low_confidence_goes_to_inbox() -> None:
     orch, _audit, inbox = _orchestrator(0.3)
-    outcome = orch.process(TENANT, MSG_ID, _message())
+    outcome = _run(orch)
     assert outcome.action is RoutingAction.INBOX_REVIEW
     assert inbox.drafts[0].status is InboxStatus.NEEDS_REVIEW
 
 
 def test_unclear_after_two_invalid_outputs() -> None:
-    orch, audit, inbox = _orchestrator(0.0, invalid_twice=True)
-    outcome = orch.process(TENANT, MSG_ID, _message())
+    classifications = _FakeClassifications()
+    orch, audit, inbox = _orchestrator(0.0, invalid_twice=True, classifications=classifications)
+    outcome = _run(orch)
     assert outcome.is_unclear is True
     assert outcome.action is RoutingAction.INBOX_REVIEW
     assert inbox.drafts[0].status is InboxStatus.NEEDS_REVIEW
     assert audit.entries[0].action == "unclassified"
+    # Nothing to describe, so no classification row and nothing for the inbox item to point at.
+    assert classifications.drafts == []
+    assert inbox.drafts[0].classification_id is None
 
 
-def test_matching_rule_auto_routes_regardless_of_band() -> None:
-    rule = Rule(
-        id="r1",
-        name="new senders",
-        conditions=[SenderIsNew()],
-        action=RuleAction(destination_id="dest-9"),
-    )
-    # Medium confidence, but a rule matches a new sender → auto-route to its destination.
-    orch, audit, inbox = _orchestrator(0.6, rules=[rule])
-    outcome = orch.process(TENANT, MSG_ID, _message())
-    assert outcome.action is RoutingAction.AUTO_ROUTE
-    assert outcome.matched_rule_id == "r1"
-    assert outcome.destination_id == "dest-9"
-    assert audit.entries[0].destination_id == "dest-9"
+def test_the_classification_is_recorded_with_its_telemetry() -> None:
+    """``classifications`` stops being a table nothing writes to (A5)."""
+    classifications = _FakeClassifications()
+    orch, _audit, inbox = _orchestrator(0.95, classifications=classifications)
+    outcome = _run(orch)
+
+    draft = classifications.drafts[0]
+    assert draft.model_used == "cheap"
+    assert draft.prompt_version  # carried from the classifier, not invented here
+    assert draft.latency_ms >= 0
+    assert draft.result.person_name == "Sara"
+    # The inbox item points at the row, so the control page can show why it was filed this way.
+    assert inbox.drafts[0].classification_id == outcome.classification_id == "classification-1"
 
 
-def test_known_contact_resolves_to_merge_and_is_not_new() -> None:
+def test_known_contact_resolves_to_merge() -> None:
     known = CrmRecord(external_record_id="c1", name="Sara", phones=["+966500000000"])
-    new_sender_rule = Rule(
-        id="r1",
-        name="new senders only",
-        conditions=[SenderIsNew()],
-        action=RuleAction(destination_id="dest-9"),
-    )
-    # Phone matches a cached record → MERGE, sender not new → the new-sender rule must NOT fire.
-    orch, _audit, _inbox = _orchestrator(0.95, rules=[new_sender_rule], candidates=[known])
-    outcome = orch.process(TENANT, MSG_ID, _message())
+    orch, _audit, _inbox = _orchestrator(0.95, candidates=[known])
+    outcome = _run(orch)
     assert outcome.identity_decision is IdentityDecision.MERGE
-    assert outcome.matched_rule_id is None
-    assert outcome.action is RoutingAction.AUTO_ROUTE  # by HIGH band, not by rule
 
 
 def test_media_message_is_enriched_before_classify() -> None:
@@ -199,7 +266,6 @@ def test_media_message_is_enriched_before_classify() -> None:
         classifier,
         _FakeAudit(),
         _FakeInbox(),
-        rules_provider=lambda _t: [],
         crm_lookup=lambda _t, _c: [],
         media=media,
     )
@@ -212,7 +278,7 @@ def test_media_message_is_enriched_before_classify() -> None:
         media_id="m1",
         received_at=datetime.now(UTC),
     )
-    orch.process(TENANT, MSG_ID, voice)
+    asyncio.run(orch.process(TENANT, MSG_ID, voice))
     assert downloader.calls == [(TENANT, "m1")]  # media pipeline ran before classify
 
 
@@ -228,81 +294,163 @@ def test_incoming_contact_built_from_classification() -> None:
         captured.append(contact)
         return []
 
-    orch = Orchestrator(
-        classifier,
-        _FakeAudit(),
-        _FakeInbox(),
-        rules_provider=lambda _t: [],
-        crm_lookup=_lookup,
-    )
-    orch.process(TENANT, MSG_ID, _message())
+    orch = Orchestrator(classifier, _FakeAudit(), _FakeInbox(), crm_lookup=_lookup)
+    asyncio.run(orch.process(TENANT, MSG_ID, _message()))
     assert captured[0].name == "Sara"
     assert captured[0].company == "Acme"
     assert captured[0].phone_e164 == "+966500000000"
 
 
-def _orchestrator_with_receptionist(
+# ── The receptionist path ──────────────────────────────────────────────────────────────────
+
+
+def _conversing(
     intent: str,
     confidence: float,
-) -> tuple[Orchestrator, _FakeAudit, _FakeInbox]:
+    *,
+    conversations: _FakeConversations | None = None,
+    sender: _FakeSender | None = None,
+) -> tuple[Orchestrator, _FakeAudit, _FakeInbox, _FakeConversations]:
     classifier = Classifier(
-        _ScriptedProvider("cheap", [_result_json_intent(intent, confidence)]),
-        _ScriptedProvider("big", [_result_json_intent(intent, confidence)]),
+        _ScriptedProvider("cheap", [_result_json(confidence, intent)]),
+        _ScriptedProvider("big", [_result_json(confidence, intent)]),
     )
     audit = _FakeAudit()
     inbox = _FakeInbox()
+    store = conversations or _FakeConversations()
     orch = Orchestrator(
         classifier,
         audit,
         inbox,
-        rules_provider=lambda _t: [],
         crm_lookup=lambda _t, _c: [],
         receptionist=receptionist_handle,
+        conversations=store,
+        sender=sender,
     )
-    return orch, audit, inbox
+    return orch, audit, inbox, store
 
 
-def _result_json_intent(intent: str, confidence: float) -> dict[str, Any]:
-    return {
-        "intent": intent,
-        "summary_one_line": "summary",
-        "language": "en",
-        "person_name": "Sara",
-        "company_name": "Acme",
-        "confidence_overall": confidence,
-        "confidence_intent": confidence,
-        "confidence_person": confidence,
-        "confidence_company": confidence,
-    }
+def _converse(orch: Orchestrator, text: str = "Need a quote") -> ProcessOutcome:
+    return asyncio.run(orch.process(TENANT_UUID, MSG_ID, _message(text)))
 
 
 def test_acting_intent_returns_receptionist_reply() -> None:
-    orch, audit, inbox = _orchestrator_with_receptionist("property_question", 0.95)
-    outcome = orch.process(TENANT_UUID, MSG_ID, _message())
+    orch, audit, _inbox, store = _conversing("property_question", 0.95)
+    outcome = _converse(orch)
     assert outcome.action is RoutingAction.RECEPTIONIST_REPLY
     assert outcome.autonomy == "act"
     assert outcome.outbound_action is not None
     assert audit.entries[0].action == "receptionist_reply"
+    assert store.replies[0] is outcome.outbound_action
 
 
-def test_act_and_notify_returns_receptionist_reply_with_notify() -> None:
-    orch, audit, inbox = _orchestrator_with_receptionist("booking_enquiry", 0.95)
-    outcome = orch.process(TENANT_UUID, MSG_ID, _message())
-    assert outcome.action is RoutingAction.RECEPTIONIST_REPLY
-    assert outcome.autonomy == "act_and_notify"
+def test_the_inbound_turn_is_recorded_before_the_receptionist_answers() -> None:
+    """Continuity begins with a transcript. Without it there is nothing to be continuous with."""
+    orch, _audit, _inbox, store = _conversing("property_question", 0.95)
+    _converse(orch, "Is there parking?")
+    assert [turn.text for turn in store.inbound] == ["Is there parking?"]
+    assert store.inbound[0].channel_identity == "+966500000000"
+
+
+def test_a_hand_off_intent_still_answers_the_guest_and_files_for_a_person() -> None:
+    """The v1 behaviour was silence plus a filed row. Both halves are now true at once."""
+    orch, audit, inbox, store = _conversing("cancel_reservation", 0.95)
+    outcome = _converse(orch)
+
+    assert outcome.action is RoutingAction.HANDOFF
+    assert outcome.autonomy == "hand_off"
     assert outcome.outbound_action is not None
+    assert outcome.outbound_action.kind == "handoff"
+    assert audit.entries[0].action == "handed_off"
+    assert inbox.drafts[0].status is InboxStatus.NEEDS_REVIEW
+    assert store.task is not None and store.task.status is TaskStatus.HANDED_OFF
 
 
-def test_hand_off_intent_falls_through_to_routing() -> None:
-    orch, audit, inbox = _orchestrator_with_receptionist("cancel_reservation", 0.95)
-    outcome = orch.process(TENANT_UUID, MSG_ID, _message())
-    assert outcome.action is not RoutingAction.RECEPTIONIST_REPLY
-    assert outcome.autonomy is None
+def test_an_active_task_is_continued_rather_than_restarted() -> None:
+    """The point of A5: the second message resumes the job the first one opened."""
+    running = Task(intent="availability_check", slots={"check_in": "4 June"})
+    store = _FakeConversations(task=running)
+    orch, _audit, _inbox, _store = _conversing("availability_check", 0.95, conversations=store)
+
+    _converse(orch, "and for two guests")
+
+    assert store.task is running  # same job, not a new one
+    assert store.task.slots["check_in"] == "4 June"  # what the previous turn learned survived
 
 
-def test_no_receptionist_uses_old_path() -> None:
-    orch, _audit, _inbox = _orchestrator(0.95)
-    outcome = orch.process(TENANT, MSG_ID, _message())
-    assert outcome.action is RoutingAction.AUTO_ROUTE
-    assert outcome.autonomy is None
-    assert outcome.outbound_action is None
+def test_a_task_that_stops_making_progress_fetches_a_person() -> None:
+    """The clarifying-turn budget, honoured end to end.
+
+    Without this a task that cannot be filled asks the same question on every message, forever,
+    which is the failure mode continuity introduces and the vocabulary already had an answer for.
+    """
+    store = _FakeConversations(task=Task(intent="availability_check"), replies_sent=3)
+    orch, audit, inbox, _store = _conversing("availability_check", 0.95, conversations=store)
+
+    outcome = _converse(orch)
+
+    assert outcome.action is RoutingAction.HANDOFF
+    assert outcome.outbound_action is not None
+    assert outcome.outbound_action.kind == "handoff"
+    assert inbox.drafts[0].status is InboxStatus.NEEDS_REVIEW
+
+
+def test_the_reply_is_put_on_the_wire() -> None:
+    """A6, in one assertion: the composed reply actually leaves the process."""
+    sender = _FakeSender()
+    orch, _audit, _inbox, _store = _conversing("property_question", 0.95, sender=sender)
+    outcome = _converse(orch)
+
+    action, turn = sender.sent[0]
+    assert action is outcome.outbound_action
+    assert turn.channel_identity == "+966500000000"  # sent back to whoever asked
+    assert outcome.delivered is True
+
+
+def test_a_send_failure_does_not_lose_the_message() -> None:
+    """A transient failure at the last step must not undo the four that succeeded."""
+    sender = _FakeSender(fails=True)
+    orch, audit, inbox, store = _conversing("property_question", 0.95, sender=sender)
+
+    outcome = _converse(orch)
+
+    assert outcome.delivered is False
+    assert store.replies  # the reply is recorded, so the next turn knows we spoke
+    assert audit.entries and inbox.drafts  # and the decision is still filed
+
+
+def test_without_a_sender_the_reply_is_composed_and_recorded_but_undelivered() -> None:
+    """The half-configured deploy: everything works except the wire."""
+    orch, _audit, _inbox, store = _conversing("property_question", 0.95)
+    outcome = _converse(orch)
+    assert outcome.delivered is None
+    assert store.replies
+
+
+def test_a_receptionist_without_a_conversation_store_is_refused() -> None:
+    """The trap A4 left a note about, made structural.
+
+    A receptionist with no store forgets the previous turn on every message, which looks like it
+    works and is the exact thing A5 exists to remove. It is refused at construction rather than
+    discovered on the second message of a real conversation.
+    """
+    import pytest
+
+    classifier = Classifier(
+        _ScriptedProvider("cheap", [_result_json(0.95)]),
+        _ScriptedProvider("big", [_result_json(0.95)]),
+    )
+    with pytest.raises(ValueError, match="configured together"):
+        Orchestrator(
+            classifier,
+            _FakeAudit(),
+            _FakeInbox(),
+            crm_lookup=lambda _t, _c: [],
+            receptionist=receptionist_handle,
+        )
+
+
+def test_tenant_id_reaches_the_turn_as_a_uuid() -> None:
+    orch, _audit, _inbox, store = _conversing("property_question", 0.95)
+    _converse(orch)
+    assert store.inbound[0].tenant_id == uuid.UUID(TENANT_UUID)

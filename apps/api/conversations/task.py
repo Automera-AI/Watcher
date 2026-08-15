@@ -29,6 +29,10 @@ class TaskStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     HANDED_OFF = "handed_off"
+    #: The guest moved on to something else before this job finished. Not a failure — nothing
+    #: went wrong — but it is over, and it must leave the active set or the next message keeps
+    #: resuming a job nobody is asking about (roadmap A5).
+    ABANDONED = "abandoned"
 
 
 class UnknownIntent(ValueError):

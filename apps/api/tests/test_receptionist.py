@@ -119,3 +119,53 @@ def test_new_intent_creates_new_task() -> None:
     )
     assert task.intent == "availability_check"
     assert action.kind == "ask"
+
+
+def test_a_task_that_has_asked_enough_times_fetches_a_person() -> None:
+    """``defaults.max_clarifying_turns``, honoured at last (roadmap A5).
+
+    The vocabulary has declared this since item 0.3 and nothing read it, which was harmless while
+    every message opened a fresh task. Once a task survives between messages, a task that cannot
+    be filled asks the same question forever — so the budget is what stops a receptionist looping
+    at a guest who is not answering the question.
+    """
+    task = Task(intent="availability_check")
+    action, updated = asyncio.run(
+        handle(_turn(), "availability_check", 0.95, {}, task, turns_taken=3)
+    )
+
+    assert action.kind == "handoff"
+    assert updated.status == TaskStatus.HANDED_OFF
+
+
+def test_the_budget_does_not_cut_a_task_off_that_is_ready_to_act() -> None:
+    """The guard is about questions, not about the job.
+
+    A task with everything it needs executes even on the last turn of the budget; handing off a
+    request we could simply have completed would be worse than the loop it prevents.
+    """
+    task = Task(
+        intent="availability_check",
+        slots={"check_in": "4 June", "check_out": "6 June", "guests": "2", "unit": "A1"},
+        confirmed={"check_in", "check_out", "guests", "unit"},
+    )
+    action, updated = asyncio.run(
+        handle(_turn(), "availability_check", 0.95, {}, task, turns_taken=9)
+    )
+
+    assert action.kind == "say"
+    assert updated.status == TaskStatus.COMPLETED
+
+
+def test_a_turn_within_budget_still_asks() -> None:
+    action, _task = asyncio.run(
+        handle(
+            _turn(),
+            "availability_check",
+            0.95,
+            {},
+            Task(intent="availability_check"),
+            turns_taken=1,
+        )
+    )
+    assert action.kind == "ask"

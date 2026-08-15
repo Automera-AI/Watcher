@@ -19,6 +19,7 @@ a worker, so nothing else changes.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -61,21 +62,30 @@ class MessageConsumer:
         self._orchestrator = orchestrator
         self._logger = logger
 
-    def consume(self, tenant_id: str, external_id: str) -> ProcessOutcome | None:
-        """Process one enqueued message; returns ``None`` (and logs) if the row is missing."""
+    async def consume(self, tenant_id: str, external_id: str) -> ProcessOutcome | None:
+        """Process one enqueued message; returns ``None`` (and logs) if the row is missing.
+
+        Asynchronous since A5: the orchestrator awaits a receptionist and a channel send. Each
+        transport below owns the decision of *where* that loop comes from, which is the whole
+        reason the loop is not opened inside the orchestrator itself.
+        """
         loaded = self._loader.load(tenant_id, external_id)
         if loaded is None:
             self._logger.warning(
                 "enqueued message not found: tenant=%s external_id=%s", tenant_id, external_id
             )
             return None
-        return self._orchestrator.process(
+        return await self._orchestrator.process(
             tenant_id, loaded.message_id, loaded.message, loaded.history
         )
 
 
 class BackgroundTasksQueue:
-    """``ClassificationQueue`` backed by one request's FastAPI ``BackgroundTasks`` (now path)."""
+    """``ClassificationQueue`` backed by one request's FastAPI ``BackgroundTasks`` (now path).
+
+    ``add_task`` accepts a coroutine function and awaits it on the server's own loop after the
+    response is sent, so the async consumer needs no loop of its own here.
+    """
 
     def __init__(self, consumer: MessageConsumer, background_tasks: BackgroundTasks) -> None:
         self._consumer = consumer
@@ -86,13 +96,18 @@ class BackgroundTasksQueue:
 
 
 class InlineClassificationQueue:
-    """``ClassificationQueue`` consuming synchronously — single-process dev / scripted wiring."""
+    """``ClassificationQueue`` consuming synchronously — single-process dev / scripted wiring.
+
+    ``asyncio.run`` means this cannot be called from inside a running event loop, which is a
+    correct restriction rather than a limitation: consuming inline from a request handler is what
+    makes the webhook wait for the model, and §5 forbids exactly that.
+    """
 
     def __init__(self, consumer: MessageConsumer) -> None:
         self._consumer = consumer
 
     def enqueue(self, tenant_id: str, external_id: str) -> None:
-        self._consumer.consume(tenant_id, external_id)
+        asyncio.run(self._consumer.consume(tenant_id, external_id))
 
 
 #: Concurrent classifications in one process. Each one is mostly waiting on a model, so this is a
@@ -137,9 +152,13 @@ class ThreadPoolClassificationQueue:
         A future whose exception is never retrieved is a silent failure: the message is simply
         never classified and nothing anywhere says so. Nothing retrieves these futures — the
         webhook has long since answered — so the logging has to happen in the worker.
+
+        The event loop is opened here, one per message, on the thread that will do the work. That
+        is the cost of running an async pipeline from a thread pool, and it is small next to the
+        model call it wraps; B5's worker replaces the pool and keeps a loop per process instead.
         """
         try:
-            self._consumer.consume(tenant_id, external_id)
+            asyncio.run(self._consumer.consume(tenant_id, external_id))
         except Exception:
             self._logger.exception(
                 "classification failed: tenant=%s external_id=%s", tenant_id, external_id

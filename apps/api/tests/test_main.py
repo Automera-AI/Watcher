@@ -23,11 +23,22 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from apps.api.channels import ConfigError
+from apps.api.classifier.prompt import PROMPT_VERSION
 from apps.api.classifier.service import Classifier
 from apps.api.classifier.types import ClassificationInput
 from apps.api.core.config import Settings
 from apps.api.db.engine import Database
-from apps.api.db.models import AuditLogRow, ChannelConfig, InboxItem, Message, Tenant
+from apps.api.db.models import (
+    AuditLogRow,
+    ChannelConfig,
+    Classification,
+    Conversation,
+    InboxItem,
+    Message,
+    TaskRow,
+    Tenant,
+    Turn,
+)
 from apps.api.db.tenant_resolver import UnknownEndpoint
 from apps.api.ingestion.security import SIGNATURE_HEADER, expected_signature
 from apps.api.main import assemble, create_application
@@ -179,10 +190,14 @@ def test_verify_handshake_uses_the_configured_token(client: TestClient) -> None:
     assert (response.status_code, response.text) == (200, "31415")
 
 
-def test_a_signed_message_is_persisted_classified_and_filed(
+def test_a_signed_message_is_persisted_classified_and_answered(
     app: FastAPI, client: TestClient, seeded: Database, provider: StubProvider
 ) -> None:
-    """The whole point of A4, in one block: a request in, a decision recorded."""
+    """The whole point of A4 and A5, in one block: a request in, a conversation out.
+
+    The audit action is the difference A5 made. This assertion used to read ``auto_routed`` — the
+    message was filed against whatever the rules said and the guest heard nothing.
+    """
     assert _post(client, _payload()) == 200
     _drain(app)
 
@@ -192,17 +207,72 @@ def test_a_signed_message_is_persisted_classified_and_filed(
         assert message.tenant_id == uuid.UUID(TENANT_ID)  # resolved through channel_configs
 
         audit = session.query(AuditLogRow).one()
-        assert audit.action == "auto_routed"  # high confidence, no rules configured
+        assert audit.action == "receptionist_reply"
         assert audit.actor == "bot"
         assert audit.classification_snapshot["intent"] == "booking_enquiry"
         assert audit.message_id == message.id
+
+        classification = session.query(Classification).one()
+        assert classification.message_id == message.id
+        assert classification.intent == "booking_enquiry"
+        assert classification.model_used == "stub-model"
+        assert classification.prompt_version == PROMPT_VERSION
+        assert classification.latency_ms >= 0
 
         item = session.query(InboxItem).one()
         assert item.status == InboxStatus.AUTO_ROUTED.value
         assert item.band == ConfidenceBand.HIGH.value
         assert item.message_id == message.id
+        assert item.classification_id == classification.id  # filed with its reasoning attached
+
+        # The conversation half: what was said, and the job it opened.
+        conversation = session.query(Conversation).one()
+        assert conversation.channel_thread_id == "966500000000"
+        assert conversation.last_turn_at is not None
+
+        turns = session.query(Turn).order_by(Turn.direction).all()
+        assert [t.direction for t in turns] == ["inbound", "outbound"]
+        assert turns[0].body_text == "Any rooms free in June?"
+        assert turns[1].body_text  # we said something back
+
+        task = session.query(TaskRow).one()
+        assert task.intent == "booking_enquiry"
+        assert task.conversation_id == conversation.id
 
     assert [call.text for call in provider.calls] == ["Any rooms free in June?"]
+
+
+def test_a_second_message_continues_the_same_conversation(
+    settings: Settings, seeded: Database, provider: StubProvider
+) -> None:
+    """A5, stated as plainly as it can be: the second message resumes the first one's job.
+
+    Before this, ``ConversationRepository`` was never called outside its own tests and the
+    orchestrator passed ``task=None`` on every message. Two messages produced two unrelated
+    classifications and no memory of either. They now produce one conversation, one task, and a
+    transcript with both halves of both turns in it.
+
+    Each turn is delivered through its own application over the same database, which is both how
+    the guest experiences it — they reply after being answered — and a stronger claim than one
+    process would make: the continuity is in the rows, so it survives a restart between turns.
+    """
+    for external_id, text in (
+        ("wamid.1", "Any rooms free in June?"),
+        ("wamid.2", "for two people"),
+    ):
+        turn_app = assemble(settings, seeded, Classifier(provider, provider))
+        assert _post(TestClient(turn_app), _payload(external_id, text)) == 200
+        _drain(turn_app)
+
+    with seeded.session() as session:
+        assert session.query(Message).count() == 2
+        assert session.query(Conversation).count() == 1  # same thread, same conversation
+        assert session.query(TaskRow).count() == 1  # same intent, same job continued
+        assert session.query(Turn).count() == 4  # two asked, two answered
+        assert session.query(Classification).count() == 2  # one row per message, as it should be
+
+        task = session.query(TaskRow).one()
+        assert task.status in {"collecting", "handed_off", "completed"}
 
 
 def test_the_webhook_does_not_wait_for_the_model(settings: Settings, seeded: Database) -> None:

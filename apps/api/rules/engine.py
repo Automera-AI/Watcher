@@ -1,12 +1,17 @@
 """Rule evaluation (addendum §12).
 
-Conditions are ANDed; rules are tried in ascending ``priority`` and the first enabled match wins. A
-match auto-routes the message (the caller writes the audit entry with ``actor=bot`` and still
-surfaces the item in the inbox marked ``auto``).
+Conditions are ANDed; rules are tried in ascending ``priority`` and the first enabled match wins.
+
+**Who calls this, as of A5.** Not the orchestrator. Auto-routing a message to a destination was
+v1's answer to an inbound message and the receptionist is v2's; an answered message has nowhere to
+be filed to. The engine, the ``rules`` table and the stored-rule adapter are retained rather than
+dropped, because deliberate routing by a human is a control-page feature (track D) and this is the
+evaluator it will use. Retained, not wired: nothing in the message path reads a rule today.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from apps.api.rules.models import (
@@ -16,6 +21,10 @@ from apps.api.rules.models import (
     SenderInList,
     SenderIsNew,
 )
+
+#: tenant_id → that tenant's enabled rules (priority order handled by the engine). Lives here
+#: rather than in the orchestrator's ports now that the orchestrator does not depend on it.
+RulesProvider = Callable[[str], list[Rule]]
 
 
 @dataclass(frozen=True, slots=True)
