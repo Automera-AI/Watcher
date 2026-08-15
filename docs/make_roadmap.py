@@ -1,9 +1,8 @@
 """Generate the Watcher v2 roadmap PDF: urgency, ease, effort, per work item.
 
-**v2.3 — 15 August 2026.** This generator is the single source of the roadmap PDF. v2.2 flagged
-that three roadmap artifacts disagreed (this script still emitted the v1.11 / 3 August plan, and
-two separate PDFs claimed to be current); regenerating from here is the fix, so edit this file and
-re-run it rather than producing a fourth version by hand.
+**v2.4 — 15 August 2026.** This generator is the single source of the roadmap PDF. Edit this file
+and re-run it rather than producing another version by hand; v2.2 flagged that three roadmap
+artifacts disagreed, and regenerating from here is what keeps that closed.
 
     python docs/make_roadmap.py     # needs reportlab
 """
@@ -25,7 +24,7 @@ from reportlab.platypus import (
 )
 
 OUT = "/home/user/Watcher/docs/Watcher_v2_Roadmap.pdf"
-VERSION = "v2.3"
+VERSION = "v2.4"
 DATED = "15 August 2026"
 
 INK = colors.HexColor("#12171f")
@@ -163,23 +162,23 @@ story.append(Paragraph("Watcher v2 &mdash; Build Roadmap", H1))
 story.append(Paragraph(
     "From a message&nbsp;filer to a receptionist. Every item scored for urgency and ease. "
     f"&nbsp;&bull;&nbsp; <b>{VERSION}</b> &nbsp;&bull;&nbsp; {DATED} &nbsp;&bull;&nbsp; "
-    "supersedes the v2.2 PDF of the same date", LEAD))
+    "supersedes the v2.3 PDF of the same date", LEAD))
 story.append(Spacer(1, 10))
 
 story.append(banner(
-    "<b>What this revision does.</b> v2.2 named A2 and A4 as the whole of the critical path and put "
-    "the honest remaining total at ~43.75&nbsp;&rarr;&nbsp;41.75 engineering days. Session&nbsp;6 "
-    "built both. <b>The application now starts.</b> It reads its configuration, opens a database, "
-    "resolves which tenant a message belongs to, classifies it, and files the decision &mdash; end "
-    "to end, through the production wiring, for the first time. What it still cannot do is reply: "
-    "that is A5 and A6, and those two items are now the whole of Track&nbsp;A. "
-    "<b>Remaining: ~40.25 engineering days.</b>"))
+    "<b>What this revision does.</b> v2.3 named A5 and A6 as the whole of the remaining critical "
+    "path and put the honest total at ~40.25 engineering days. Session&nbsp;7 built both. "
+    "<b>The application now answers.</b> A guest's message is classified, joined to the "
+    "conversation it belongs to, continued as a task that survives between turns, answered by the "
+    "receptionist and put on the wire &mdash; and the v1 filer that used to route it to a "
+    "spreadsheet instead is gone. <b>Track&nbsp;A is complete.</b> "
+    "<b>Remaining: ~37 engineering days.</b>"))
 
 story.append(Paragraph("Where we stand today", H2))
 story.append(two_col(
     "Built and tested", "Missing &mdash; nothing ships without these",
-    "<b>375 passing tests</b>, no DB or network needed<br/>"
-    "83 source files across 20 modules (121 with tests)<br/>"
+    "<b>406 passing tests</b>, no DB or network needed<br/>"
+    "86 source files across 20 modules (125 with tests)<br/>"
     "19 DB tables + 3 migrations<br/>"
     "Every external system behind a swappable seam<br/>"
     "Eval runner + CI accuracy gate, 50 golden cases<br/>"
@@ -192,12 +191,20 @@ story.append(two_col(
     f'<font color="{DONE_GREEN.hexval()}"><b>NEW</b></font> &bull; Engine + session scope, '
     "pooler-safe by default (A2)<br/>"
     f'<font color="{DONE_GREEN.hexval()}"><b>NEW</b></font> &bull; Composition root: the process '
-    "starts and files a message end to end (A4)",
+    "starts and files a message end to end (A4)<br/>"
+    f'<font color="{DONE_GREEN.hexval()}"><b>NEW</b></font> &bull; Conversation continuity: one '
+    "task carried across turns, classifications recorded (A5)<br/>"
+    f'<font color="{DONE_GREEN.hexval()}"><b>NEW</b></font> &bull; Outbound sender &mdash; the '
+    "reply reaches the guest (A6)",
 
     f'<font color="{DONE_GREEN.hexval()}"><b>No DB connection &mdash; done (A2)</b></font><br/>'
     f'<font color="{DONE_GREEN.hexval()}"><b>No entrypoint &mdash; done (A4)</b></font><br/>'
-    "<b>No outbound</b> &mdash; ChannelSender has no implementation<br/>"
-    "<b>No memory across turns</b> &mdash; worker.py still passes task=None<br/>"
+    f'<font color="{DONE_GREEN.hexval()}"><b>No memory across turns &mdash; done (A5)</b></font>'
+    "<br/>"
+    f'<font color="{DONE_GREEN.hexval()}"><b>No outbound &mdash; done (A6)</b></font><br/>'
+    "<b>No emergency detection</b> &mdash; emergency=False is still hardcoded (G3)<br/>"
+    "<b>No slot extraction</b> &mdash; the model emits no slots, so a task fills only by "
+    "handing off (2.x)<br/>"
     "No Dockerfile &mdash; so cd.yml has never deployed anything<br/>"
     "No Supabase project &mdash; and <b>no channel_configs row</b>, without which "
     "every webhook 500s (B1)<br/>"
@@ -208,40 +215,43 @@ story.append(two_col(
     "Live availability &mdash; no read path to any PMS<br/>"
     "A measured prompt &mdash; the gate replays v2 fixtures, so 88% is not v3's number"))
 
-story.append(Paragraph("What changed in this revision (v2.2 &rarr; v2.3)", H2))
+story.append(Paragraph("What changed in this revision (v2.3 &rarr; v2.4)", H2))
 story.append(two_col(
     "Delivered", "Consequences",
-    "<b>A2 and A4 delivered</b> &mdash; 1.5 engineering days. "
-    "Total 41.75&nbsp;&rarr;&nbsp;40.25<br/>"
-    "<b>Track A: 4.75&nbsp;&rarr;&nbsp;3.25 days</b>, and it is now only A5 and A6<br/>"
-    "Tests 325 &rarr; <b>375</b> (+50). Source files 79 &rarr; 83<br/>"
-    "Five database port implementations replace the last of the in-memory doubles<br/>"
-    "Two runtime dependencies: <b>psycopg 3</b> and <b>uvicorn</b>",
+    "<b>A5 and A6 delivered</b> &mdash; 3.25 engineering days. "
+    "Total 40.25&nbsp;&rarr;&nbsp;<b>37</b><br/>"
+    "<b>Track A: 3.25&nbsp;&rarr;&nbsp;0 days. The track is complete</b><br/>"
+    "Tests 375 &rarr; <b>406</b> (+31). Source files 83 &rarr; 86<br/>"
+    "<b>classifications</b> is written to for the first time; conversations, turns and task_rows "
+    "join it<br/>"
+    "The rules/destinations threading is gone from the message path (D24)",
 
-    "<b>DATABASE_POOL_MODE</b> is new, and pooler-safe by default &mdash; the Supabase "
-    "pgbouncer risk is now a policy rather than an open question<br/>"
-    "<b>Migrations connect exactly as the app does</b>, so B1 cannot discover a driver "
-    "mismatch on its first upgrade<br/>"
-    "<b>Tenant resolution refuses to guess</b> &mdash; B1 must insert a channel_configs row<br/>"
-    "<b>This generator is regenerated</b>, so the three-disagreeing-artifacts item is closed<br/>"
+    "<b>The milestone &ldquo;holds a conversation&rdquo; is now true</b> &mdash; a task survives "
+    "between messages and the reply reaches the guest<br/>"
+    "<b>KNOWN_LEAKS is empty</b>, which closes roadmap item 1.1: no core file names a channel<br/>"
+    "<b>G3 is now the last safety gap</b> &mdash; a receptionist that answers but cannot recognise "
+    "an emergency is more dangerous than one that stays silent<br/>"
+    "<b>A task fills only by handing off</b> until the model emits slots (2.x) &mdash; bounded, "
+    "and it escalates cleanly<br/>"
     "Unchanged: 2.4 is still the last item before a demo; 3.1 still blocked on P1; the "
     "scope guard still holds &mdash; no PDF handbook ingestion"))
 
 story.append(Spacer(1, 10))
 story.append(Paragraph(
-    "<b>Totals:</b> ~40.25 engineering days remaining. At the observed 2&ndash;3 engineering days "
-    "per working session that is <b>13&ndash;20 sessions</b>; at the six-day week these estimates "
-    "assume, ~6.7 weeks of pure build &mdash; so plan <b>~9 weeks to sellable</b> and "
-    "<b>~10 days to a real number that answers safely</b>. The critical path is still "
-    "Track&nbsp;A, and it is now A5 then A6.", BODY))
+    "<b>Totals:</b> ~37 engineering days remaining. At the observed 2&ndash;3 engineering days "
+    "per working session that is <b>12&ndash;18 sessions</b>; at the six-day week these estimates "
+    "assume, ~6.2 weeks of pure build &mdash; so plan <b>~8 weeks to sellable</b> and "
+    "<b>~6.75 days to a real number that answers safely</b>. The critical path leaves Track&nbsp;A "
+    "for the first time: it is now <b>B1&ndash;B4 to host it, G3 to make it safe, and 2.4</b>.",
+    BODY))
 
 story.append(PageBreak())
 
 # ---------------------------------------------------------------- page 2
 story.extend(section(
-    "Track A &mdash; Make it run. &nbsp;[FOUR OF SIX DONE &mdash; 3.25 DAYS LEFT]",
-    "The bottom four layers exist. What remains is the two items that turn filing into answering, "
-    "and they are the last thing between this and a receptionist.",
+    "Track A &mdash; Make it run. &nbsp;[COMPLETE &mdash; ALL SIX DONE]",
+    "Configuration, a database, a model, an entrypoint, continuity and a sender. The track that "
+    "turned a library into a running receptionist is finished; what follows is hosting it safely.",
     [
         ("A1", "Configuration layer", "DONE", "Easy", "0.5",
          "<b>DONE</b> &mdash; core/config.py; every variable in .env.example typed, required per "
@@ -258,24 +268,25 @@ story.extend(section(
          "<font name='Courier'>uvicorn apps.api.main:create_application --factory</font>. Also the "
          "five database port implementations create_app needed and a process-level worker pool, so "
          "the webhook still answers before classification runs"),
-        ("A5", "Wire continuity + excise v1 filer", "NOW", "Moderate", "2.25",
-         "<b>NEXT</b> &mdash; ConversationRepository is still never called outside tests; the "
-         "orchestrator passes task=None and empty slots. Also converts process() to async and "
-         "removes the rules/destinations threading (D24). Tables retained, not dropped"),
-        ("A6", "Outbound sender", "NOW", "Moderate", "1.0",
-         "<b>NOT BUILT</b> &mdash; ChannelSender has no implementation; replies are composed and "
-         "never sent. Also the moment to move the channel credential fields out of core/config.py "
-         "and clear the last KNOWN_LEAKS entry"),
+        ("A5", "Wire continuity + excise v1 filer", "DONE", "Moderate", "2.25",
+         "<b>DONE</b> &mdash; a ConversationStore in the message path: the inbound turn is "
+         "recorded, the active task is loaded and saved back, the reply joins the transcript. "
+         "process() is async; classifications is populated with measured latency and the prompt "
+         "version; the rules/destinations threading is gone (D24), tables retained"),
+        ("A6", "Outbound sender", "DONE", "Moderate", "1.0",
+         "<b>DONE</b> &mdash; WhatsAppSender on the ChannelSender seam, quick replies rendered "
+         "within the channel's limits, bounded retries. The credential fields moved behind "
+         "channels/config.py and the last KNOWN_LEAKS entry is gone with them"),
     ]))
 
 story.append(Spacer(1, 8))
 story.append(banner(
-    "<b>Why A5 is the whole game now.</b> Items 2.1 and 2.2 are genuinely written &mdash; the "
-    "tables, the repository, the task state machine, the reply path. What was never written is the "
-    "line joining them, and A4 deliberately did not write it: wiring a receptionist before "
-    "continuity exists produces one that forgets the previous turn, and it would have nothing to "
-    "send with until A6. The milestone &ldquo;holds a conversation&rdquo; is still not true, and "
-    "A5 is what makes it true.", URG["NOW"]))
+    "<b>What Track A leaves behind.</b> Items 2.1 and 2.2 were genuinely written &mdash; the "
+    "tables, the repository, the task state machine, the reply path &mdash; and the line joining "
+    "them never was. A5 wrote that line and A6 wrote the wire. The milestone &ldquo;holds a "
+    "conversation&rdquo; is now true, and the next thing between this and a real guest is not "
+    "another feature: it is <b>B1&ndash;B4 to host it and G3 to make it safe</b>.",
+    DONE_GREEN))
 
 story.append(PageBreak())
 
@@ -318,9 +329,11 @@ story.extend(section(
     "What remains is knowledge, a measured prompt, and more than one property.",
     [
         ("2.1", "Conversations, tasks and slot filling", "HIGH", "Hard", "spent",
-         "<b>PART-BUILT</b> &mdash; 2.0d spent. The wiring is priced in A5, not here"),
+         "<b>WIRED (A5)</b> &mdash; 2.0d spent here, the wiring priced in A5. Slot <i>extraction</i> "
+         "is the one part still missing: the model emits no slots, so a task fills only by the "
+         "clarifying-turn budget expiring. That is a prompt change and a golden-set change"),
         ("2.2", "The reply path", "HIGH", "Moderate", "spent",
-         "<b>PART-BUILT</b> &mdash; 1.5d spent. The sender is priced in A6, not here"),
+         "<b>WIRED (A6)</b> &mdash; 1.5d spent here, the sender priced in A6"),
         ("2.3", "Autonomy gate", "DONE", "Easy", "1.0",
          "<b>DONE</b> &mdash; RECEPTIONIST_REPLY as the fourth RoutingAction"),
         ("2.4", "Knowledge base", "HIGH", "Moderate", "2.0",
@@ -366,34 +379,51 @@ story.append(notes_table([
 story.append(PageBreak())
 
 # ---------------------------------------------------------------- page 5
-story.append(Paragraph("New this revision: what A2 and A4 settled, and what they left open", H2))
+story.append(Paragraph("New this revision: what A5 and A6 settled, and what they left open", H2))
 story.append(notes_table([
-    ("The connection path",
-     "Supabase's application URI is pgbouncer in <b>transaction mode</b>: a client connection is "
-     "bound to a server connection for one transaction only. Neither psycopg's server-side "
-     "prepared statements nor SQLAlchemy's own connection pool survives that, and both fail "
-     "intermittently under load rather than in a test. <b>DATABASE_POOL_MODE defaults to the "
-     "pooler-safe policy</b> (NullPool + prepare_threshold=None), which is always correct and "
-     "merely slower when unnecessary; <font name='Courier'>session</font> opts out for a direct "
-     "connection. It is a variable rather than a guess from the port because a pooler can sit in "
-     "front of any host. The load test the last three revisions asked for is now a flip of that "
-     "variable, not a code change"),
-    ("The driver",
-     "A bare <font name='Courier'>postgresql://</font> URI resolves to psycopg 2, which this "
-     "project does not ship. It is rewritten onto psycopg 3 so the URI can be pasted from the "
-     "dashboard &mdash; and alembic/env.py now goes through the same two functions, because "
-     "migrations resolving a different driver from the application is something a deploy discovers "
-     "on the day it matters"),
-    ("Tenant attribution",
-     "An inbound message is attributed through <b>channel_configs</b>, and an endpoint with no "
-     "enabled row raises rather than falling back to a default tenant &mdash; guessing writes one "
-     "customer's message into another's account. The lookup does not filter by channel kind, so a "
-     "phone line needs no code change. <b>B1's checklist grew one line because of this</b>"),
+    ("Continuity",
+     "Every classified message now runs against a <b>ConversationStore</b>: the inbound turn is "
+     "recorded, the job already in flight is loaded, and the updated job and the reply are written "
+     "back. A receptionist constructed without a store is <b>refused</b> &mdash; one that forgets "
+     "the previous turn looks like it works, which is the exact failure this item existed to "
+     "remove. ConversationRepository, written in item 2.1, is finally called by something other "
+     "than its own tests"),
+    ("The clarifying-turn budget",
+     "Continuity introduces a failure mode that no-continuity does not: a task that cannot make "
+     "progress no longer fails, it <b>loops</b>. The vocabulary has declared "
+     "max_clarifying_turns&nbsp;=&nbsp;3 and on_max_turns&nbsp;=&nbsp;handoff_to_human since item "
+     "0.3 and nothing read them. They are read now. The guard applies to asking, never to acting: "
+     "a task with everything it needs still completes on the last turn of the budget"),
+    ("The v1 filer",
+     "The orchestrator used to answer an inbound message twice &mdash; auto-route it by rule or "
+     "band, <i>and</i> reply to it. Routing to a spreadsheet was v1's answer; the receptionist is "
+     "v2's. <b>Rules and destinations are gone from the message path (D24) and both tables are "
+     "retained</b>, because deliberate routing by a human is a control-page feature and this is "
+     "the evaluator it will use. AUTO_ROUTE went with them: there is nothing to route to"),
+    ("classifications, at last",
+     "The table sat empty for four sessions because two of its columns &mdash; latency_ms and "
+     "prompt_version &mdash; had no honest source. The classifier reports them now rather than the "
+     "writer inventing them: <b>latency spans the whole tiered policy</b>, retries and escalation "
+     "included, because that is what the guest waited for. model_used, which used to be handed to "
+     "the inbox writer and dropped, lives on that row, and inbox_items points at it"),
+    ("The wire",
+     "WhatsAppSender posts to the versioned Graph endpoint for the number we send as. The "
+     "three-button cap and the 20-character title limit are applied there and nowhere else, and "
+     "neither raises. <b>A failed send is logged and reported, never raised</b> &mdash; by then the "
+     "message is classified, the reply recorded and the decision filed, and a transient 502 must "
+     "not undo all of it. The reply is recorded <i>before</i> it is sent, deliberately"),
+    ("Item 1.1, closed",
+     "The channel credential fields moved from core/config.py to <b>channels/config.py</b>, which "
+     "Settings extends: one object still reads one environment, but the knowledge of what a send "
+     "needs sits with the channel. <b>KNOWN_LEAKS is now empty</b> &mdash; no core file names a "
+     "channel &mdash; and the machinery stays, because an empty allowlist is the strongest form of "
+     "that test and a phone line is next"),
     ("Still not written",
-     "<b>classifications rows.</b> The audit row carries the classification snapshot, but that "
-     "table wants latency_ms and prompt_version and the orchestrator surfaces neither; model_used "
-     "has nowhere to go either. Small, and it belongs with A5, which is already in that code path. "
-     "Do not invent the missing telemetry to fill the columns"),
+     "<b>Slot extraction.</b> The receptionist receives an empty slot dict because "
+     "ClassificationResult has no slots field; adding one is a prompt change and a golden-set "
+     "change, which is item 2.x. The consequence is bounded and honest: a task fills only by the "
+     "budget expiring and then fetches a person. <b>Emergency detection is still hardcoded to "
+     "False</b> &mdash; that is G3, and it is the last safety gap"),
 ], first_col=118))
 
 story.append(Paragraph("Two numbers nobody has measured, both cheap to settle during 2.7", H2))
@@ -412,24 +442,24 @@ story.append(notes_table([
 
 story.append(Paragraph("How the total reconciles", H2))
 story.append(Paragraph(
-    "A 3.25 + B 4.25 + D 13.75 + E 4.5 + G 5.5 + (2.4, 2.7, 2.8) 3.5 + (3.1, 3.2, 3.3) 5.5 = "
-    "<b>40.25</b>", BODY))
+    "A 0 + B 4.25 + D 13.75 + E 4.5 + G 5.5 + (2.4, 2.7, 2.8) 3.5 + (3.1, 3.2, 3.3) 5.5 = "
+    "<b>37</b>", BODY))
 story.append(Spacer(1, 4))
 story.append(Paragraph(
     "Rows 2.1 and 2.2 show &ldquo;spent&rdquo; rather than a number because their days are already "
-    "delivered and the outstanding wiring is priced in A5 and A6 &mdash; adding them would "
+    "delivered and their wiring was priced in A5 and A6, now built &mdash; adding them would "
     "double-count 3.5 days. P1&ndash;P4 is excluded: founder time, not engineering. Counting scope "
     "loosely is what produced the 5.75 figure that v2.1 replaced, so the arithmetic is stated "
     "rather than implied.", NOTE))
 
 story.append(Paragraph("The dates", H2))
 dates = Table([
-    [Paragraph("<b>Milestone</b>", CELL), Paragraph("<b>v2.2 said</b>", CELL),
+    [Paragraph("<b>Milestone</b>", CELL), Paragraph("<b>v2.3 said</b>", CELL),
      Paragraph("<b>Now</b>", CELL), Paragraph("<b>Status</b>", CELL)],
     [Paragraph("M1 &mdash; answers a real message, safely", CELLB),
-     Paragraph("~11.5 days", CELL), Paragraph("<b>~10 days</b>", CELL),
-     Paragraph("<b>NEXT</b> &mdash; Track A (3.25 left) + B1&ndash;B4 + G3 + 2.4. The emergency "
-               "path is not optional here", NOTE)],
+     Paragraph("~10 days", CELL), Paragraph("<b>~6.75 days</b>", CELL),
+     Paragraph("<b>NEXT</b> &mdash; B1&ndash;B4 + G3 + 2.4. Track A is done; the emergency path "
+               "is what &ldquo;safely&rdquo; still depends on", NOTE)],
     [Paragraph("M2 &mdash; you can watch and correct it", CELLB),
      Paragraph("+13.75 days", CELL), Paragraph("+13.75 days", CELL),
      Paragraph("PENDING &mdash; Track D, six receptionist views", NOTE)],
@@ -455,7 +485,7 @@ story.append(PageBreak())
 
 # ---------------------------------------------------------------- page 5
 story.append(Paragraph("What would actually move these dates", H2))
-story.append(Paragraph("The risks v2.2 named, re-scored against what session 6 learned.", SUBT))
+story.append(Paragraph("The risks v2.3 named, re-scored against what session 7 learned.", SUBT))
 story.append(Spacer(1, 5))
 story.append(notes_table([
     ("Supabase connection pooling",
@@ -479,18 +509,29 @@ story.append(notes_table([
      "Unchanged. Docs are public, but sandbox approval and rate limits are theirs to grant. Start "
      "P2 today"),
     ("Three roadmap artifacts disagree",
-     "<b>CLOSED.</b> docs/make_roadmap.py now generates this document into "
-     "docs/Watcher_v2_Roadmap.pdf. Edit the generator and re-run it; do not hand-write a fourth "
+     "<b>CLOSED.</b> docs/make_roadmap.py generates this document into "
+     "docs/Watcher_v2_Roadmap.pdf. Edit the generator and re-run it; do not hand-write another "
      "version"),
+    ("A receptionist that answers but cannot recognise an emergency",
+     "<b>NEW, and the most serious item on this page.</b> Until A6 a gas leak was filed in silence; "
+     "now it gets a polite, confident reply about maintenance. Answering raises the cost of "
+     "emergency=False rather than lowering it, which is why <b>G3 moves ahead of 2.4</b> for any "
+     "deployment a real guest can reach"),
+    ("Two messages arriving at once",
+     "<b>NEW, bounded.</b> Two turns in one thread classified concurrently can race and open two "
+     "conversations. Per-message ordering is a property of the queue, and the queue is an "
+     "in-process pool until <b>B5</b>, where ordered per-conversation delivery belongs. Recorded "
+     "rather than papered over with a lock that would not survive a second process"),
 ], first_col=132))
 
 story.append(Spacer(1, 10))
 story.append(banner(
-    "<b>If you do only one thing next session: A5, then A6.</b> Not 2.4. The receptionist can now "
-    "read its configuration, reach a model, connect to a database and start &mdash; and a guest who "
-    "messages it gets silence, because nothing joins the conversation to the task and nothing puts "
-    "a reply on the wire. A5&nbsp;+&nbsp;A6 is 3.25 days and it is the difference between a system "
-    "that files and a receptionist &mdash; and G3 before any real guest can message it.",
+    "<b>If you do only one thing next session: B1, then G3.</b> Not 2.4, and not D. The "
+    "receptionist now answers &mdash; on a laptop, to a number nobody can message. B1&ndash;B4 is "
+    "3.25 days and ends with a public HTTPS URL the platform can deliver to (and B1 must insert "
+    "the channel_configs row, or every message 500s). <b>G3 is 1.5 days and it is what makes "
+    "answering safe</b>: emergency=False is hardcoded, so a gas leak now gets a confident reply "
+    "about maintenance rather than a person. Answering made that worse, not better.",
     URG["NOW"]))
 
 story.append(Paragraph("Session log", H2))
@@ -513,12 +554,19 @@ log = Table([
                "OpenAI providers with prompt caching and per-call usage; D8-a re-pinned to the "
                "Claude 5 family", NOTE),
      Paragraph("277 &rarr; 325", NOTE), Paragraph("2.0", CELL)],
-    [Paragraph("6", CELLB),
-     Paragraph("<b>Items A2, A4.</b> Engine and session scope, pooler-safe by default; the "
+    [Paragraph("6", CELL),
+     Paragraph("PR #18 &mdash; items A2, A4. Engine and session scope, pooler-safe by default; the "
                "composition root and the five database port implementations it needed; a "
                "process-level worker pool so the webhook still answers before classification; "
-               "alembic aligned to the same connection path; this generator regenerated", NOTE),
-     Paragraph("<b>325 &rarr; 375</b>", NOTE), Paragraph("1.5", CELLB)],
+               "alembic aligned to the same connection path", NOTE),
+     Paragraph("325 &rarr; 375", NOTE), Paragraph("1.5", CELL)],
+    [Paragraph("7", CELLB),
+     Paragraph("<b>Items A5, A6 &mdash; Track A complete.</b> Conversation and task continuity in "
+               "the message path; the clarifying-turn budget honoured; classifications populated "
+               "with measured telemetry; process() async; the v1 rules/destinations filer excised "
+               "(D24); the outbound sender, and the channel credentials moved behind channels/, "
+               "which emptied KNOWN_LEAKS and closed item 1.1", NOTE),
+     Paragraph("<b>375 &rarr; 406</b>", NOTE), Paragraph("3.25", CELLB)],
 ], colWidths=[44, 296, 68, 48], hAlign="LEFT")
 log.setStyle(TableStyle([
     ("BACKGROUND", (0, 0), (-1, 0), BAND),
@@ -533,7 +581,7 @@ log.setStyle(TableStyle([
 story.append(log)
 story.append(Spacer(1, 6))
 story.append(Paragraph(
-    "<b>Cumulative: 12.0 engineering days delivered. ~40.25 remaining.</b>", SMALL))
+    "<b>Cumulative: 15.25 engineering days delivered. ~37 remaining.</b>", SMALL))
 
 
 # ---------------------------------------------------------------- chrome

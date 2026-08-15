@@ -43,12 +43,21 @@ class ClassificationOutcome:
 
     ``result`` is ``None`` when the model returned schema-invalid output twice — the message is
     marked unclear and routed to the inbox (addendum §8).
+
+    ``latency_ms`` and ``prompt_version`` are the two columns ``classifications`` wants that the
+    service alone can answer for. They are *measured and reported*, not reconstructed downstream:
+    latency is the wall clock across every attempt and every tier, because that is what the guest
+    waited for, and the prompt version is the one this service was built with rather than whatever
+    constant the writer happens to import. A row cannot be written honestly without both, which is
+    why they live on the outcome and not on the persistence adapter.
     """
 
     result: ClassificationResult | None
     model_used: str
     escalated: bool
     attempts: int
+    latency_ms: int = 0
+    prompt_version: str = ""
 
     @property
     def is_unclear(self) -> bool:

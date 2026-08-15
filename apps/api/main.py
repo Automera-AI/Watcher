@@ -16,12 +16,17 @@ fails on a machine that has neither — including when a linter, a type checker,
 for something else entirely. As a factory, importing the module does nothing and calling it does
 everything.
 
-**What is wired, and what is deliberately not.** The pipeline this assembles listens, persists,
-classifies, resolves identity, applies rules and files the outcome. It does not yet reply: the
-orchestrator is built without a receptionist, because wiring one before conversation continuity
-exists produces a receptionist with no memory of the previous turn (roadmap A5), and it has nothing
-to send a reply with until the outbound sender exists (A6). Filing works end to end; answering is
-the next two items, in that order.
+**What is wired, as of A5 and A6.** The pipeline this assembles listens, persists, classifies,
+resolves identity, *continues the conversation*, replies, sends the reply, and files what it did.
+A4 deliberately built the orchestrator without a receptionist — one wired before continuity existed
+would have forgotten the previous turn on every message, and would have had nothing to send with.
+Both of those now exist, so the receptionist, the conversation store and the channel sender are
+wired here and the loop is closed: a guest who messages the number gets an answer.
+
+The one degraded state that is still allowed is a process with no send credentials. It ingests,
+classifies, continues conversations and records the replies it composed — it simply cannot put them
+on the wire, which is every deploy between B1 and B4. That is a loud warning at startup rather than
+a refusal to start, because everything except the last step still works.
 """
 
 from __future__ import annotations
@@ -31,16 +36,19 @@ import logging
 from fastapi import FastAPI
 
 from apps.api.app import create_app
+from apps.api.channels.factory import build_sender
 from apps.api.classifier.factory import build_classifier
 from apps.api.classifier.service import Classifier
+from apps.api.conversations.receptionist import handle
 from apps.api.core.config import Settings, get_settings
 from apps.api.db.engine import Database, build_database
 from apps.api.db.orchestration_repo import (
     SqlAlchemyAuditLog,
+    SqlAlchemyClassificationWriter,
+    SqlAlchemyConversationStore,
     SqlAlchemyCrmLookup,
     SqlAlchemyInboxWriter,
     SqlAlchemyMessageLoader,
-    SqlAlchemyRulesProvider,
 )
 from apps.api.db.repository import SessionScopedMessageRepository
 from apps.api.db.tenant_resolver import ChannelConfigTenantResolver
@@ -69,14 +77,18 @@ def assemble(settings: Settings, database: Database, classifier: Classifier) -> 
     above is the four lines that decide what to pass it.
     """
     scope = database.session
+    sender = build_sender(settings)
 
     orchestrator = Orchestrator(
         classifier,
         SqlAlchemyAuditLog(scope),
         SqlAlchemyInboxWriter(scope),
-        SqlAlchemyRulesProvider(scope),
         SqlAlchemyCrmLookup(scope),
         policy=settings.tenant_policy(),
+        receptionist=handle,
+        conversations=SqlAlchemyConversationStore(scope),
+        sender=sender,
+        classifications=SqlAlchemyClassificationWriter(scope),
     )
     queue = ThreadPoolClassificationQueue(
         MessageConsumer(SqlAlchemyMessageLoader(scope), orchestrator)
@@ -91,12 +103,16 @@ def assemble(settings: Settings, database: Database, classifier: Classifier) -> 
 
     # Held on the application so nothing here is collected while the process is still serving, and
     # so a test can reach the queue to drain it. Shutdown order is not arbitrary: the pool has to
-    # finish the messages it accepted before the engine those messages are writing through closes.
+    # finish the messages it accepted before the engine those messages are writing through closes,
+    # and before the sender those messages are replying through closes its connections.
     app.state.database = database
     app.state.queue = queue
+    app.state.sender = sender
 
     def _shutdown() -> None:
         queue.shutdown()
+        if sender is not None:
+            sender.close()
         database.dispose()
 
     app.add_event_handler("shutdown", _shutdown)

@@ -120,3 +120,51 @@ def test_prompt_metadata_is_wired() -> None:
     assert CLASSIFICATION_TOOL_SCHEMA["type"] == "object"
     rendered = render_user_prompt(_INPUT)
     assert "Need a quote" in rendered
+
+
+def test_the_outcome_carries_the_telemetry_the_classifications_table_needs() -> None:
+    """A5's two columns, measured here because nowhere else can measure them.
+
+    ``classifications`` sat empty for four sessions because ``latency_ms`` and ``prompt_version``
+    had no honest source. The clock is injected so this asserts on a real measurement rather than
+    on a test that sleeps.
+    """
+    ticks = iter([10.0, 10.25])
+    outcome = Classifier(
+        ScriptedProvider("cheap", [_result_json(0.95)]),
+        ScriptedProvider("big", [_result_json(0.99)]),
+        clock=lambda: next(ticks),
+    ).classify(_INPUT)
+
+    assert outcome.latency_ms == 250
+    assert outcome.prompt_version == PROMPT_VERSION
+
+
+def test_latency_spans_the_retries_and_the_escalation_it_paid_for() -> None:
+    """A per-call number would report the fastest thing that happened and hide the slow path.
+
+    This input is retried once on the cheap tier and then escalated — three model calls — and the
+    guest waited for all of them.
+    """
+    ticks = iter([0.0, 1.5])
+    outcome = Classifier(
+        ScriptedProvider("cheap", [{"bad": 1}, _result_json(0.4)]),
+        ScriptedProvider("big", [_result_json(0.99)]),
+        clock=lambda: next(ticks),
+    ).classify(_INPUT)
+
+    assert outcome.escalated is True
+    assert outcome.attempts == 3
+    assert outcome.latency_ms == 1500
+
+
+def test_an_unclear_outcome_still_reports_how_long_it_took() -> None:
+    ticks = iter([0.0, 0.4])
+    outcome = Classifier(
+        ScriptedProvider("cheap", [{"bad": 1}, {"bad": 2}]),
+        ScriptedProvider("big", [_result_json(0.99)]),
+        clock=lambda: next(ticks),
+    ).classify(_INPUT)
+
+    assert outcome.is_unclear is True
+    assert outcome.latency_ms == 400

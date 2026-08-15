@@ -3,14 +3,40 @@
 Ported from the v2 scaffold with one key change: instead of accepting a scaffold-specific
 ``Understanding`` type, this accepts intent/confidence/extracted_slots directly so it works
 with the existing classification pipeline.
+
+**``turns_taken`` is A5's addition, and it is a safety rail rather than a feature.** Once a task
+survives between messages, a task that cannot make progress no longer fails — it loops, asking a
+guest the same question every time they reply. The vocabulary has always declared
+``defaults.max_clarifying_turns`` and ``defaults.on_max_turns`` and nothing has ever read them;
+they are read here, because this is the file that decides what to say next. A receptionist that
+has asked three times and learned nothing fetches a person.
 """
 
 from __future__ import annotations
+
+from packages.intents.schema import Vocabulary, default_vocabulary
 
 from apps.api.conversations.task import Task, TaskStatus
 from apps.api.conversations.tools import REGISTRY
 from apps.api.core.autonomy import Autonomy, decide_autonomy
 from apps.api.schemas.envelope import InboundTurn, OutboundAction
+
+HANDOFF_TEXT = "Let me connect you with someone who can help."
+
+
+async def _hand_off(task: Task, tool_name: str) -> tuple[OutboundAction, Task]:
+    """Mark the task handed off, run whichever tool the vocabulary names, and say so.
+
+    The tool is looked up by name rather than hardcoded because ``on_max_turns`` and the
+    autonomy ceiling both point at one by name in ``intents.yaml``. A name the registry does not
+    know is not worth crashing a live conversation over — the guest still gets the reply and the
+    task is still marked handed off, which is what actually fetches a person.
+    """
+    task.status = TaskStatus.HANDED_OFF
+    tool = REGISTRY.get(tool_name)
+    if tool is not None:
+        await tool.run()
+    return OutboundAction(kind="handoff", text=HANDOFF_TEXT), task
 
 
 async def handle(
@@ -22,13 +48,17 @@ async def handle(
     *,
     identity_verified: bool = False,
     emergency: bool = False,
+    turns_taken: int = 0,
+    vocabulary: Vocabulary | None = None,
 ) -> tuple[OutboundAction, Task]:
     """Process one turn and return the action to take plus the updated task state.
 
     This is the core receptionist loop: check autonomy, manage task state, decide next step.
     """
+    vocab = vocabulary or default_vocabulary()
+
     if task is None or task.intent != intent:
-        task = Task(intent=intent)
+        task = Task(intent=intent, vocabulary=vocab)
 
     task.absorb(extracted_slots)
 
@@ -37,22 +67,19 @@ async def handle(
         confidence,
         identity_verified=identity_verified,
         emergency=emergency,
+        vocabulary=vocab,
     )
 
     if autonomy == "hand_off":
-        task.status = TaskStatus.HANDED_OFF
-        handoff_tool = REGISTRY.get("handoff_to_human")
-        if handoff_tool is not None:
-            await handoff_tool.run()
-        return (
-            OutboundAction(
-                kind="handoff",
-                text="Let me connect you with someone who can help.",
-            ),
-            task,
-        )
+        return await _hand_off(task, "handoff_to_human")
 
     step, slot = task.next_step()
+
+    # Asking again is only worth doing while it is still making progress. `turns_taken` counts
+    # what we have already said on this task, so the guard fires on the reply *after* the limit
+    # rather than on the last useful question.
+    if step in ("ask", "confirm") and turns_taken >= vocab.defaults.max_clarifying_turns:
+        return await _hand_off(task, vocab.defaults.on_max_turns)
 
     if step == "ask":
         assert slot is not None

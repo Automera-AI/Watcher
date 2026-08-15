@@ -49,19 +49,16 @@ CHANNEL_REGISTRY: dict[str, set[str]] = {
 #: Core files that still leak, and what they still leak, pending 1.1. Delete entries as they are
 #: cleaned; the suite fails if an entry becomes untrue, so this cannot rot.
 #:
-#: ``wa_message_id`` → ``external_id``, ``wa_chat_id`` → ``thread_id``, plus a channel field.
-#: The ``whatsapp`` hits are prose in docstrings and one prompt string, cheaper to fix in the
-#: same pass than to argue about separately.
+#: **It is empty, and that is roadmap item 1.1 finished.** The last entry was ``core/config.py``,
+#: which held the per-channel credential fields (``WHATSAPP_ACCESS_TOKEN`` and friends) — not
+#: per-channel *behaviour*, but fields that belong to a channel nonetheless. A6 moved them behind
+#: ``channels/config.py``, where the adapter declares what it needs and the core inherits it, and
+#: the entry went with them.
 #:
-#: ``core/config.py`` holds the WhatsApp/Meta credential fields (``WHATSAPP_ACCESS_TOKEN`` and
-#: friends). It is debt rather than a permanent exception: the settings object has no per-channel
-#: *behaviour*, but the fields themselves belong to the channel, and A6's outbound sender is the
-#: natural moment to move them behind ``channels/`` and have the core ask the adapter for its own
-#: configuration. Until then the entry stays here, where the list is expected to shrink — not in
-#: CHANNEL_REGISTRY, which would assert this is how it should stay.
-KNOWN_LEAKS: dict[str, set[str]] = {
-    "core/config.py": {"whatsapp"},
-}
+#: Leave the machinery in place rather than deleting it with the last entry. An empty allowlist is
+#: the strongest form of this test — every core file must now be clean — and the next channel is a
+#: phone line, which is exactly when someone will want to add "just one" exception back.
+KNOWN_LEAKS: dict[str, set[str]] = {}
 
 
 def _core_files() -> list[Path]:

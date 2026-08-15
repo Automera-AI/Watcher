@@ -106,7 +106,6 @@ def _orchestrator(confidence: float) -> tuple[Orchestrator, _FakeInbox]:
         classifier,
         _FakeAudit(),
         inbox,
-        rules_provider=lambda _t: [],
         crm_lookup=lambda _t, _c: [],
     )
     return orch, inbox
@@ -118,10 +117,10 @@ def test_consumer_reloads_persisted_message_and_orchestrates() -> None:
     orch, inbox = _orchestrator(0.95)
     consumer = MessageConsumer(store, orch)
 
-    outcome = consumer.consume(TENANT, "wamid.A")
+    outcome = asyncio.run(consumer.consume(TENANT, "wamid.A"))
 
     assert outcome is not None
-    assert outcome.action is RoutingAction.AUTO_ROUTE
+    assert outcome.action is RoutingAction.CONTROL_PING
     assert len(inbox.drafts) == 1
     # The orchestrator was handed the persistent id from the loaded row, not the wa id.
     loaded = store.load(TENANT, "wamid.A")
@@ -136,7 +135,7 @@ def test_consumer_skips_and_logs_when_message_missing(
     consumer = MessageConsumer(_MemoryStore(), orch)
 
     with caplog.at_level(logging.WARNING):
-        outcome = consumer.consume(TENANT, "wamid.ghost")
+        outcome = asyncio.run(consumer.consume(TENANT, "wamid.ghost"))
 
     assert outcome is None
     assert not inbox.drafts

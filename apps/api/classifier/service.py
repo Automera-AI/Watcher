@@ -11,8 +11,12 @@ Policy:
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
+
 from pydantic import ValidationError
 
+from apps.api.classifier.prompt import PROMPT_VERSION
 from apps.api.classifier.provider import LLMProvider
 from apps.api.classifier.types import ClassificationInput, ClassificationOutcome
 from apps.api.schemas.classification import ClassificationResult
@@ -30,33 +34,52 @@ class Classifier:
         escalation: LLMProvider,
         *,
         escalation_threshold: float = HIGH_CONFIDENCE_THRESHOLD,
+        prompt_version: str = PROMPT_VERSION,
+        clock: Callable[[], float] = time.perf_counter,
     ) -> None:
         self._first_pass = first_pass
         self._escalation = escalation
         self._threshold = escalation_threshold
+        self._prompt_version = prompt_version
+        self._clock = clock
 
     def classify(self, value: ClassificationInput) -> ClassificationOutcome:
-        result, attempts = self._attempt(self._first_pass, value)
-        if result is None:
+        """Classify one input, reporting how long the whole policy took.
+
+        The clock spans retries and escalation rather than the last call, because a message that
+        was retried twice and then escalated *did* take that long — a per-call number would report
+        the fastest thing that happened and hide the slow path entirely. It is injected so the
+        telemetry can be asserted without a test that sleeps.
+        """
+        started = self._clock()
+
+        def finish(
+            result: ClassificationResult | None, model_used: str, *, escalated: bool, attempts: int
+        ) -> ClassificationOutcome:
             return ClassificationOutcome(
-                None, self._first_pass.model_id, escalated=False, attempts=attempts
+                result,
+                model_used,
+                escalated=escalated,
+                attempts=attempts,
+                latency_ms=max(0, round((self._clock() - started) * 1000)),
+                prompt_version=self._prompt_version,
             )
 
+        result, attempts = self._attempt(self._first_pass, value)
+        if result is None:
+            return finish(None, self._first_pass.model_id, escalated=False, attempts=attempts)
+
         if result.confidence_overall >= self._threshold:
-            return ClassificationOutcome(
-                result, self._first_pass.model_id, escalated=False, attempts=attempts
-            )
+            return finish(result, self._first_pass.model_id, escalated=False, attempts=attempts)
 
         escalated_result, escalation_attempts = self._attempt(self._escalation, value)
         attempts += escalation_attempts
         if escalated_result is not None:
-            return ClassificationOutcome(
+            return finish(
                 escalated_result, self._escalation.model_id, escalated=True, attempts=attempts
             )
         # Escalation produced no valid result; keep the usable first-pass one.
-        return ClassificationOutcome(
-            result, self._first_pass.model_id, escalated=True, attempts=attempts
-        )
+        return finish(result, self._first_pass.model_id, escalated=True, attempts=attempts)
 
     def _attempt(
         self, provider: LLMProvider, value: ClassificationInput

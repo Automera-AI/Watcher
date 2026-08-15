@@ -17,20 +17,36 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Sequence
+from enum import Enum
 
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.audit.log import AuditEntry
+from apps.api.conversations.task import Task, TaskStatus
+from apps.api.db.conversation_repo import ConversationRepository, task_from_row, task_to_row
 from apps.api.db.engine import SessionScope
-from apps.api.db.models import AuditLogRow, CrmCacheRow, InboxItem, Message, RuleRow, Source
+from apps.api.db.models import (
+    AuditLogRow,
+    Classification,
+    CrmCacheRow,
+    InboxItem,
+    Message,
+    RuleRow,
+    Source,
+)
 from apps.api.identity.models import CrmRecord
 from apps.api.identity.resolver import IncomingContact
-from apps.api.orchestration.ports import InboxItemDraft
+from apps.api.orchestration.ports import (
+    ClassificationDraft,
+    ConversationState,
+    InboxItemDraft,
+)
 from apps.api.orchestration.queue import LoadedMessage
 from apps.api.rules.models import Rule
 from apps.api.schemas.enums import ConfidenceBand, MessageDirection, MessageType, SourceKind
+from apps.api.schemas.envelope import InboundTurn, OutboundAction
 from apps.api.schemas.message import MessageEnvelope
 
 _logger = logging.getLogger(__name__)
@@ -148,6 +164,49 @@ class SqlAlchemyAuditLog:
             )
 
 
+class SqlAlchemyClassificationWriter:
+    """Writes the ``classifications`` row for one message (``ClassificationWriter``, §4).
+
+    This table has existed since the data model landed and nothing has ever written to it. The
+    reason it stayed empty is that two of its columns — ``latency_ms`` and ``prompt_version`` —
+    could only be answered by the classifier service, which did not report them; A5 made the
+    service report them rather than filling the columns with something plausible from here.
+
+    The returned id is what the inbox item points at, so the control page can show *why* a message
+    was filed the way it was without the snapshot being the only copy of it.
+    """
+
+    def __init__(self, scope: SessionScope) -> None:
+        self._scope = scope
+
+    def record(self, draft: ClassificationDraft) -> str | None:
+        result = draft.result
+        with self._scope() as session:
+            row = Classification(
+                tenant_id=uuid.UUID(draft.tenant_id),
+                message_id=uuid.UUID(draft.message_id),
+                intent=_enum_value(result.intent),
+                person_name=result.person_name,
+                person_appears_to_be=result.person_appears_to_be,
+                company_name=result.company_name,
+                company_domain_hint=result.company_domain_hint,
+                phone_e164=result.phone_e164,
+                language=_enum_value(result.language),
+                summary_one_line=result.summary_one_line,
+                suggested_record_type=_optional_enum_value(result.suggested_record_type),
+                confidence_overall=result.confidence_overall,
+                confidence_intent=result.confidence_intent,
+                confidence_person=result.confidence_person,
+                confidence_company=result.confidence_company,
+                model_used=draft.model_used,
+                prompt_version=draft.prompt_version,
+                latency_ms=draft.latency_ms,
+            )
+            session.add(row)
+            session.flush()
+            return str(row.id)
+
+
 class SqlAlchemyInboxWriter:
     """Creates the ``inbox_items`` row the control page triages from (§4, §12)."""
 
@@ -163,13 +222,9 @@ class SqlAlchemyInboxWriter:
                     status=draft.status.value,
                     # `band` is nullable on the draft and not on the row. A draft without a band
                     # is the unclassified path, and a message the model could not read is by
-                    # definition not confident enough to route — which is what LOW means.
+                    # definition not confident enough to act on — which is what LOW means.
                     band=(draft.band or ConfidenceBand.LOW).value,
-                    assigned_action=(
-                        {"destination_id": draft.assigned_destination_id}
-                        if draft.assigned_destination_id is not None
-                        else None
-                    ),
+                    classification_id=_optional_uuid(draft.classification_id),
                 )
             )
 
@@ -192,6 +247,68 @@ class SqlAlchemyRulesProvider:
                 .all()
             )
         return [rule for rule in (_rule_from(row) for row in rows) if rule is not None]
+
+
+class SqlAlchemyConversationStore:
+    """Conversation, turn and task continuity across messages (``ConversationStore``, §4).
+
+    ``ConversationRepository`` was written in item 2.1 and called by nothing outside its own tests
+    for four sessions. This is the adapter that puts it in the message path: what the guest said is
+    recorded, the job already in flight is loaded, and after the receptionist has spoken both the
+    updated job and the reply are written back.
+
+    Each call takes its own session, like every other adapter here — these objects are built once
+    and used from a worker thread per message.
+    """
+
+    def __init__(self, scope: SessionScope) -> None:
+        self._scope = scope
+
+    def begin(self, turn: InboundTurn) -> ConversationState:
+        with self._scope() as session:
+            repo = ConversationRepository(session)
+            conversation = repo.find_or_create_conversation(
+                str(turn.tenant_id), turn.channel, turn.channel_thread_id
+            )
+            repo.record_turn(conversation.id, turn)
+            conversation.last_turn_at = turn.received_at
+
+            row = repo.get_active_task(conversation.id)
+            return ConversationState(
+                conversation_id=str(conversation.id),
+                task=task_from_row(row) if row is not None else None,
+                # Only replies sent in service of the job now in flight count against its
+                # clarifying-turn budget; see `count_outbound_turns`.
+                replies_sent=repo.count_outbound_turns(
+                    conversation.id, since=row.created_at if row is not None else None
+                ),
+            )
+
+    def record_reply(
+        self,
+        state: ConversationState,
+        turn: InboundTurn,
+        task: Task,
+        action: OutboundAction,
+    ) -> None:
+        conversation_id = uuid.UUID(state.conversation_id)
+        with self._scope() as session:
+            repo = ConversationRepository(session)
+            row = repo.get_active_task(conversation_id)
+
+            if row is not None and row.intent != task.intent:
+                # The guest asked about something else. The old job did not fail and was not
+                # finished; it was left, and it has to leave the active set or every later message
+                # resumes a conversation nobody is having.
+                row.status = TaskStatus.ABANDONED.value
+                repo.save_task(row)
+                row = None
+
+            if row is None:
+                row = repo.create_task(conversation_id, str(turn.tenant_id), task.intent)
+
+            repo.save_task(task_to_row(task, row))
+            repo.record_outbound_turn(conversation_id, turn, action)
 
 
 class SqlAlchemyCrmLookup:
@@ -252,3 +369,12 @@ def _rule_from(row: RuleRow) -> Rule | None:
 
 def _optional_uuid(value: str | None) -> uuid.UUID | None:
     return uuid.UUID(value) if value is not None else None
+
+
+def _enum_value(value: object) -> str:
+    """The stored form of a taxonomy value, whether it arrives as an enum or already as a string."""
+    return str(value.value) if isinstance(value, Enum) else str(value)
+
+
+def _optional_enum_value(value: object | None) -> str | None:
+    return None if value is None else _enum_value(value)

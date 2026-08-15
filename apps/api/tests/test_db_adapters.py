@@ -16,10 +16,24 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from apps.api.audit.log import AuditEntry
+from apps.api.conversations.task import Task, TaskStatus
 from apps.api.db.engine import Database
-from apps.api.db.models import AuditLogRow, ChannelConfig, CrmCacheRow, InboxItem, RuleRow, Source
+from apps.api.db.models import (
+    AuditLogRow,
+    ChannelConfig,
+    Classification,
+    Conversation,
+    CrmCacheRow,
+    InboxItem,
+    RuleRow,
+    Source,
+    TaskRow,
+    Turn,
+)
 from apps.api.db.orchestration_repo import (
     SqlAlchemyAuditLog,
+    SqlAlchemyClassificationWriter,
+    SqlAlchemyConversationStore,
     SqlAlchemyCrmLookup,
     SqlAlchemyInboxWriter,
     SqlAlchemyMessageLoader,
@@ -28,8 +42,10 @@ from apps.api.db.orchestration_repo import (
 from apps.api.db.repository import SessionScopedMessageRepository
 from apps.api.db.tenant_resolver import ChannelConfigTenantResolver, UnknownEndpoint
 from apps.api.identity.resolver import IncomingContact
-from apps.api.orchestration.ports import InboxItemDraft
+from apps.api.orchestration.ports import ClassificationDraft, InboxItemDraft
+from apps.api.schemas.classification import ClassificationResult
 from apps.api.schemas.enums import ConfidenceBand, InboxStatus, MessageType, SourceKind
+from apps.api.schemas.envelope import InboundTurn, OutboundAction
 from apps.api.schemas.message import MessageEnvelope
 
 TENANT_A = str(uuid.uuid4())
@@ -170,8 +186,13 @@ def test_audit_log_appends_the_decision_and_its_snapshot(database: Database) -> 
         assert row.destination_id == uuid.UUID(destination_id)
 
 
-def test_inbox_writer_records_the_assigned_destination(database: Database) -> None:
-    destination_id = str(uuid.uuid4())
+def test_inbox_writer_points_at_the_classification(database: Database) -> None:
+    """Where ``model_used`` went (A5).
+
+    It used to be handed to this writer and dropped, because ``inbox_items`` has no such column.
+    The classification row now exists, carries it, and the inbox item points at it.
+    """
+    classification_id = str(uuid.uuid4())
 
     SqlAlchemyInboxWriter(database.session).create(
         InboxItemDraft(
@@ -179,8 +200,7 @@ def test_inbox_writer_records_the_assigned_destination(database: Database) -> No
             message_id=str(uuid.uuid4()),
             status=InboxStatus.AUTO_ROUTED,
             band=ConfidenceBand.HIGH,
-            model_used="claude-haiku-4-5",
-            assigned_destination_id=destination_id,
+            classification_id=classification_id,
         )
     )
 
@@ -188,27 +208,25 @@ def test_inbox_writer_records_the_assigned_destination(database: Database) -> No
         row = session.query(InboxItem).one()
         assert row.status == InboxStatus.AUTO_ROUTED.value
         assert row.band == ConfidenceBand.HIGH.value
-        assert row.assigned_action == {"destination_id": destination_id}
+        assert row.classification_id == uuid.UUID(classification_id)
 
 
 def test_inbox_writer_files_a_bandless_draft_as_low(database: Database) -> None:
     """The unclassified path carries no band. A message the model could not read is not
-    confident enough to route, which is what ``low`` means — and the column is not nullable."""
+    confident enough to act on, which is what ``low`` means — and the column is not nullable."""
     SqlAlchemyInboxWriter(database.session).create(
         InboxItemDraft(
             tenant_id=TENANT_A,
             message_id=str(uuid.uuid4()),
             status=InboxStatus.NEEDS_REVIEW,
             band=None,
-            model_used=None,
-            assigned_destination_id=None,
         )
     )
 
     with database.session() as session:
         row = session.query(InboxItem).one()
         assert row.band == ConfidenceBand.LOW.value
-        assert row.assigned_action is None
+        assert row.classification_id is None
 
 
 # ── Rules and CRM cache ────────────────────────────────────────────────────────────────────
@@ -320,3 +338,154 @@ def test_tenant_resolver_ignores_a_disabled_endpoint(database: Database) -> None
 
     with pytest.raises(UnknownEndpoint):
         ChannelConfigTenantResolver(database.session)("endpoint-1")
+
+
+# ── Continuity and classification telemetry (A5) ───────────────────────────────────────────
+
+
+def _turn(
+    external_id: str = "wamid.A",
+    *,
+    text: str = "Any rooms free in June?",
+    thread_id: str = "966500000000",
+) -> InboundTurn:
+    return InboundTurn(
+        tenant_id=uuid.UUID(TENANT_A),
+        channel="whatsapp",
+        channel_thread_id=thread_id,
+        channel_identity="+966500000000",
+        modality="text",
+        text=text,
+        received_at=NOW,
+        idempotency_key=external_id,
+    )
+
+
+def _classification_result(intent: str = "booking_enquiry") -> ClassificationResult:
+    return ClassificationResult.model_validate(
+        {
+            "intent": intent,
+            "summary_one_line": "Guest asks about availability",
+            "language": "en",
+            "person_name": "Sara",
+            "confidence_overall": 0.9,
+            "confidence_intent": 0.9,
+            "confidence_person": 0.9,
+            "confidence_company": 0.9,
+        }
+    )
+
+
+def test_classification_writer_records_the_result_and_its_telemetry(database: Database) -> None:
+    """The table that had never been written to, and the two columns that kept it empty."""
+    message_id = str(uuid.uuid4())
+
+    row_id = SqlAlchemyClassificationWriter(database.session).record(
+        ClassificationDraft(
+            tenant_id=TENANT_A,
+            message_id=message_id,
+            result=_classification_result(),
+            model_used="claude-haiku-4-5",
+            prompt_version="v3",
+            latency_ms=412,
+        )
+    )
+
+    with database.session() as session:
+        row = session.query(Classification).one()
+        assert str(row.id) == row_id  # the id the inbox item points at
+        assert row.message_id == uuid.UUID(message_id)
+        assert (row.intent, row.language) == ("booking_enquiry", "en")
+        assert row.person_name == "Sara"
+        assert (row.model_used, row.prompt_version, row.latency_ms) == (
+            "claude-haiku-4-5",
+            "v3",
+            412,
+        )
+
+
+def test_the_store_opens_a_conversation_and_records_what_was_said(database: Database) -> None:
+    state = SqlAlchemyConversationStore(database.session).begin(_turn())
+
+    assert state.task is None  # nothing in flight yet
+    assert state.replies_sent == 0
+
+    with database.session() as session:
+        conversation = session.query(Conversation).one()
+        assert str(conversation.id) == state.conversation_id
+        assert conversation.channel_thread_id == "966500000000"
+        # SQLite hands datetimes back naive; the value is what matters, not the tzinfo.
+        assert conversation.last_turn_at is not None
+        assert conversation.last_turn_at.replace(tzinfo=UTC) == NOW
+
+        turn = session.query(Turn).one()
+        assert (turn.direction, turn.body_text) == ("inbound", "Any rooms free in June?")
+
+
+def test_the_second_message_finds_the_same_conversation_and_its_task(database: Database) -> None:
+    """What continuity actually is: the job the previous turn opened comes back."""
+    store = SqlAlchemyConversationStore(database.session)
+
+    first = store.begin(_turn("wamid.1"))
+    task = Task(intent="booking_enquiry", slots={"check_in": "4 June"})
+    store.record_reply(first, _turn("wamid.1"), task, OutboundAction(kind="ask", text="How many?"))
+
+    second = store.begin(_turn("wamid.2", text="two people"))
+
+    assert second.conversation_id == first.conversation_id
+    assert second.task is not None
+    assert second.task.intent == "booking_enquiry"
+    assert second.task.slots == {"check_in": "4 June"}  # survived the gap between messages
+    assert second.replies_sent == 1  # and so did the clarifying-turn budget
+
+
+def test_a_reply_is_recorded_once_even_if_the_message_is_processed_twice(
+    database: Database,
+) -> None:
+    """A queue retry must not double the transcript, or double-count the turn budget."""
+    store = SqlAlchemyConversationStore(database.session)
+    action = OutboundAction(kind="ask", text="How many?")
+
+    for _ in range(2):
+        state = store.begin(_turn("wamid.1"))
+        store.record_reply(state, _turn("wamid.1"), Task(intent="booking_enquiry"), action)
+
+    with database.session() as session:
+        assert session.query(Conversation).count() == 1
+        assert session.query(Turn).count() == 2  # one inbound, one reply — not four
+        assert session.query(TaskRow).count() == 1
+
+
+def test_a_new_intent_abandons_the_old_task_rather_than_overwriting_it(
+    database: Database,
+) -> None:
+    """A guest who changes the subject starts a new job, and the old one leaves the active set."""
+    store = SqlAlchemyConversationStore(database.session)
+
+    first = store.begin(_turn("wamid.1"))
+    store.record_reply(
+        first,
+        _turn("wamid.1"),
+        Task(intent="booking_enquiry"),
+        OutboundAction(kind="ask", text="When?"),
+    )
+
+    second = store.begin(_turn("wamid.2", text="actually, where do I park?"))
+    store.record_reply(
+        second,
+        _turn("wamid.2"),
+        Task(intent="property_question"),
+        OutboundAction(kind="say", text="In the basement."),
+    )
+
+    with database.session() as session:
+        statuses = {row.intent: row.status for row in session.query(TaskRow).all()}
+        assert statuses == {
+            "booking_enquiry": TaskStatus.ABANDONED.value,
+            "property_question": TaskStatus.COLLECTING.value,
+        }
+
+    # The new job starts with a clean budget: the turns spent on the abandoned one do not count.
+    third = store.begin(_turn("wamid.3", text="which level?"))
+    assert third.task is not None and third.task.intent == "property_question"
+    assert third.replies_sent == 1

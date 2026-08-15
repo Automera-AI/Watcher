@@ -43,6 +43,11 @@ thinking and the tool call together, would truncate the classification rather th
 | D13‑a | Eval in CI | **Recorded fixtures in CI; live key nightly** | Deterministic, cheap, no live key on every PR |
 | — | Schema shape | **Flat (addendum §4)** | One model backs LLM output + DB row + REST contract |
 | — | DB connection path | **Assume a transaction‑mode pooler** (`NullPool` + `prepare_threshold=None`); `DATABASE_POOL_MODE=session` opts out | Supabase's app URI is pgbouncer in transaction mode, where prepared statements and a client‑side pool both break — intermittently, under load. Safe default; the cost is a handshake per checkout, to be measured in B1/B3 |
+| D24 | Rules + destinations in the message path | **Removed** — the orchestrator neither evaluates rules nor assigns a destination. Engine, `rules` and `destinations` tables all retained for the control page (track D) | Auto‑routing a message to a Sheet was v1's answer to an inbound message; the receptionist is v2's. A message that gets *answered* has nowhere to be filed to, and keeping both meant one message could be routed and replied to at once (roadmap A5) |
+| — | Conversation continuity | **Every classified message runs against a `ConversationStore`**; a receptionist without one is refused at construction | A receptionist with no store forgets the previous turn on every message — it looks like it works and it is the exact failure A5 exists to remove (roadmap A5) |
+| — | Clarifying‑turn budget | **`defaults.max_clarifying_turns` from the vocabulary**, then `defaults.on_max_turns` (hand off) | Once a task survives between messages, a task that cannot be filled asks the same question forever. The vocabulary declared this from item 0.3 and nothing read it until continuity made it load‑bearing |
+| — | A failed send | **Logged, reported on the outcome, not raised** | The message is classified, the reply is recorded and the decision is filed by the time the send runs. Raising would lose all of it to a transient 502 from the channel (roadmap A6) |
+| — | Channel credential fields | **Declared by `channels/config.py`, inherited by `Settings`** | An access token and a phone‑number id are facts about a channel. One object still reads one environment; the *knowledge* of what a channel needs sits with the channel. Emptied `KNOWN_LEAKS` (roadmap A6) |
 
 ---
 
@@ -54,6 +59,8 @@ thinking and the tool call together, would truncate the classification rather th
 - [x] Add a typed **Settings** object in `core/` (extend `MetaSettings`) reading the pinned model/ASR config. *(roadmap A1 — `core/config.py`; `Settings.meta()` returns the existing `MetaSettings`)*
 - [x] Wire the **engine and session scope** over `DATABASE_URL`, pooler‑safe by default. *(roadmap A2 — `db/engine.py`)*
 - [x] Build the **composition root**: the first production caller of `create_app()`. *(roadmap A4 — `main.py`, run as `uvicorn apps.api.main:create_application --factory`)*
+- [x] Wire **conversation + task continuity** into the message path and populate `classifications`. *(roadmap A5 — `orchestration/ports.py`, `db/orchestration_repo.py`; `process()` is async and the v1 filer is gone)*
+- [x] Implement the **outbound sender** behind `ChannelSender` and move the channel credentials behind `channels/`. *(roadmap A6 — `channels/whatsapp.py`, `channels/config.py`, `channels/factory.py`)*
 - [ ] Alembic target + Render Postgres URL wired in deploy.
 
 ---

@@ -1,26 +1,33 @@
 """Typed application configuration — one object over the whole of ``.env`` (roadmap A1).
 
 Before this, exactly two variables were read anywhere in the tree: ``META_APP_SECRET`` and
-``META_WEBHOOK_VERIFY_TOKEN``, via ``MetaSettings.from_env``. Everything else in ``.env.example``
-— model IDs, API keys, the WhatsApp number identifiers, the ASR choice — was documented config
-that no code could see. This module is the seam that makes those values reachable, and it is a
-prerequisite for the composition root (A4): a process cannot be wired from configuration it
+``META_WEBHOOK_VERIFY_TOKEN``, via a ``from_env`` classmethod on an adapter. Everything else in
+``.env.example`` — model IDs, API keys, the number identifiers, the ASR choice — was documented
+config that no code could see. This module is the seam that makes those values reachable, and it is
+a prerequisite for the composition root (A4): a process cannot be wired from configuration it
 cannot read.
 
 Three rules the design follows:
 
 * **Nothing is required to *import*.** Every field is optional or has a default, so the eval
-  runner, the tests, and a shell session can construct ``Settings()`` without a WABA. What is
-  required is required *per subsystem*, checked at the point of use — :meth:`Settings.meta`
-  raises for a missing app secret, :meth:`Settings.llm_credentials` for a missing key — and the
-  error names every missing variable at once rather than one per restart.
+  runner, the tests, and a shell session can construct ``Settings()`` without an account of any
+  kind. What is required is required *per subsystem*, checked at the point of use —
+  :meth:`~apps.api.channels.config.ChannelCredentials.meta` raises for a missing app secret,
+  :meth:`Settings.llm_credentials` for a missing key — and the error names every missing variable
+  at once rather than one per restart.
 * **Placeholders are absence.** ``.env.example`` ships ``<META_APP_ID>``-style placeholders and a
   half-filled ``.env`` is the normal state of a machine mid-setup. A value still wrapped in angle
-  brackets is treated as unset, so it fails as "missing META_APP_ID" rather than reaching Meta as
-  a literal string and failing as a 401 an hour later.
+  brackets is treated as unset, so it fails as "missing META_APP_ID" rather than reaching a
+  provider as a literal string and failing as a 401 an hour later. See ``core/settings_base.py``.
 * **Secrets are :class:`~pydantic.SecretStr`.** ``Settings`` ends up in tracebacks, log lines and
   ``/debug``-shaped endpoints; ``repr`` of a key must not be the key. Call
   ``.get_secret_value()`` deliberately, at the call site that needs it.
+
+**Where the per-channel variables went (A6).** ``Settings`` extends
+:class:`~apps.api.channels.config.ChannelCredentials`, which declares the credential fields for the
+channels and the accessors that validate them. One object still reads one environment; what changed
+is that this file no longer has to know what a channel needs in order to hold it, which is what
+finally emptied ``KNOWN_LEAKS`` in the boundary test.
 
 ``.env`` is read when present (dev convenience) and the process environment always wins over it.
 Unknown variables are ignored rather than rejected: a container image gets ``PATH``, ``HOME`` and
@@ -31,21 +38,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Literal
+from typing import Literal
 
-from pydantic import Field, SecretStr, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, SecretStr
+from pydantic_settings import SettingsConfigDict
 
-from apps.api.channels import ConfigError, MetaSettings
+from apps.api.channels.config import ChannelCredentials
 from apps.api.core.policy import TenantPolicy
 from apps.api.schemas.common import HIGH_CONFIDENCE_THRESHOLD, PhoneE164
-
-
-def _is_placeholder(value: str) -> bool:
-    """``<ANTHROPIC_API_KEY>`` from ``.env.example``, or an assignment left empty."""
-    stripped = value.strip()
-    return not stripped or (stripped.startswith("<") and stripped.endswith(">"))
-
 
 #: Wire protocol default for Anthropic. Overridable so the regulated tier can point at a gateway
 #: inside its own perimeter without a code change (AGENTS.md: no unreviewed egress).
@@ -68,8 +68,12 @@ class LLMCredentials:
     max_retries: int
 
 
-class Settings(BaseSettings):
-    """Every variable in ``.env.example``, typed, with the placeholders treated as unset."""
+class Settings(ChannelCredentials):
+    """Every variable in ``.env.example``, typed, with the placeholders treated as unset.
+
+    The channel credential fields and their accessors are inherited (see the module docstring);
+    everything declared below belongs to the core and would be true of any channel.
+    """
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -80,17 +84,7 @@ class Settings(BaseSettings):
         str_strip_whitespace=True,
     )
 
-    # ── Meta WhatsApp Business Cloud API — ingestion (addendum §5) ──────────────────────────
-    meta_app_id: str | None = None
-    meta_app_secret: SecretStr | None = None
-    meta_webhook_verify_token: SecretStr | None = None
-    meta_graph_api_version: str = "v21.0"
-
-    # ── The watched number and the operator's (addendum §4, §10) ───────────────────────────
-    whatsapp_access_token: SecretStr | None = None
-    whatsapp_business_account_id: str | None = None
-    whatsapp_phone_number_id: str | None = None
-    whatsapp_business_number_e164: PhoneE164 | None = None
+    # ── The operator's own number for the control chat (addendum §10) ──────────────────────
     control_chat_phone_e164: PhoneE164 | None = None
 
     # ── Classifier tiering (addendum §8 / D8-a) ────────────────────────────────────────────
@@ -139,46 +133,7 @@ class Settings(BaseSettings):
     # derived from the URL, since a pooler can be put in front of any host on any port.
     database_pool_mode: Literal["transaction", "session"] = "transaction"
 
-    @model_validator(mode="before")
-    @classmethod
-    def _drop_placeholders(cls, data: Any) -> Any:
-        """Treat ``<LIKE_THIS>`` and the empty string as "not configured".
-
-        ``.env.example`` is meant to be copied and filled in, so the failure mode this guards is
-        a real one: an unedited line reaching a provider as a literal API key, where it surfaces
-        as an authentication error from a third party instead of a missing-variable error from
-        us. An empty assignment (``FOO=``) is the same statement made a different way.
-
-        The placeholder is *removed* rather than replaced with ``None`` so that a field with a
-        default gets its default. ``.env.example`` ships ``META_GRAPH_API_VERSION=<...>``;
-        copying that file unedited should leave the pinned default in place, not fail
-        validation on a field that has a perfectly good answer already.
-        """
-        if not isinstance(data, dict):
-            return data
-        return {
-            key: value
-            for key, value in data.items()
-            if not (isinstance(value, str) and _is_placeholder(value))
-        }
-
     # ── Per-subsystem accessors: this is where "required" is decided ───────────────────────
-
-    def meta(self) -> MetaSettings:
-        """Webhook verification settings, or :class:`ConfigError` naming what is missing."""
-        secret, token = self._require(
-            META_APP_SECRET=self.meta_app_secret,
-            META_WEBHOOK_VERIFY_TOKEN=self.meta_webhook_verify_token,
-        )
-        return MetaSettings(app_secret=secret, webhook_verify_token=token)
-
-    def whatsapp_send_credentials(self) -> tuple[str, str]:
-        """``(access_token, phone_number_id)`` for outbound sends — A6's dependency."""
-        token, phone_number_id = self._require(
-            WHATSAPP_ACCESS_TOKEN=self.whatsapp_access_token,
-            WHATSAPP_PHONE_NUMBER_ID=self.whatsapp_phone_number_id,
-        )
-        return token, phone_number_id
 
     def tenant_policy(self) -> TenantPolicy:
         """The default routing policy, with the one knob the environment can move applied.
@@ -238,25 +193,6 @@ class Settings(BaseSettings):
             base_url=base_url.rstrip("/"),
             timeout_seconds=self.llm_timeout_seconds,
             max_retries=self.llm_max_retries,
-        )
-
-    @staticmethod
-    def _require(**values: str | SecretStr | None) -> tuple[str, ...]:
-        """Unwrap the given settings, or raise naming *every* missing one in a single message.
-
-        One variable per error means one restart per variable. A first deploy is typically
-        missing three or four at once, so they are collected and reported together.
-        """
-        missing = sorted(name for name, value in values.items() if value is None)
-        if missing:
-            raise ConfigError(
-                "Missing required environment variable"
-                f"{'s' if len(missing) > 1 else ''}: {', '.join(missing)}. "
-                "See .env.example."
-            )
-        return tuple(
-            value.get_secret_value() if isinstance(value, SecretStr) else str(value)
-            for value in values.values()
         )
 
 
