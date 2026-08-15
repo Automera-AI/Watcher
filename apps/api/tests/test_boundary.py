@@ -52,7 +52,16 @@ CHANNEL_REGISTRY: dict[str, set[str]] = {
 #: ``wa_message_id`` → ``external_id``, ``wa_chat_id`` → ``thread_id``, plus a channel field.
 #: The ``whatsapp`` hits are prose in docstrings and one prompt string, cheaper to fix in the
 #: same pass than to argue about separately.
-KNOWN_LEAKS: dict[str, set[str]] = {}
+#:
+#: ``core/config.py`` holds the WhatsApp/Meta credential fields (``WHATSAPP_ACCESS_TOKEN`` and
+#: friends). It is debt rather than a permanent exception: the settings object has no per-channel
+#: *behaviour*, but the fields themselves belong to the channel, and A6's outbound sender is the
+#: natural moment to move them behind ``channels/`` and have the core ask the adapter for its own
+#: configuration. Until then the entry stays here, where the list is expected to shrink — not in
+#: CHANNEL_REGISTRY, which would assert this is how it should stay.
+KNOWN_LEAKS: dict[str, set[str]] = {
+    "core/config.py": {"whatsapp"},
+}
 
 
 def _core_files() -> list[Path]:
