@@ -1,8 +1,9 @@
 # Session handoff — read this first
 
 **Updated:** end of session 6, 15 August 2026
-**Branch:** `claude/a2-a4-roadmap-ju60pc` — one commit, `bdd45bf`, pushed. **No PR opened yet.**
-**`main` is at:** `b7cbefe` — **session-6 work is not on `main`**; see §8 before branching
+**Branch:** `claude/a2-a4-roadmap-ju60pc` — pushed
+**PR:** [#18](https://github.com/amahmoudosman96-lgtm/Watcher/pull/18) — **open, not merged**
+**`main` is at:** `b7cbefe` — **session-6 work is not on `main` until #18 merges**; see §8 before branching
 **Start at §2 for status, §8 for what to do first.**
 
 Purpose: let a new session pick up without re-deriving anything. Companion documents are
@@ -21,7 +22,7 @@ Measured by running it, not read off a document.
 
 | | |
 |---|---|
-| Branch | **`claude/a2-a4-roadmap-ju60pc`** — commit `bdd45bf`, pushed, unmerged |
+| Branch | **`claude/a2-a4-roadmap-ju60pc`** — pushed; PR #18 open, unmerged |
 | `main` | `b7cbefe` — sessions 1–5 only |
 | Tests | **375 passing** (was 325 at the start of this session) |
 | Python files | 121 total; 83 source across 20 modules |
@@ -235,8 +236,8 @@ Also worth doing in 2.7: add Franco-Arabic cases to the golden set.
 
 ## 8. First five minutes of the next session
 
-1. **Session-6 work is not on `main`.** Either open and merge a PR for
-   `claude/a2-a4-roadmap-ju60pc` first, or branch from it:
+1. **Session-6 work is not on `main` until PR #18 merges.** Either merge it first, or branch from
+   the branch:
    `git fetch origin && git checkout -B <new-branch> origin/claude/a2-a4-roadmap-ju60pc`.
    Do **not** branch from `main` and start A5 — you will be building on a tree with no entrypoint.
 2. Rebuild the venv from §1 and confirm **375 passed**.
