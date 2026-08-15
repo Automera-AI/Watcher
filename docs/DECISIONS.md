@@ -10,15 +10,22 @@ single source of truth for engineering; supersedes the open `🔲 NEEDS INPUT` i
 
 | # | Decision | **Locked choice** | Downstream impact |
 |---|----------|-------------------|-------------------|
-| D8‑a | Classifier model tiering | **Haiku 4.5 → Sonnet 4.6, GPT‑4o‑mini fallback** | LLM provider impls; `.env` model IDs pinned |
+| D8‑a | Classifier model tiering | **Haiku 4.5 → Sonnet 5, GPT‑4o‑mini fallback** | LLM provider impls; `.env` model IDs pinned |
 | — | SaaS hosting | **Render** | CD deploy target; Alembic DB; staging env |
 | D2‑a | Control‑page auth | **Clerk** (swap to self‑hostable for regulated tier) | Auth slice; tenancy binding |
 | — | Intent taxonomy + schema | **Pin 6 intents + 3 record types as enums; keep flat schema** | `schemas/enums.py` + classification; eval confusion matrix |
 
-**Pinned model IDs** (in `.env.example`):
-- First pass: `claude-haiku-4-5-20251001`
-- Escalation: `claude-sonnet-4-6`
+**Pinned model IDs** (in `.env.example`), revised 2026‑08‑15 to the Claude 5 family:
+- First pass: `claude-haiku-4-5` — unchanged in substance; the Claude 5 family has no Haiku, and
+  Haiku 4.5 is still the current cheap tier. First‑pass traffic is every inbound message, so
+  moving it up a tier is a cost decision, not a version bump.
+- Escalation: `claude-sonnet-5` (was `claude-sonnet-4-6`)
 - Fallback: `gpt-4o-mini`
+
+Switching the escalation tier to a Claude 5 model changes two things in the request, both handled
+in `classifier/factory.py` rather than per‑deploy config: the family rejects a non‑default
+`temperature` with a 400, and it thinks unless told not to — which, with `max_tokens` bounding
+thinking and the tool call together, would truncate the classification rather than error.
 
 **Intent enum** (role‑guide vocabulary): `new_lead`, `existing_contact_reply`, `support_issue`,
 `internal_team`, `spam_or_noise`, `unclear`.

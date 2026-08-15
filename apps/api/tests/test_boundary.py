@@ -40,17 +40,10 @@ ADAPTER_PACKAGES: frozenset[str] = frozenset({"ingestion", "channels"})
 #: why the quick-reply cap was moved out of that file and into the WhatsApp adapter.
 #:
 #: Kept separate from KNOWN_LEAKS so the two never get confused: this one does not shrink.
-#: ``core/config.py`` is the fourth entry and the least obvious one. A deployment's environment
-#: names the channels that deployment speaks — ``WHATSAPP_ACCESS_TOKEN`` is a credential for a
-#: specific vendor and there is no channel-neutral spelling of it — and DECISIONS.md puts the
-#: typed settings object in ``core/`` deliberately. What the rule actually forbids is *behaviour*
-#: that assumes a channel; holding a token in a field is not that, and the settings object has no
-#: branches. When the phone line lands, ``twilio`` joins this entry rather than KNOWN_LEAKS.
 CHANNEL_REGISTRY: dict[str, set[str]] = {
     "schemas/envelope.py": {"whatsapp"},
     "schemas/message.py": {"whatsapp"},
     "db/models.py": {"whatsapp"},
-    "core/config.py": {"whatsapp"},
 }
 
 #: Core files that still leak, and what they still leak, pending 1.1. Delete entries as they are
@@ -59,7 +52,16 @@ CHANNEL_REGISTRY: dict[str, set[str]] = {
 #: ``wa_message_id`` → ``external_id``, ``wa_chat_id`` → ``thread_id``, plus a channel field.
 #: The ``whatsapp`` hits are prose in docstrings and one prompt string, cheaper to fix in the
 #: same pass than to argue about separately.
-KNOWN_LEAKS: dict[str, set[str]] = {}
+#:
+#: ``core/config.py`` holds the WhatsApp/Meta credential fields (``WHATSAPP_ACCESS_TOKEN`` and
+#: friends). It is debt rather than a permanent exception: the settings object has no per-channel
+#: *behaviour*, but the fields themselves belong to the channel, and A6's outbound sender is the
+#: natural moment to move them behind ``channels/`` and have the core ask the adapter for its own
+#: configuration. Until then the entry stays here, where the list is expected to shrink — not in
+#: CHANNEL_REGISTRY, which would assert this is how it should stay.
+KNOWN_LEAKS: dict[str, set[str]] = {
+    "core/config.py": {"whatsapp"},
+}
 
 
 def _core_files() -> list[Path]:

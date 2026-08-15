@@ -81,8 +81,8 @@ def test_defaults_match_the_locked_decisions(_settings: SettingsFactory) -> None
     """D8-a pins the tiering; an unset environment must not invent a different one."""
     settings = _settings()
 
-    assert settings.classifier_model_first_pass == "claude-haiku-4-5-20251001"
-    assert settings.classifier_model_escalation == "claude-sonnet-4-6"
+    assert settings.classifier_model_first_pass == "claude-haiku-4-5"
+    assert settings.classifier_model_escalation == "claude-sonnet-5"
     assert settings.classifier_model_fallback == "gpt-4o-mini"
     assert settings.classifier_confidence_escalation_threshold == 0.85
     assert settings.asr_provider == "whisper-api"

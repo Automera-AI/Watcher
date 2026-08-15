@@ -94,6 +94,24 @@ into the user turn; the tests assert that invariant rather than trusting it. `la
 counts cached tokens inside `prompt_tokens` and Anthropic reports them alongside — so a cache hit
 ratio falling to zero is visible and not merely expensive.
 
+**The pinned tiers are Claude 5, and the family changes the request.** D8-a's escalation tier
+moved from Sonnet 4.6 to `claude-sonnet-5`; the cheap tier stays on Haiku 4.5, which has no Claude
+5 equivalent and carries every inbound message. Two consequences, both handled in `factory.py` so
+that re-pinning a tier stays a config edit:
+
+* **No `temperature`.** The Claude 5 family rejects a non-default sampling parameter with a 400,
+  and it never guaranteed identical output twice on the models that did accept it.
+* **Thinking is off explicitly.** Claude 5 models think when `thinking` is omitted, and
+  `max_tokens` bounds thinking *and* the tool call together — so a classification could spend its
+  budget reasoning and be truncated before emitting the tool call, which reads downstream as
+  invalid output rather than as truncation. `_thinking_policy` sends `{"type": "disabled"}` to the
+  models that accept it, omits it on older models that predate the value, and raises the output
+  ceiling for Fable/Mythos, which reject `disabled` and think regardless.
+
+`effort` is deliberately left at its default. It is the other spend lever on Claude 5, but accuracy
+is the product metric and 2.7 is what measures accuracy — tuning it first is how 0.88 stopped
+meaning anything.
+
 **Unusable output is not an error.** A response with no tool call, or arguments that will not parse,
 returns `{}`. That fails validation, and validation failure is already a defined path: retry once on
 the same tier, then unclear → inbox (§8). `ProviderError` is reserved for "could not reach the
@@ -121,6 +139,18 @@ factory tests ending with a model that answers in prose reaching `is_unclear` th
 provider code rather than a double.
 
 ---
+
+## Open, for 2.7
+
+**The system prompt's token count is an estimate, and one number depends on it.** It is ~5k tokens
+by a characters÷4 approximation — never measured, because measuring needs a key. That matters in
+one place: Haiku 4.5 will not cache a prefix below **4,096 tokens**, and the cheap tier is where
+caching pays for itself. The estimate clears the floor by roughly 30% and the true count is
+probably higher (Arabic and Franco-Arabic tokenize worse than the approximation), so caching
+almost certainly activates — but if the vocabulary ever shrinks, it stops silently: no error, just
+a larger bill. 2.7 has a key in hand; count the assembled prompt then, record the real number, and
+pin it with a test if the margin is thinner than it looks. Sonnet 5's floor is 1,024, so the
+escalation tier is not at risk either way.
 
 ## What this does not do
 

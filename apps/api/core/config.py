@@ -101,8 +101,12 @@ class Settings(BaseSettings):
     # Defaults mirror DECISIONS.md D8-a. They are defaults rather than requirements because a
     # deploy that forgets to pin a model should run the pinned-by-decision one, not refuse to
     # start; a deploy that means to change tier says so in its environment.
-    classifier_model_first_pass: str = "claude-haiku-4-5-20251001"
-    classifier_model_escalation: str = "claude-sonnet-4-6"
+    #
+    # The cheap tier stays on Haiku 4.5 because there is no Haiku in the Claude 5 family and it
+    # is still the current cheap tier — it carries first-pass traffic, which is every inbound
+    # message, so moving it up a tier is a cost decision rather than a version bump.
+    classifier_model_first_pass: str = "claude-haiku-4-5"
+    classifier_model_escalation: str = "claude-sonnet-5"
     classifier_model_fallback: str = "gpt-4o-mini"
     classifier_confidence_escalation_threshold: float = Field(
         default=HIGH_CONFIDENCE_THRESHOLD, ge=0.0, le=1.0

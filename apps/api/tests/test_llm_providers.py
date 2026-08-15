@@ -119,7 +119,7 @@ def _openai_body(arguments: str | None, **usage: Any) -> dict[str, Any]:
 
 def _provider(recorder: _Recorder, **kwargs: Any) -> AnthropicProvider:
     return AnthropicProvider(
-        "claude-haiku-4-5-20251001", "sk-ant", recorder.client(), max_retries=0, **kwargs
+        "claude-haiku-4-5", "sk-ant", recorder.client(), max_retries=0, **kwargs
     )
 
 
@@ -163,13 +163,37 @@ def test_anthropic_forces_the_classification_tool() -> None:
     payload = recorder.payload()
     assert payload["tool_choice"] == {"type": "tool", "name": CLASSIFICATION_TOOL_NAME}
     assert payload["tools"][0]["input_schema"]["type"] == "object"
-    assert payload["temperature"] == 0
-    assert payload["model"] == "claude-haiku-4-5-20251001"
+    assert payload["model"] == "claude-haiku-4-5"
     assert payload["messages"][0]["content"] == render_user_prompt(_INPUT)
 
     headers = recorder.requests[0].headers
     assert headers["x-api-key"] == "sk-ant"
     assert headers["anthropic-version"] == ANTHROPIC_API_VERSION
+
+
+def test_anthropic_never_sends_temperature() -> None:
+    """The Claude 5 family rejects a non-default sampling parameter with a 400."""
+    recorder = _Recorder(httpx.Response(200, json=_anthropic_body(_RESULT)))
+    _provider(recorder).complete_json(_INPUT)
+
+    payload = recorder.payload()
+    assert "temperature" not in payload
+    assert "top_p" not in payload
+    assert "top_k" not in payload
+
+
+def test_anthropic_omits_thinking_unless_it_is_configured() -> None:
+    recorder = _Recorder(httpx.Response(200, json=_anthropic_body(_RESULT)))
+    _provider(recorder).complete_json(_INPUT)
+
+    assert "thinking" not in recorder.payload()
+
+
+def test_anthropic_sends_the_configured_thinking_parameter() -> None:
+    recorder = _Recorder(httpx.Response(200, json=_anthropic_body(_RESULT)))
+    _provider(recorder, thinking={"type": "disabled"}).complete_json(_INPUT)
+
+    assert recorder.payload()["thinking"] == {"type": "disabled"}
 
 
 def test_anthropic_records_cache_savings_as_usage() -> None:
@@ -267,7 +291,7 @@ def test_connection_failure_raises_provider_error() -> None:
         raise httpx.ConnectTimeout("timed out", request=request)
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    provider = AnthropicProvider("claude-haiku-4-5-20251001", "sk-ant", client, max_retries=0)
+    provider = AnthropicProvider("claude-haiku-4-5", "sk-ant", client, max_retries=0)
 
     with pytest.raises(ProviderError, match="ConnectTimeout"):
         provider.complete_json(_INPUT)
@@ -354,6 +378,45 @@ def test_factory_routes_each_model_id_to_its_provider() -> None:
     assert isinstance(build_provider(settings, "qwen2.5-32b-instruct", client), OpenAIProvider)
 
 
+def test_factory_disables_thinking_on_the_models_that_think_by_default() -> None:
+    """Sonnet 5 thinks unless told not to, and max_tokens bounds thinking + the tool call.
+
+    Left alone, a classification can spend its whole budget reasoning and be cut off before it
+    emits the tool call — which arrives downstream as invalid output, not as the truncation it
+    is, and so gets retried and then filed as unclear. It is the expensive kind of silent.
+    """
+    recorder = _Recorder(httpx.Response(200, json=_anthropic_body(_RESULT)))
+    settings = _settings(anthropic_api_key="sk-ant")
+
+    build_provider(settings, "claude-sonnet-5", recorder.client()).complete_json(_INPUT)
+
+    payload = recorder.payload()
+    assert payload["thinking"] == {"type": "disabled"}
+    assert payload["max_tokens"] == 1024
+
+
+def test_factory_omits_thinking_on_models_that_do_not_think_by_default() -> None:
+    """Haiku 4.5 predates the `disabled` value; omitting is both correct and safe to send."""
+    recorder = _Recorder(httpx.Response(200, json=_anthropic_body(_RESULT)))
+    settings = _settings(anthropic_api_key="sk-ant")
+
+    build_provider(settings, "claude-haiku-4-5", recorder.client()).complete_json(_INPUT)
+
+    assert "thinking" not in recorder.payload()
+
+
+def test_factory_gives_headroom_to_models_that_cannot_disable_thinking() -> None:
+    """Fable and Mythos reject `disabled`, so they get room for the thinking they will do."""
+    recorder = _Recorder(httpx.Response(200, json=_anthropic_body(_RESULT)))
+    settings = _settings(anthropic_api_key="sk-ant")
+
+    build_provider(settings, "claude-fable-5", recorder.client()).complete_json(_INPUT)
+
+    payload = recorder.payload()
+    assert "thinking" not in payload
+    assert payload["max_tokens"] == 8192
+
+
 def test_factory_builds_a_classifier_that_classifies() -> None:
     recorder = _Recorder(httpx.Response(200, json=_anthropic_body(_RESULT)))
     settings = _settings(anthropic_api_key="sk-ant")
@@ -362,7 +425,7 @@ def test_factory_builds_a_classifier_that_classifies() -> None:
 
     assert outcome.result is not None
     assert outcome.result.intent == "availability_check"
-    assert outcome.model_used == "claude-haiku-4-5-20251001"  # D8-a's pinned cheap tier
+    assert outcome.model_used == "claude-haiku-4-5"  # D8-a's pinned cheap tier
     assert outcome.escalated is False
 
 
@@ -377,7 +440,7 @@ def test_factory_escalation_threshold_comes_from_configuration() -> None:
     outcome = build_classifier(settings, recorder.client()).classify(_INPUT)
 
     assert outcome.escalated is True
-    assert outcome.model_used == "claude-sonnet-4-6"
+    assert outcome.model_used == "claude-sonnet-5"
 
 
 def test_a_model_answering_in_prose_ends_as_unclear_not_as_a_crash() -> None:

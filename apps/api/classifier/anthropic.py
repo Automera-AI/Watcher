@@ -27,6 +27,7 @@ expensive.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import httpx
@@ -48,7 +49,13 @@ ANTHROPIC_API_VERSION = "2023-06-01"
 
 #: The structured output is a few hundred tokens at most. A ceiling keeps a degenerate response
 #: (a model that loops) from becoming a bill rather than an error.
-_MAX_OUTPUT_TOKENS = 1024
+#:
+#: ``max_tokens`` bounds thinking *and* the tool call together, so this is only generous when
+#: thinking is off — which is why the factory raises it for the models that cannot turn thinking
+#: off. Left at 1024 with thinking on, a model can spend the whole budget reasoning and get cut
+#: off before it emits the tool call, which reads downstream as invalid output rather than as
+#: the truncation it is.
+DEFAULT_MAX_OUTPUT_TOKENS = 1024
 
 
 class AnthropicProvider:
@@ -64,6 +71,8 @@ class AnthropicProvider:
         timeout_seconds: float = 30.0,
         max_retries: int = 2,
         system_prompt: str = SYSTEM_PROMPT,
+        thinking: Mapping[str, Any] | None = None,
+        max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     ) -> None:
         self.model_id = model_id
         self._api_key = api_key
@@ -72,6 +81,8 @@ class AnthropicProvider:
         self._timeout = timeout_seconds
         self._max_retries = max_retries
         self._system_prompt = system_prompt
+        self._thinking = thinking
+        self._max_output_tokens = max_output_tokens
         self.last_usage: TokenUsage | None = None
         """Tokens billed by the most recent call, or ``None`` before the first one."""
 
@@ -93,12 +104,13 @@ class AnthropicProvider:
         return _tool_input_from(body, self.model_id)
 
     def _payload(self, value: ClassificationInput) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "model": self.model_id,
-            "max_tokens": _MAX_OUTPUT_TOKENS,
-            # Temperature 0: the same message should get the same label twice, or the eval
-            # measures the sampler as much as the prompt.
-            "temperature": 0,
+            "max_tokens": self._max_output_tokens,
+            # No `temperature`. The Claude 5 family rejects a non-default sampling parameter
+            # with a 400, and temperature never actually guaranteed identical output twice on
+            # the models that did accept it — so the determinism it looked like it bought was
+            # never real, and keeping it would make re-pinning a tier a code change.
             "system": [
                 {
                     "type": "text",
@@ -116,6 +128,9 @@ class AnthropicProvider:
             ],
             "tool_choice": {"type": "tool", "name": CLASSIFICATION_TOOL_NAME},
         }
+        if self._thinking is not None:
+            payload["thinking"] = dict(self._thinking)
+        return payload
 
 
 def _tool_input_from(body: dict[str, Any], model_id: str) -> dict[str, Any]:

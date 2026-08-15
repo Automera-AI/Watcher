@@ -15,14 +15,51 @@ at.
 
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
 
 from apps.api.channels import ConfigError
-from apps.api.classifier.anthropic import AnthropicProvider
+from apps.api.classifier.anthropic import DEFAULT_MAX_OUTPUT_TOKENS, AnthropicProvider
 from apps.api.classifier.openai import OpenAIProvider
 from apps.api.classifier.provider import LLMProvider
 from apps.api.classifier.service import Classifier
 from apps.api.core.config import Settings
+
+#: Claude models that think unless told not to. Classification is a labelling call with a fixed
+#: output shape — there is nothing for a reasoning pass to add that the prompt's tie-breaks do
+#: not already state — so thinking here is latency and spend on every inbound message.
+_THINKS_BY_DEFAULT = ("claude-sonnet-5", "claude-opus-5")
+
+#: Claude models that think unconditionally and reject ``{"type": "disabled"}`` with a 400.
+#: They can still run the classifier; they just need room for the thinking they will do anyway.
+_CANNOT_DISABLE_THINKING = ("claude-fable-5", "claude-mythos-5")
+
+#: Enough headroom for a thinking pass plus the tool call, for the models above.
+_MAX_OUTPUT_TOKENS_WITH_THINKING = 8192
+
+
+def _thinking_policy(model_id: str) -> tuple[dict[str, Any] | None, int]:
+    """``(thinking parameter, max_tokens)`` for one model.
+
+    Three families, because the API's default differs by family and getting it wrong is silent
+    rather than loud. Sending ``disabled`` where it is rejected is a 400 you find immediately;
+    *omitting* it on a model that thinks by default is a bill and a truncation you find in
+    production. Neither is a judgement call about the model — it is the vendor's contract, so it
+    lives here rather than in a per-deploy environment variable an operator has to get right.
+
+    Deliberately not set: ``effort``. It is the other spend lever on the Claude 5 family, and
+    turning it down is a plausible saving — but accuracy is the product metric here, and item
+    2.7 is what measures accuracy. Guessing at it before the eval can measure the result is how
+    the 88% number stopped meaning anything the first time.
+    """
+    if model_id.startswith(_CANNOT_DISABLE_THINKING):
+        return None, _MAX_OUTPUT_TOKENS_WITH_THINKING
+    if model_id.startswith(_THINKS_BY_DEFAULT):
+        return {"type": "disabled"}, DEFAULT_MAX_OUTPUT_TOKENS
+    # Haiku 4.5, Sonnet 4.6, Opus 4.x: no thinking unless asked. Omitting is both correct and
+    # the safest thing to send, since the older models predate the `disabled` value.
+    return None, DEFAULT_MAX_OUTPUT_TOKENS
 
 
 def build_provider(
@@ -36,6 +73,7 @@ def build_provider(
         api_key = credentials.api_key
         if api_key is None:  # `llm_credentials` requires the key on this path; belt and braces.
             raise ConfigError("Missing required environment variable: ANTHROPIC_API_KEY")
+        thinking, max_output_tokens = _thinking_policy(model_id)
         return AnthropicProvider(
             model_id,
             api_key,
@@ -43,6 +81,8 @@ def build_provider(
             base_url=credentials.base_url,
             timeout_seconds=credentials.timeout_seconds,
             max_retries=credentials.max_retries,
+            thinking=thinking,
+            max_output_tokens=max_output_tokens,
         )
 
     return OpenAIProvider(
