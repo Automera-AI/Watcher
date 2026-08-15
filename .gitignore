@@ -21,6 +21,9 @@ eval-out/
 # Compiled intent vocabulary (build artifact — regenerate with packages.intents.compile)
 packages/intents/build/
 
+# setuptools' scratch directory, left behind by `pip install .` (the Dockerfile's build step).
+/build/
+
 # Node (control page)
 node_modules/
 .next/

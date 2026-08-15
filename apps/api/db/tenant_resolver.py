@@ -11,6 +11,14 @@ deliberately does not filter by channel kind. The question being asked is "who o
 and the answer is the same question for a phone line as for a chat number — a resolver that had to
 be told which kind to expect would need editing on the day a second channel is connected, which is
 exactly the coupling ``channel_configs`` exists to avoid.
+
+**Why this one keeps the unstamped session (B2).** Everything else that touches the database takes
+a :data:`~apps.api.db.engine.TenantScope` and acts as a named tenant. This cannot: it is the
+question asked before the answer exists. Migration ``004`` therefore gives ``channel_configs`` a
+second policy that permits a *read* by a session with no tenant set, and only then — a session that
+has adopted a tenant sees that tenant's endpoints and no others, and a session with no tenant sees
+endpoint rows and nothing else in the database, because every other policy fails closed on an
+absent setting. The blast radius of the exception is one column of routing configuration.
 """
 
 from __future__ import annotations

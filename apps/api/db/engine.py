@@ -25,6 +25,24 @@ that only appears under concurrency.
 a driver this project does not ship. :func:`normalize_database_url` rewrites a bare Postgres scheme
 onto psycopg 3 so that pasting the URI from the dashboard works, while an explicitly named driver
 (``postgresql+asyncpg://``) is left exactly as written.
+
+**Which tenant a session is acting as (B2).** Row-Level Security is enforced in Postgres against
+one session-local setting, ``app.current_tenant``. Migration ``004`` writes the policies; this file
+is where the setting is *set*, because a session is the only thing that can carry it. Hence two
+scopes rather than one:
+
+* :data:`TenantScope` — :meth:`Database.tenant_session`, which stamps the tenant on the transaction
+  before yielding. Every adapter that touches tenant data takes one of these, so a session cannot
+  be opened for that data without saying whose it is. The tenant was always available at those call
+  sites (every port already takes ``tenant_id``); what was missing was anywhere to put it.
+* :data:`SessionScope` — the plain, unstamped scope. Exactly one thing still uses it: the tenant
+  resolver, which reads ``channel_configs`` to answer *which* tenant an endpoint belongs to and so
+  cannot already know. Migration ``004`` gives that one lookup a policy of its own; the resolver's
+  session can therefore see endpoint rows and no guest data of any kind, because every other policy
+  fails closed when the setting is absent.
+
+Setting it is a no-op on SQLite, which has no such concept — the tests would otherwise all fail on
+a statement their database cannot parse, and the alternative (a Postgres-only test suite) is worse.
 """
 
 from __future__ import annotations
@@ -34,7 +52,7 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
@@ -45,6 +63,15 @@ from apps.api.core.config import Settings
 #: these rather than a :class:`~sqlalchemy.orm.Session`, so nothing has to decide how long a
 #: session lives except the thing that opened it.
 SessionScope = Callable[[], AbstractContextManager[Session]]
+
+#: The same, for a session that acts as one tenant: ``Database.tenant_session``. Everything that
+#: reads or writes tenant data takes one of these instead of a :data:`SessionScope`, which is what
+#: makes "which tenant is this?" unanswerable-by-omission rather than merely conventional.
+TenantScope = Callable[[str], AbstractContextManager[Session]]
+
+#: The session-local setting RLS policies read (addendum §3). Named in migration ``004`` too;
+#: changing it means changing both, which is why it is a constant in one of them.
+TENANT_SETTING = "app.current_tenant"
 
 PoolMode = Literal["transaction", "session"]
 
@@ -116,6 +143,26 @@ def create_db_engine(url: str, pool_mode: PoolMode = POOL_MODE_TRANSACTION) -> E
     return create_engine(dsn, **options)
 
 
+def set_current_tenant(session: Session, tenant_id: str) -> None:
+    """Stamp ``tenant_id`` on this session's transaction, for RLS to enforce against.
+
+    ``set_config(..., is_local => true)`` rather than ``SET``: the setting lasts exactly as long as
+    the transaction, so a connection handed back to the pooler cannot carry one tenant's identity
+    into the next tenant's transaction. It is also the parameterised form — ``SET`` takes a literal,
+    and a literal built by interpolation is an injection waiting for a tenant id that came from
+    somewhere unexpected.
+
+    Executing it is what opens the transaction, which is why it happens before anything else the
+    session does. On SQLite there is nothing to set and nothing enforcing it, so this returns
+    quietly; the tenant filter every query already carries is what isolates the tests.
+    """
+    if session.get_bind().dialect.name != "postgresql":
+        return
+    session.execute(
+        text("SELECT set_config(:name, :value, true)"), {"name": TENANT_SETTING, "value": tenant_id}
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class Database:
     """An engine and its sessionmaker, plus the one blessed way to get a session out of them."""
@@ -150,6 +197,17 @@ class Database:
             raise
         finally:
             session.close()
+
+    @contextmanager
+    def tenant_session(self, tenant_id: str) -> Iterator[Session]:
+        """A session acting as one tenant: the same unit of work, with RLS in force.
+
+        The stamp is applied inside the scope, so a rollback takes the setting with it and there is
+        no window in which the transaction exists without an owner.
+        """
+        with self.session() as session:
+            set_current_tenant(session, tenant_id)
+            yield session
 
     def get_session(self) -> Iterator[Session]:
         """The same scope in FastAPI-dependency form: ``Depends(database.get_session)``."""

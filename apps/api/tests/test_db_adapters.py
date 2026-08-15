@@ -75,7 +75,7 @@ def _message(
 
 
 def test_session_scoped_repository_persists_across_sessions(database: Database) -> None:
-    repository = SessionScopedMessageRepository(database.session)
+    repository = SessionScopedMessageRepository(database.tenant_session)
 
     assert repository.exists(TENANT_A, "wamid.A") is False
     repository.save(TENANT_A, _message("wamid.A"))
@@ -89,13 +89,13 @@ def test_session_scoped_repository_persists_across_sessions(database: Database) 
 
 def test_loader_returns_none_for_an_unknown_message(database: Database) -> None:
     """The consumer logs and moves on; it must not crash the worker on a missing row."""
-    assert SqlAlchemyMessageLoader(database.session).load(TENANT_A, "wamid.missing") is None
+    assert SqlAlchemyMessageLoader(database.tenant_session).load(TENANT_A, "wamid.missing") is None
 
 
 def test_loader_round_trips_the_envelope(database: Database) -> None:
-    SessionScopedMessageRepository(database.session).save(TENANT_A, _message("wamid.A"))
+    SessionScopedMessageRepository(database.tenant_session).save(TENANT_A, _message("wamid.A"))
 
-    loaded = SqlAlchemyMessageLoader(database.session).load(TENANT_A, "wamid.A")
+    loaded = SqlAlchemyMessageLoader(database.tenant_session).load(TENANT_A, "wamid.A")
 
     assert loaded is not None
     assert loaded.message.external_id == "wamid.A"
@@ -111,13 +111,13 @@ def test_loader_reads_source_kind_from_the_sources_table(database: Database) -> 
     It matters because the classifier is told: in a group, the sender is not necessarily the
     person the message is about.
     """
-    SessionScopedMessageRepository(database.session).save(TENANT_A, _message("wamid.A"))
+    SessionScopedMessageRepository(database.tenant_session).save(TENANT_A, _message("wamid.A"))
     with database.session() as session:
         session.add(
             Source(tenant_id=uuid.UUID(TENANT_A), thread_id="966500000000", kind=SourceKind.GROUP)
         )
 
-    loaded = SqlAlchemyMessageLoader(database.session).load(TENANT_A, "wamid.A")
+    loaded = SqlAlchemyMessageLoader(database.tenant_session).load(TENANT_A, "wamid.A")
 
     assert loaded is not None
     assert loaded.message.source_kind is SourceKind.GROUP
@@ -130,7 +130,7 @@ def test_loader_history_is_the_last_n_turns_oldest_first(database: Database) -> 
     conversation instead of the part the message is answering, and ordering by insertion rather
     than by timestamp gets it wrong whenever a channel batches or retries a delivery.
     """
-    repository = SessionScopedMessageRepository(database.session)
+    repository = SessionScopedMessageRepository(database.tenant_session)
     # Saved newest-first, so insertion order and timestamp order disagree.
     for index in reversed(range(5)):
         repository.save(
@@ -141,19 +141,21 @@ def test_loader_history_is_the_last_n_turns_oldest_first(database: Database) -> 
         )
     repository.save(TENANT_A, _message("wamid.now", text="the message", at=NOW))
 
-    loaded = SqlAlchemyMessageLoader(database.session, history_turns=3).load(TENANT_A, "wamid.now")
+    loaded = SqlAlchemyMessageLoader(database.tenant_session, history_turns=3).load(
+        TENANT_A, "wamid.now"
+    )
 
     assert loaded is not None
     assert [turn.body_text for turn in loaded.history] == ["turn 2", "turn 3", "turn 4"]
 
 
 def test_loader_history_does_not_cross_threads_or_tenants(database: Database) -> None:
-    repository = SessionScopedMessageRepository(database.session)
+    repository = SessionScopedMessageRepository(database.tenant_session)
     repository.save(TENANT_A, _message("wamid.other", thread_id="966599999999", at=NOW))
     repository.save(TENANT_B, _message("wamid.b", at=NOW))
     repository.save(TENANT_A, _message("wamid.now", at=NOW + timedelta(minutes=1)))
 
-    loaded = SqlAlchemyMessageLoader(database.session).load(TENANT_A, "wamid.now")
+    loaded = SqlAlchemyMessageLoader(database.tenant_session).load(TENANT_A, "wamid.now")
 
     assert loaded is not None
     assert loaded.history == []
@@ -166,7 +168,7 @@ def test_audit_log_appends_the_decision_and_its_snapshot(database: Database) -> 
     message_id = str(uuid.uuid4())
     destination_id = str(uuid.uuid4())
 
-    SqlAlchemyAuditLog(database.session).write(
+    SqlAlchemyAuditLog(database.tenant_session).write(
         AuditEntry(
             tenant_id=TENANT_A,
             message_id=message_id,
@@ -194,7 +196,7 @@ def test_inbox_writer_points_at_the_classification(database: Database) -> None:
     """
     classification_id = str(uuid.uuid4())
 
-    SqlAlchemyInboxWriter(database.session).create(
+    SqlAlchemyInboxWriter(database.tenant_session).create(
         InboxItemDraft(
             tenant_id=TENANT_A,
             message_id=str(uuid.uuid4()),
@@ -214,7 +216,7 @@ def test_inbox_writer_points_at_the_classification(database: Database) -> None:
 def test_inbox_writer_files_a_bandless_draft_as_low(database: Database) -> None:
     """The unclassified path carries no band. A message the model could not read is not
     confident enough to act on, which is what ``low`` means — and the column is not nullable."""
-    SqlAlchemyInboxWriter(database.session).create(
+    SqlAlchemyInboxWriter(database.tenant_session).create(
         InboxItemDraft(
             tenant_id=TENANT_A,
             message_id=str(uuid.uuid4()),
@@ -254,7 +256,7 @@ def test_rules_provider_returns_enabled_rules_in_priority_order(database: Databa
             ]
         )
 
-    rules = SqlAlchemyRulesProvider(database.session)(TENANT_A)
+    rules = SqlAlchemyRulesProvider(database.tenant_session)(TENANT_A)
 
     assert [rule.name for rule in rules] == ["first", "second"]
 
@@ -270,7 +272,7 @@ def test_rules_provider_skips_an_unparseable_rule(
         session.add(broken)
 
     with caplog.at_level(logging.WARNING):
-        rules = SqlAlchemyRulesProvider(database.session)(TENANT_A)
+        rules = SqlAlchemyRulesProvider(database.tenant_session)(TENANT_A)
 
     assert [rule.name for rule in rules] == ["good"]
     assert "skipping unparseable rule" in caplog.text
@@ -296,7 +298,7 @@ def test_crm_lookup_is_tenant_scoped(database: Database) -> None:
             ]
         )
 
-    records = SqlAlchemyCrmLookup(database.session)(
+    records = SqlAlchemyCrmLookup(database.tenant_session)(
         TENANT_A, IncomingContact(phone_e164="+966500000000")
     )
 
@@ -380,7 +382,7 @@ def test_classification_writer_records_the_result_and_its_telemetry(database: Da
     """The table that had never been written to, and the two columns that kept it empty."""
     message_id = str(uuid.uuid4())
 
-    row_id = SqlAlchemyClassificationWriter(database.session).record(
+    row_id = SqlAlchemyClassificationWriter(database.tenant_session).record(
         ClassificationDraft(
             tenant_id=TENANT_A,
             message_id=message_id,
@@ -405,7 +407,7 @@ def test_classification_writer_records_the_result_and_its_telemetry(database: Da
 
 
 def test_the_store_opens_a_conversation_and_records_what_was_said(database: Database) -> None:
-    state = SqlAlchemyConversationStore(database.session).begin(_turn())
+    state = SqlAlchemyConversationStore(database.tenant_session).begin(_turn())
 
     assert state.task is None  # nothing in flight yet
     assert state.replies_sent == 0
@@ -424,7 +426,7 @@ def test_the_store_opens_a_conversation_and_records_what_was_said(database: Data
 
 def test_the_second_message_finds_the_same_conversation_and_its_task(database: Database) -> None:
     """What continuity actually is: the job the previous turn opened comes back."""
-    store = SqlAlchemyConversationStore(database.session)
+    store = SqlAlchemyConversationStore(database.tenant_session)
 
     first = store.begin(_turn("wamid.1"))
     task = Task(intent="booking_enquiry", slots={"check_in": "4 June"})
@@ -443,7 +445,7 @@ def test_a_reply_is_recorded_once_even_if_the_message_is_processed_twice(
     database: Database,
 ) -> None:
     """A queue retry must not double the transcript, or double-count the turn budget."""
-    store = SqlAlchemyConversationStore(database.session)
+    store = SqlAlchemyConversationStore(database.tenant_session)
     action = OutboundAction(kind="ask", text="How many?")
 
     for _ in range(2):
@@ -460,7 +462,7 @@ def test_a_new_intent_abandons_the_old_task_rather_than_overwriting_it(
     database: Database,
 ) -> None:
     """A guest who changes the subject starts a new job, and the old one leaves the active set."""
-    store = SqlAlchemyConversationStore(database.session)
+    store = SqlAlchemyConversationStore(database.tenant_session)
 
     first = store.begin(_turn("wamid.1"))
     store.record_reply(

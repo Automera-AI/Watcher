@@ -6,10 +6,16 @@ process that starts and a process that does something: the loader reloads the pe
 queue was given the id of (§5), and the audit log and inbox writer are where a decision stops being
 a return value and becomes a record the control page can show (§4, §12).
 
-Every one of them takes a :data:`~apps.api.db.engine.SessionScope` rather than a session. They are
+Every one of them takes a :data:`~apps.api.db.engine.TenantScope` rather than a session. They are
 constructed once, at startup, and called from a worker thread per message; a session captured at
 construction would be shared across threads, which SQLAlchemy does not support, and would hold a
 connection between messages, which the transaction pooler does not appreciate.
+
+That the scope takes a tenant is B2's half of it. Each of these methods was already given the
+tenant it was acting for — in an argument, on a draft, on a turn — and passed it no further than
+the ``WHERE`` clause. Passing it to the scope instead means the session itself carries it, which is
+what the RLS policies in migration ``004`` enforce against, and what makes a forgotten filter a
+query that returns nothing rather than a query that returns somebody else's rows.
 """
 
 from __future__ import annotations
@@ -26,7 +32,7 @@ from sqlalchemy.orm import Session
 from apps.api.audit.log import AuditEntry
 from apps.api.conversations.task import Task, TaskStatus
 from apps.api.db.conversation_repo import ConversationRepository, task_from_row, task_to_row
-from apps.api.db.engine import SessionScope
+from apps.api.db.engine import TenantScope
 from apps.api.db.models import (
     AuditLogRow,
     Classification,
@@ -95,12 +101,12 @@ def _envelope(session: Session, row: Message) -> MessageEnvelope:
 class SqlAlchemyMessageLoader:
     """Reloads an enqueued message and its recent history (``MessageLoader``, §5 + §7)."""
 
-    def __init__(self, scope: SessionScope, *, history_turns: int = HISTORY_TURNS) -> None:
+    def __init__(self, scope: TenantScope, *, history_turns: int = HISTORY_TURNS) -> None:
         self._scope = scope
         self._history_turns = history_turns
 
     def load(self, tenant_id: str, external_id: str) -> LoadedMessage | None:
-        with self._scope() as session:
+        with self._scope(tenant_id) as session:
             row = session.execute(
                 select(Message).where(
                     Message.tenant_id == uuid.UUID(tenant_id),
@@ -145,11 +151,11 @@ class SqlAlchemyMessageLoader:
 class SqlAlchemyAuditLog:
     """Appends to ``audit_log`` — every routing decision, with its classification (§4, §12)."""
 
-    def __init__(self, scope: SessionScope) -> None:
+    def __init__(self, scope: TenantScope) -> None:
         self._scope = scope
 
     def write(self, entry: AuditEntry) -> None:
-        with self._scope() as session:
+        with self._scope(entry.tenant_id) as session:
             session.add(
                 AuditLogRow(
                     tenant_id=uuid.UUID(entry.tenant_id),
@@ -176,12 +182,12 @@ class SqlAlchemyClassificationWriter:
     was filed the way it was without the snapshot being the only copy of it.
     """
 
-    def __init__(self, scope: SessionScope) -> None:
+    def __init__(self, scope: TenantScope) -> None:
         self._scope = scope
 
     def record(self, draft: ClassificationDraft) -> str | None:
         result = draft.result
-        with self._scope() as session:
+        with self._scope(draft.tenant_id) as session:
             row = Classification(
                 tenant_id=uuid.UUID(draft.tenant_id),
                 message_id=uuid.UUID(draft.message_id),
@@ -210,11 +216,11 @@ class SqlAlchemyClassificationWriter:
 class SqlAlchemyInboxWriter:
     """Creates the ``inbox_items`` row the control page triages from (§4, §12)."""
 
-    def __init__(self, scope: SessionScope) -> None:
+    def __init__(self, scope: TenantScope) -> None:
         self._scope = scope
 
     def create(self, draft: InboxItemDraft) -> None:
-        with self._scope() as session:
+        with self._scope(draft.tenant_id) as session:
             session.add(
                 InboxItem(
                     tenant_id=uuid.UUID(draft.tenant_id),
@@ -232,11 +238,11 @@ class SqlAlchemyInboxWriter:
 class SqlAlchemyRulesProvider:
     """A tenant's enabled auto-routing rules, in priority order (``RulesProvider``, §12)."""
 
-    def __init__(self, scope: SessionScope) -> None:
+    def __init__(self, scope: TenantScope) -> None:
         self._scope = scope
 
     def __call__(self, tenant_id: str) -> list[Rule]:
-        with self._scope() as session:
+        with self._scope(tenant_id) as session:
             rows = (
                 session.execute(
                     select(RuleRow)
@@ -261,11 +267,11 @@ class SqlAlchemyConversationStore:
     and used from a worker thread per message.
     """
 
-    def __init__(self, scope: SessionScope) -> None:
+    def __init__(self, scope: TenantScope) -> None:
         self._scope = scope
 
     def begin(self, turn: InboundTurn) -> ConversationState:
-        with self._scope() as session:
+        with self._scope(str(turn.tenant_id)) as session:
             repo = ConversationRepository(session)
             conversation = repo.find_or_create_conversation(
                 str(turn.tenant_id), turn.channel, turn.channel_thread_id
@@ -292,7 +298,7 @@ class SqlAlchemyConversationStore:
         action: OutboundAction,
     ) -> None:
         conversation_id = uuid.UUID(state.conversation_id)
-        with self._scope() as session:
+        with self._scope(str(turn.tenant_id)) as session:
             repo = ConversationRepository(session)
             row = repo.get_active_task(conversation_id)
 
@@ -314,12 +320,12 @@ class SqlAlchemyConversationStore:
 class SqlAlchemyCrmLookup:
     """Cached destination records to dedup an incoming contact against (``CrmLookup``, §9)."""
 
-    def __init__(self, scope: SessionScope, *, limit: int = CANDIDATE_LIMIT) -> None:
+    def __init__(self, scope: TenantScope, *, limit: int = CANDIDATE_LIMIT) -> None:
         self._scope = scope
         self._limit = limit
 
     def __call__(self, tenant_id: str, contact: IncomingContact) -> list[CrmRecord]:
-        with self._scope() as session:
+        with self._scope(tenant_id) as session:
             rows = (
                 session.execute(
                     select(CrmCacheRow)

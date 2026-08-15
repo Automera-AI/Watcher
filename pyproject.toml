@@ -1,6 +1,8 @@
 # Watcher — Python tooling config (API + eval).
-# The build itself is not packaged yet (pre-Phase-1); this file pins the lint,
-# type-check, and test configuration the CI pipeline runs against. See AGENTS.md.
+# Packaged as of B3: the container image installs this project, so the dependency
+# list above is the one the image resolves and there is no second copy of it in a
+# Dockerfile to drift. This file also pins the lint, type-check, and test
+# configuration the CI pipeline runs against. See AGENTS.md.
 
 [project]
 name = "watcher"
@@ -32,6 +34,24 @@ dependencies = [
     # YAML. Without this the fallback is a ModuleNotFoundError on the first turn.
     "pyyaml>=6,<7",
 ]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# Named explicitly rather than discovered. This is a flat layout with four top-level
+# directories, two of which (`alembic`, `docs`) are not importable code; auto-discovery
+# refuses to guess between them, and guessing is not what should decide what ships.
+[tool.setuptools.packages.find]
+include = ["apps*", "packages*"]
+
+# The intent vocabulary is data, not code, and `packages/intents/schema.py` reads it off disk
+# relative to its own file. Left out of the wheel, the image imports fine right up to the moment
+# the classifier prompt is built at import time, and then dies on a missing YAML — which is what
+# the first container run found. `clients/*.yaml` are the per-client overlays the same loader
+# takes, and are shipped for the same reason.
+[tool.setuptools.package-data]
+"packages.intents" = ["*.yaml", "clients/*.yaml"]
 
 [tool.ruff]
 target-version = "py313"
