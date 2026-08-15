@@ -2,7 +2,8 @@
 
 **Written:** 15 August 2026 · **Supersedes the day-count in** `Watcher_v2_Roadmap.pdf` (v1.15)
 **Target:** a multi-tenant product, many properties per client, nothing hardcoded, sellable.
-**Stack decision (locked this session):** Supabase Postgres + Render API + Clerk auth.
+**Stack:** Supabase Postgres + Render API + Clerk auth, EU (Frankfurt).
+**Decisions D14–D26** in `DECISIONS.md` are the locked outcome of the design review in §13.
 
 ---
 
@@ -73,32 +74,44 @@ and resolution of an inbound message to a property. Priced as C3.
 
 | Phase | Work | Days |
 |---|---|---:|
-| A | **Make it run** — provider, config, engine, entrypoint, sender, conversation wiring | 6.00 |
+| A | **Make it run** — provider, config, engine, entrypoint, sender, conversation wiring, v1 excision | 6.75 |
 | B | **Host it** — Supabase, RLS, Docker, Render, domain, durable queue | 4.25 |
 | C | **Knowledge + multi-property** (roadmap 2.4, extended) | 3.00 |
-| D | **Control page** — all five views + the REST API behind them | 11.50 |
+| D | **Control page** — six receptionist views + the REST API behind them + spec rewrite | 13.75 |
 | E | **Product surface** — onboarding, metering, billing, observability, backups | 4.50 |
-| F | **Roadmap remainder** — PMS adapter, eval re-record, end-to-end, tuning tail | 6.00 |
-| | **Total** | **35.25** |
+| F | **Roadmap remainder** — PMS bridges, eval re-record, end-to-end, tuning tail | 6.00 |
+| G | **Receptionist guardrails** — quote provenance, verification, emergency, config split | 5.50 |
+| | **Total** | **43.75** |
 
-At the six-day week the roadmap assumes, that is **~6 weeks of pure build**. With review,
-integration, and the external approvals below, plan **7–8 weeks to sellable**.
+Three figures have now been published for this work. For the record: **5.75** (roadmap v1.15,
+counted only the numbered work items), **35.25** (after the infrastructure audit in §2), and
+**43.75** (after the design review in §13 priced the guardrails the vocabulary already requires).
+Each increase came from reading something that was already in the repository.
+
+At ~2–3 engineering days per working session (the observed rate across sessions 1–3), that is
+**15–20 sessions**. At the six-day week the roadmap assumes, ~7.3 weeks of pure build; with review
+and the external approvals below, plan **9–10 weeks to sellable**.
 
 ---
 
 ## 4. Milestones
 
-### M1 — "It answers a real message" · ~10 days
-Phase A + B1–B4 + C1/C2. A real WhatsApp number, real model calls, live Supabase, deployed on
-Render, watched through logs. **This is the first moment the system exists as a system.**
+### M1 — "It answers a real message, safely" · ~13.5 days
+Phase A + B1–B4 + G3 (emergency) + C1/C2. A real WhatsApp number, real model calls, live Supabase,
+deployed on Render, watched through logs. **This is the first moment the system exists as a system.**
 
-### M2 — "You can watch and correct it" · +11.5 days
-Phase D. All five views and the ~25 REST endpoints behind them. Bad classifications become
-correctable, which is what makes a pilot survivable rather than embarrassing.
+The emergency path is inside M1 and not negotiable: `worker.py` hardcodes `emergency=False` today,
+so a gas leak currently classifies as `maintenance_issue`. You cannot take real guest traffic
+before that is wired.
 
-### M3 — "Sellable" · +13.75 days
-Phases E and F. RLS enforced and tested, multi-property, the first PMS adapter, usage metering,
-billing, and an eval number that is measured rather than replayed.
+### M2 — "You can watch and correct it" · +13.75 days
+Phase D. Six receptionist views and the REST endpoints behind them. Bad classifications become
+correctable and the guardrails become visible, which is what makes a pilot survivable.
+
+### M3 — "Sellable" · +16.5 days
+B5, C3, and Phases E, F and the rest of G. RLS enforced and tested, multi-property, the first PMS
+bridge, quote provenance, usage metering, billing, and an eval number that is measured rather than
+replayed.
 
 ---
 
@@ -110,7 +123,7 @@ billing, and an eval number that is measured rather than replayed.
 | A2 | Database session | 0.5 | `apps/api/db/session.py`: engine from `DATABASE_URL`, `sessionmaker`, a `get_session` dependency. **Supabase transaction-mode pooling needs `NullPool` + `prepare_threshold=None`** — get this right here or it fails intermittently under load later. |
 | A3 | LLM providers | 1.5 | `anthropic_provider.py` + `openai_provider.py` satisfying the existing `LLMProvider` protocol. Tool-call/constrained decoding against `CLASSIFICATION_TOOL_SCHEMA`. **Mark the system block `cache_control`** — ~5k tokens per inbound message otherwise (handoff gotcha #5). Model IDs from A1, never from code. Raise `ProviderError` on transport failure so the retry policy in `classifier/service.py` applies unchanged. |
 | A4 | Composition root | 1.0 | `apps/api/main.py` assembling the real app: repository, queue, classifier, orchestrator, receptionist, audit, inbox, rules, CRM lookup. First production caller of `create_app()`. Prove it with an integration test that boots against a temporary Postgres. |
-| A5 | Conversation wiring | 1.5 | Connect `ConversationRepository` into the orchestrator: `find_or_create_conversation` → `get_active_task` → pass the real task and slots to the receptionist → `save_task` + `record_turn`. Convert `Orchestrator.process` to `async def`, drop `asyncio.run()`, update `MessageConsumer` and both queue transports. **This is the change that makes it hold a conversation.** |
+| A5 | Conversation wiring **+ v1 excision** | 2.25 | Connect `ConversationRepository` into the orchestrator: `find_or_create_conversation` → `get_active_task` → pass the real task and slots to the receptionist → `save_task` + `record_turn`. Convert `Orchestrator.process` to `async def`, drop `asyncio.run()`, update `MessageConsumer` and both queue transports. **This is the change that makes it hold a conversation.** In the same pass (D24), remove the rules/destinations threading — `RuleAction.destination_id` is the rules engine's only action, and the vocabulary's build-validated `force_hand_off` replaces it. **Stop threading the tables; do not drop them.** |
 | A6 | Outbound sender | 1.0 | `channels/whatsapp_sender.py` implementing `ChannelSender` against the Meta Graph API, reusing the existing `RenderedMessage` / `QUICK_REPLY_LIMIT` rendering. Wire `ProcessOutcome.outbound_action` to actually send. |
 
 ## 6. Phase B — host it · 4.25d
@@ -134,21 +147,43 @@ billing, and an eval number that is measured rather than replayed.
 > **Scope guard — unchanged and still right.** "Can it read our PDF handbook?" is a different
 > and much larger project. Structured intake + PMS sync only.
 
-## 8. Phase D — control page, all five views · 11.5d
+## 8. Phase D — control page, six receptionist views · 13.75d
+
+**Why the view set changed (D15).** `DESIGN-SPEC.md` §8 specifies Inbox · Sources · Destinations ·
+Rules · Admin — the UI of the v1 message-filer, where the job is triaging a *record* and routing it
+to a Sheet or a CRM. The v2 receptionist has nine tools (`lookup_reservation`, `check_availability`,
+`quote_price`, `hold_slot`, `confirm_booking`, `answer_from_knowledge`, `create_ticket`,
+`take_message`, `handoff_to_human`) and talks to guests. It does not route records anywhere. Two of
+the five views serve a product we are no longer building.
 
 | ID | Item | Days | Notes |
 |---|---|---:|---|
+| D0 | **DESIGN-SPEC §8 rewrite** | 1.0 | New view set, against the nine tools and the guardrails. Tokens, type scale, confidence chip and the RTL rules in §9/§10 all carry over unchanged — only §8 and the components in §6 that serve Destinations/Rules are replaced. |
 | D1 | Scaffold | 1.0 | Next.js 15 + TS + Tailwind, `design-tokens.css` mapped into the Tailwind theme, Inter/Cairo self-hosted via `next/font` (no runtime CDN — `AGENTS.md`), Clerk. Commit `package-lock.json`; activates CI's dormant `web` job. |
-| D2 | **REST API** | 3.0 | **The hidden half of this phase.** ~25 endpoints: inbox list/detail/confirm/edit/route, sources, destinations, rules CRUD, eval reports. Tenant-scoped, paginated, tested. None exist today. |
+| D2 | **REST API** | 3.0 | **The hidden half of this phase.** Tenant-scoped, paginated, tested endpoints for handoffs, conversations, emergencies, properties/facts, quotes and eval. None exist today. |
 | D3 | Typed client | 0.25 | Generated from the FastAPI OpenAPI schema. |
-| D4 | Inbox view | 2.0 | The critical path (DESIGN-SPEC §7): confidence chip, three interaction patterns by band, field-edit popover, identity-match card. |
-| D5 | Sources + first-run wizard | 1.0 | |
-| D6 | Destinations | 1.25 | Recipe picker + webhook URL + field mapping. |
-| D7 | Rules builder | 1.25 | Condition → action. No DSL. |
-| D8 | Admin / Eval viewer | 0.75 | Accuracy drift per client. |
-| D9 | Arabic/RTL + a11y | 1.0 | DESIGN-SPEC §9/§10, across all views. |
+| D4 | **Handoff queue** | 2.0 | The operator's actual work queue and the replacement for Inbox: everything the bot escalated, with *why* — max clarifying turns, tool failure, no knowledge, `force_hand_off`, low confidence. One reason per item, which is why D24 removes the second escalation mechanism. |
+| D5 | **Conversations** | 1.5 | Live threads, what the bot said and on what basis, take-over by a human. |
+| D6 | **Emergencies** | 0.75 | Alarm-like, acknowledged, never buried in a queue. Backed by G3. |
+| D7 | **Properties & Facts** | 1.5 | The knowledge editor that makes Phase C usable, with sensitivity flags visible on the row. |
+| D8 | **Quotes & Audit** | 1.0 | Every price the bot said, with provenance, re-checkable months later. Also the surface where the D20 door-code risk is recorded and visible. |
+| D9 | Admin / Eval viewer | 0.75 | Accuracy, per-language breakdown, spend. Founder-only, role-gated. |
+| D10 | Arabic/RTL + a11y | 1.0 | DESIGN-SPEC §9/§10 carry over unchanged, applied across the new views. |
 
-Build against `DESIGN-SPEC.md`. Never hardcode a colour — reference a token.
+Never hardcode a colour — reference a token.
+
+## 8a. Phase G — receptionist guardrails · 5.5d
+
+The vocabulary already requires all of this; none of it is built. These are not new features, they
+are the enforcement of rules `packages/intents/intents.yaml` states and `packages/intents/schema.py`
+validates.
+
+| ID | Item | Days | Notes |
+|---|---|---:|---|
+| G1 | Quote path and provenance | 2.0 | Extend `AvailabilityResult` with `rate_or_quote_id` and `valid_until` — **as shipped it cannot satisfy `quoting.provenance_required`, which `schema.py:176` enforces**. Add the 300s freshness bound, `on_stale_or_failed: handoff_to_human`, and the audit write that must land *before* the number reaches the guest. |
+| G2 | Reservation lookup + verification | 1.5 | Booking reference + a second fact (D19). Unlocks `lookup_reservation` and, per D20, door codes on the same bar. Fixes the `identity_verified` wiring in the same pass (D21) so a fuzzy name match stops reading as proof. |
+| G3 | Emergency path | 1.5 | Wire trigger matching **before classification**, per the vocabulary. Six trigger families across three scripts, including `locked_out_at_night` (22:00–07:00, needs tenant timezone). `reply_immediately`, then Twilio outbound call to the operator. Removes the `emergency=False` hardcode at `worker.py:162`. |
+| G4 | Client config split | 0.5 | D23. `property_system`, `quote_prices`, `force_hand_off`, `disabled_intents` stay in YAML behind the build validator; currency, timezone, hours, wording move to the DB. |
 
 ## 9. Phase E — product surface · 4.5d
 
@@ -164,7 +199,7 @@ Build against `DESIGN-SPEC.md`. Never hardcode a colour — reference a token.
 
 | ID | Item | Days | Notes |
 |---|---|---:|---|
-| F1 | PMS adapter (3.1) | 2.5 | Hostaway / Guesty / Cloudbeds. **Blocked on P1.** |
+| F1 | PMS adapter (3.1) | 2.5 | **Direction settled by D16.** `HttpPropertySystemAdapter` calling a client-supplied URL that speaks Watcher's own contract (~1.0d), plus the first bridge — Hostaway — which **Watcher writes and hosts** (~1.5d). The published `/v1/property-system` router is an *inbound* projection for operations and integration testing; it does not fetch anything. Hostaway will not implement your contract, so the vendor-neutral port relocates the adapter rather than removing it. Subsequent vendors ~1.5d each. **Blocked on P1.** |
 | F2 | Eval re-record (2.7) | 0.5 | Re-record `recorded_haiku.jsonl` under prompt v3, add Franco-Arabic golden cases, remove `stale_note` from `baseline.json`. Unblocked the moment A3 lands. **Until then 0.88 is v2's number, not v3's.** |
 | F3 | End-to-end + measure (3.2) | 1.0 | The point at which the eval number becomes real rather than recorded. |
 | F4 | Tuning tail | 2.0 | The roadmap flags this itself: trustworthy is further away than working. |
@@ -193,3 +228,50 @@ Build against `DESIGN-SPEC.md`. Never hardcode a colour — reference a token.
   measurable; prompt caching is what keeps it small. Measure before quoting a price.
 - **The eval measures nothing today.** The gate replays fixtures recorded under prompt v2 and
   reports 88% whatever the prompt says. Treat the number as unknown until F2.
+- **Door-code disclosure (D20) — decided with reasoning, risk accepted.** Door codes unlock on
+  booking reference + a second fact. The case for it: roughly half of bookings are OTA, the
+  platform has already verified the guest by account and payment, and that guest receives the code
+  through the OTA app anyway — a second challenge is friction without much added assurance.
+
+  The residual risk: both facts appear on the confirmation email, so a forwarded or screenshotted
+  email can obtain a code. `test_autonomy.py:17` argues against it in the repository's own words.
+
+  Two mitigations were considered and rejected. Requiring the **sender's number to match the
+  reservation** looks obvious but fails precisely for OTA guests — Airbnb and Booking.com issue
+  masked relay numbers, which `SESSION-HANDOFF.md` §8 puts at "about half of all guests" — and
+  `Reservation` (`property_system/schemas.py:62`) carries no phone field to match against.
+  Gating **by lock type** — per-booking PINs released automatically, static key-box codes to a
+  human — was the stronger option and remains the thing to revisit (D20a): a PIN expires at
+  checkout, whereas a leaked static code compromises every future guest until someone physically
+  attends the property. Surfaced in the Quotes & Audit view (D8).
+- **Twilio is a new vendor and a new egress path.** `AGENTS.md` forbids runtime external calls for
+  the self-hosted regulated tier. An emergency call to the operator is egress. Fine for the SaaS
+  tier; needs an answer before the first regulated sale.
+- **The GCC residency claim is currently unsupportable.** D25 puts both Supabase and Render in
+  Frankfurt. The marketing story mentions data residency for regulated GCC clients; that migration
+  is a named future cost, not a configuration flag.
+
+---
+
+## 13. Design review — what the grilling changed
+
+The audit in §2 found that nothing runs. A second pass, reading `intents.yaml`,
+`property_system/schemas.py` and `DESIGN-SPEC.md` against each other, found that parts of the plan
+pointed at the wrong product and that the vocabulary requires enforcement nobody had priced:
+
+1. **Two of the five control-page views serve the v1 message-filer.** → D15, six receptionist views.
+2. **Emergency detection is never invoked** — `emergency=False` hardcoded. A gas leak files a
+   maintenance ticket. → D22, into M1.
+3. **`AvailabilityResult` cannot satisfy `quoting.provenance_required`** — no `rate_or_quote_id`,
+   no `valid_until`, while `schema.py:176` enforces both. Two shipped modules contradict each
+   other. → D17.
+4. **The port is read-only by design but the vocabulary promises `hold_slot` and
+   `confirm_booking`**, and `get_reservation` is gated on verification that does not exist. → D18,
+   enquiry + lookup only.
+5. **The published property-system API is inbound**, so "integrate with anything" was not built in
+   either direction. → D16.
+6. **The rules engine's only action is `destination_id`** — it is the destinations mechanism, not a
+   separate one, and it duplicates the vocabulary's `force_hand_off`. → D24.
+
+Each of these was already in the repository. None required a decision that could not have been made
+in week one; they had simply never been read against each other.

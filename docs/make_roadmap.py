@@ -11,9 +11,14 @@ any of them execute: there is no LLM client, no database connection, no applicat
 container, and no frontend. This revision adds the four tracks that were never priced -- A (make it
 run), B (host it), D (control page), E (product surface) -- and restates the total as ~35.25 days.
 
-It also corrects two items previously marked DONE. Conversation continuity is built but not wired:
+It also corrects items previously marked DONE. Conversation continuity is built but not wired:
 ConversationRepository is never called outside tests, and the orchestrator passes empty slots and a
-null task, so every message is treated as turn one.
+null task, so every message is treated as turn one. Emergency detection is never invoked at all --
+worker.py hardcodes emergency=False, so a gas leak files a maintenance ticket.
+
+v2.1 adds the outcome of the design review recorded as D14-D26 in docs/DECISIONS.md: the control
+page is rebuilt around six receptionist views rather than the v1 message-filer's five, and Track G
+prices the guardrails the vocabulary already requires but nothing enforces. Total 35.25 -> 43.75.
 
 The narrative source of truth is docs/LAUNCH-PLAN.md; this script renders it. Keep the day counts
 here in sync with that document -- there should never be a third figure.
@@ -36,7 +41,7 @@ from reportlab.platypus import (
 )
 
 OUT = "/home/user/Watcher/docs/Watcher_v2_Roadmap.pdf"
-VERSION = "v2.0"
+VERSION = "v2.1"
 DATE = "2026-08-15"
 
 INK = colors.HexColor("#12171f")
@@ -186,7 +191,9 @@ story.append(band(
     "the numbered Track&nbsp;0&ndash;3 items &mdash; it did not count the code that makes any of "
     "them execute. There is <b>no LLM client, no database connection, no application entrypoint, "
     "no container and no frontend</b>. The receptionist can be reasoned about; it cannot yet "
-    "process a single real message. Honest remaining: <b>~35.25 engineering days</b>.",
+    "process a single real message. A second pass then read intents.yaml against the schemas and "
+    "the design spec, and found guardrails the vocabulary requires but nothing enforces. Honest "
+    "remaining: <b>~43.75 engineering days</b>.",
     URG["NOW"]))
 
 story.append(Paragraph("Where we stand today", H2))
@@ -227,15 +234,19 @@ story.append(two_col(
 
 story.append(Paragraph("What changed in this revision", H2))
 story.append(two_col(
-    "v1.15 &rarr; v2.0 (audit against the code)",
+    "v1.15 &rarr; v2.1 (audit + design review)",
     [
-        "Four unpriced tracks added: <b>A</b> make it run, <b>B</b> host it, "
-        "<b>D</b> control page, <b>E</b> product surface",
-        "Total restated: 5.75 &rarr; <b>~35.25 days</b>",
+        "Five unpriced tracks added: <b>A</b> make it run, <b>B</b> host it, "
+        "<b>D</b> control page, <b>E</b> product surface, <b>G</b> guardrails",
+        "Total restated: 5.75 &rarr; 35.25 &rarr; <b>~43.75 days</b>",
         "<b>2.1 / 2.2 downgraded</b> &mdash; conversation continuity is built "
         "but never wired; every message is treated as turn one",
+        "<b>Emergency detection is never invoked</b> &mdash; a gas leak files "
+        "a maintenance ticket today",
+        "<b>Control page rebuilt</b> &mdash; six receptionist views; the old "
+        "five serve the v1 message-filer",
         "New item 2.8 &mdash; many properties per client, not one",
-        "Stack locked: Supabase + Render + Clerk",
+        "Decisions D14&ndash;D26 locked in DECISIONS.md",
     ],
     "What did not change",
     [
@@ -248,11 +259,12 @@ story.append(two_col(
 
 story.append(Spacer(1, 10))
 story.append(Paragraph(
-    "<b>Totals:</b> ~35.25 engineering days remaining. At the six-day week these estimates assume, "
-    "that is ~6 weeks of pure build; with review, integration and the external approvals (P1&ndash;"
-    "P3), plan <b>7&ndash;8 weeks to sellable</b> and <b>~2 weeks to a real phone number that "
-    "answers</b>. The critical path is no longer 2.4 &mdash; it is <b>Track A</b>, because until "
-    "the app can start and call a model, no other item can be demonstrated at all.", BODY))
+    "<b>Totals:</b> ~43.75 engineering days remaining. At the observed rate of 2&ndash;3 "
+    "engineering days per working session, that is <b>15&ndash;20 sessions</b>; at the six-day week "
+    "these estimates assume, ~7.3 weeks of pure build, so plan <b>9&ndash;10 weeks to sellable</b> "
+    "and <b>~13.5 days to a real number that answers safely</b>. The critical path is no longer "
+    "2.4 &mdash; it is <b>Track A</b>, because until the app can start and call a model, no other "
+    "item can be demonstrated at all.", BODY))
 
 story.append(PageBreak())
 
@@ -271,10 +283,11 @@ story.extend(section(
          "system block cacheable or it is the largest cost line"),
         ("A4", "Composition root", "NOW", "Moderate", "1.0",
          "NOT BUILT — apps/api/main.py, the first production caller of create_app()"),
-        ("A5", "Wire conversation continuity", "NOW", "Moderate", "1.5",
+        ("A5", "Wire continuity + excise v1 filer", "NOW", "Moderate", "2.25",
          "PART-BUILT — ConversationRepository is never called outside tests; the orchestrator "
          "passes task=None and empty slots. Also converts process() to async, removing the "
-         "asyncio.run() crash on the inline queue"),
+         "asyncio.run() crash, and removes the rules/destinations threading (D24) while the "
+         "surgery is already open. Tables retained, not dropped"),
         ("A6", "WhatsApp outbound sender", "NOW", "Moderate", "1.0",
          "NOT BUILT — ChannelSender has no implementation; replies are composed and never sent"),
     ]))
@@ -314,12 +327,13 @@ story.extend(section(
     "The reply path is written and the prompt now contains instructions a model can follow. What "
     "remains is knowledge, a measured prompt, and more than one property.",
     [
-        ("2.1", "Conversations, tasks and slot filling", "HIGH", "Hard", "2.0",
-         "PART-BUILT — 7 tables, ConversationRepository, task converters all written and tested; "
-         "not wired into the pipeline. Wiring is priced as A5"),
-        ("2.2", "The reply path", "HIGH", "Moderate", "1.5",
-         "PART-BUILT — tool registry, receptionist, ChannelSender protocol. No sender "
-         "implementation exists, so nothing is delivered. Priced as A6"),
+        ("2.1", "Conversations, tasks and slot filling", "HIGH", "Hard", "spent",
+         "PART-BUILT — 2.0d already spent: 7 tables, ConversationRepository, task converters, all "
+         "written and tested. Not wired into the pipeline. <b>The wiring is priced in A5, not "
+         "here</b> — do not add this row to the total"),
+        ("2.2", "The reply path", "HIGH", "Moderate", "spent",
+         "PART-BUILT — 1.5d already spent: tool registry, receptionist, ChannelSender protocol. No "
+         "sender implementation, so nothing is delivered. <b>Priced in A6, not here</b>"),
         ("2.3", "Autonomy gate", "HIGH", "Easy", "1.0",
          "DONE — RECEPTIONIST_REPLY as the fourth RoutingAction; decide_autonomy() runs "
          "after classification and identity, before rule matching"),
@@ -349,28 +363,78 @@ story.append(PageBreak())
 
 # ---------------------------------------------------------------- page 4
 story.extend(section(
-    "Track D &mdash; The control page. &nbsp;[ALL FIVE VIEWS]",
-    "Built against DESIGN-SPEC.md. Never hardcode a colour &mdash; reference a token.",
+    "Track D &mdash; The control page. &nbsp;[SIX RECEPTIONIST VIEWS]",
+    "DESIGN-SPEC §8 specifies Inbox / Sources / Destinations / Rules / Admin &mdash; the UI of the "
+    "v1 message-filer, where the job is triaging a record and routing it to a Sheet. The v2 "
+    "receptionist has nine tools and talks to guests. Two of those five views serve a product we "
+    "are no longer building.",
     [
+        ("D0", "Rewrite DESIGN-SPEC §8", "NOW", "Easy", "1.0",
+         "NEW — new view set against the nine tools. Tokens, type scale, confidence chip and the "
+         "RTL rules in §9/§10 all carry over unchanged"),
         ("D1", "Next.js scaffold, tokens, fonts, Clerk", "HIGH", "Easy", "1.0",
          "NOT STARTED — apps/control-page holds one CSS file. Committing package-lock.json "
          "activates CI&rsquo;s dormant web job"),
         ("D2", "REST API behind the views", "NOW", "Hard", "3.0",
-         "NOT BUILT — the hidden half of this track. ~25 tenant-scoped, paginated endpoints for "
-         "inbox, sources, destinations, rules and eval. None exist today"),
+         "NOT BUILT — the hidden half of this track. Tenant-scoped, paginated endpoints for "
+         "handoffs, conversations, emergencies, properties, quotes and eval. None exist today"),
         ("D3", "Typed client from the OpenAPI schema", "MED", "Trivial", "0.25",
          "NOT STARTED — generated, not hand-written"),
-        ("D4", "Inbox view", "NOW", "Moderate", "2.0",
-         "NOT STARTED — the critical path (DESIGN-SPEC §7): confidence chip, three interaction "
-         "patterns by band, field-edit popover, identity-match card"),
-        ("D5", "Sources view + first-run wizard", "HIGH", "Easy", "1.0", "NOT STARTED"),
-        ("D6", "Destinations + recipes + mapping", "HIGH", "Moderate", "1.25", "NOT STARTED"),
-        ("D7", "Rules builder", "MED", "Moderate", "1.25", "NOT STARTED — condition → action, no DSL"),
-        ("D8", "Admin / Eval viewer", "MED", "Easy", "0.75",
-         "NOT STARTED — accuracy drift per client"),
-        ("D9", "Arabic / RTL and accessibility", "HIGH", "Moderate", "1.0",
-         "NOT STARTED — DESIGN-SPEC §9 and §10, across all views"),
+        ("D4", "Handoff queue", "NOW", "Moderate", "2.0",
+         "NEW — the operator&rsquo;s work queue and the replacement for Inbox: everything the bot "
+         "escalated, <b>with why</b>. One reason per item, which is why D24 removes the second "
+         "escalation mechanism"),
+        ("D5", "Conversations", "HIGH", "Moderate", "1.5",
+         "NEW — live threads, what the bot said and on what basis, take-over by a human"),
+        ("D6", "Emergencies", "NOW", "Easy", "0.75",
+         "NEW — alarm-like, acknowledged, never buried in a queue. Backed by G3"),
+        ("D7", "Properties &amp; Facts", "HIGH", "Moderate", "1.5",
+         "NEW — the knowledge editor that makes Track C usable, sensitivity flags visible on the row"),
+        ("D8", "Quotes &amp; Audit", "HIGH", "Moderate", "1.0",
+         "NEW — every price the bot said, with provenance, re-checkable months later. Also where "
+         "the D20 door-code risk is recorded and visible"),
+        ("D9", "Admin / Eval viewer", "MED", "Easy", "0.75",
+         "NOT STARTED — accuracy, per-language breakdown, spend. Founder-only"),
+        ("D10", "Arabic / RTL and accessibility", "HIGH", "Moderate", "1.0",
+         "NOT STARTED — DESIGN-SPEC §9 and §10 carry over, applied across the new views"),
     ]))
+
+story.append(Spacer(1, 8))
+story.extend(section(
+    "Track G &mdash; Receptionist guardrails. &nbsp;[THE VOCABULARY ALREADY REQUIRES THESE]",
+    "Not new features. These enforce rules intents.yaml states and schema.py validates, and which "
+    "nothing in apps/ currently honours.",
+    [
+        ("G1", "Quote path and provenance", "NOW", "Moderate", "2.0",
+         "NOT BUILT — AvailabilityResult has no rate_or_quote_id and no valid_until, so <b>as "
+         "shipped it cannot satisfy quoting.provenance_required</b>, which schema.py:176 enforces. "
+         "Two modules contradict each other. Adds the 300s freshness bound and the audit write that "
+         "must land before the number reaches the guest"),
+        ("G2", "Reservation lookup + verification", "HIGH", "Moderate", "1.5",
+         "NOT BUILT — booking reference plus a second fact (D19). Fixes the identity_verified "
+         "wiring in the same pass so a fuzzy name match stops reading as proof"),
+        ("G3", "Emergency path", "NOW", "Moderate", "1.5",
+         "NOT BUILT — worker.py:162 hardcodes emergency=False, so a gas leak files a maintenance "
+         "ticket. Wire trigger matching before classification, then Twilio call to the operator"),
+        ("G4", "Client config split", "MED", "Easy", "0.5",
+         "NEW — safety-critical keys stay in YAML behind the build validator; currency, timezone, "
+         "hours and wording move to the DB (D23)"),
+    ]))
+
+story.append(Spacer(1, 8))
+story.append(band(
+    "<b>The door-code decision (D20), with its reasoning.</b> Door codes unlock on booking "
+    "reference plus a second fact. The case for it: about half of bookings are OTA, the platform "
+    "has already verified the guest by account and payment, and that guest gets the code through "
+    "the OTA app anyway. Residual risk accepted: both facts appear on the confirmation email. "
+    "Note the trap &mdash; requiring the sender&rsquo;s number to match the reservation looks like "
+    "the fix but <b>fails for OTA guests precisely</b>, because Airbnb and Booking.com issue "
+    "masked relay numbers (SESSION-HANDOFF §8: about half of all guests), and Reservation carries "
+    "no phone field. <b>The one to revisit (D20a) is lock type:</b> a per-booking PIN expires at "
+    "checkout, a leaked static key-box code compromises every future guest until someone drives "
+    "out to the property.", URG["HIGH"]))
+
+story.append(PageBreak())
 
 story.extend(section(
     "Track E &mdash; What makes it sellable rather than working",
@@ -396,8 +460,10 @@ story.extend(section(
     "Base360.ai is ruled out as a partner. Hostaway, Guesty and Cloudbeds all publish APIs.",
     [
         ("3.1", "PropertySystemPort plus the first adapter", "MED", "Moderate", "2.5",
-         "PENDING — vendor-neutral read port and router exist (PR #14); needs the first concrete "
-         "adapter. Blocks pricing, availability and door codes. Cache facts, never availability"),
+         "PENDING — the published /v1/property-system router is an <b>inbound</b> projection; it "
+         "fetches nothing. D16: an outbound HttpPropertySystemAdapter (~1.0) plus the Hostaway "
+         "bridge, which Watcher writes and hosts (~1.5). Vendors will not implement your contract, "
+         "so the neutral port relocates the adapter rather than removing it"),
         ("3.2", "End to end on a real number, then measure", "HIGH", "Moderate", "1.0",
          "PENDING — the point at which the eval number becomes real rather than recorded"),
         ("3.3", "Tuning tail", "MED", "Hard", "2.0",
@@ -421,6 +487,16 @@ story.extend(section(
          "NOT STARTED — maps the repo for the coding agents. Local parsing, nothing leaves "
          "the machine"),
     ]))
+
+story.append(Spacer(1, 8))
+story.append(band(
+    "<b>How the total reconciles.</b> A 6.75 + B 4.25 + D 13.75 + E 4.5 + G 5.5 + (2.4, 2.7, 2.8) "
+    "3.5 + (3.1, 3.2, 3.3) 5.5 = <b>43.75</b>. Rows 2.1 and 2.2 show &ldquo;spent&rdquo; rather "
+    "than a number because their days are already delivered and the outstanding wiring is priced "
+    "in A5 and A6 &mdash; adding them would double-count 3.5 days. The parallel track P1&ndash;P4 "
+    "is excluded: it is founder time, not engineering. <b>Counting scope loosely is what produced "
+    "the 5.75 figure this document replaces</b>, so the arithmetic is stated rather than implied.",
+    ACCENT))
 
 story.append(PageBreak())
 
@@ -455,12 +531,12 @@ for milestone, original, revised, stat in (
     ("Core stops speaking one channel; scaffold ported", "Week 1", "--", "DONE"),
     ("Taxonomy unified, prompt v2, eval at 50", "14 Aug", "--", "DONE"),
     ("Prompt v3 &mdash; instructions a model can follow", "14 Aug", "--", "DONE"),
-    ("<b>M1 &mdash; answers a real message on a real number</b>", "~2 days from 14 Aug",
-     "~10 days", "NEXT — Track A + B + 2.4"),
-    ("<b>M2 &mdash; you can watch and correct it</b>", "not scheduled", "~+11.5 days",
-     "PENDING — Track D, all five views"),
-    ("<b>M3 &mdash; sellable</b>", "~5 days from 14 Aug", "~+13.75 days",
-     "PENDING — Track E + 3.1, blocked on P1"),
+    ("<b>M1 &mdash; answers a real message, safely</b>", "~2 days from 14 Aug",
+     "~13.5 days", "NEXT — Track A + B1-B4 + G3 + 2.4. The emergency path is not optional here"),
+    ("<b>M2 &mdash; you can watch and correct it</b>", "not scheduled", "~+13.75 days",
+     "PENDING — Track D, six receptionist views"),
+    ("<b>M3 &mdash; sellable</b>", "~5 days from 14 Aug", "~+16.5 days",
+     "PENDING — Tracks E, F and the rest of G. Blocked on P1"),
     ("Phone answering", "Week 4", "after M3", "PENDING — the speech-to-text seam already exists"),
 ):
     dates.append([
@@ -509,7 +585,8 @@ story.append(band(
     "<b>If you do only one thing next session:</b> start Track A. Not 2.4. The knowledge base was "
     "the right answer while the question was &ldquo;what does it lack?&rdquo; &mdash; but the "
     "receptionist cannot start, cannot reach a model and cannot send a reply, and no amount of "
-    "knowledge changes that. A1 through A4 is the shortest path to a system that exists.",
+    "knowledge changes that. A1 through A4 is the shortest path to a system that exists &mdash; "
+    "and G3 before any real guest can message it.",
     URG["NOW"]))
 
 story.append(Paragraph("Session log", H2))
@@ -518,10 +595,13 @@ for label, text in (
                   "= 6.5 engineering days."),
     ("Session 2", "PR #14 and #15. Tests 248 &rarr; 259 (+11). Items 2.5, 2.6 = 1.5 days."),
     ("Session 3", "PR #16. Tests 259 &rarr; 277 (+18). Prompt v3, ~0.5 days, unplanned."),
-    ("Session 4", "Code audit against the roadmap. No application code changed. Four unpriced "
-                  "tracks added; 2.1 and 2.2 downgraded to part-built; stack locked to Supabase + "
-                  "Render + Clerk. See docs/LAUNCH-PLAN.md."),
-    ("Cumulative", "<b>8.5 engineering days delivered. ~35.25 remaining.</b>"),
+    ("Session 4", "Code audit plus a design review reading intents.yaml, property_system/schemas.py "
+                  "and DESIGN-SPEC against each other. No application code changed. Five unpriced "
+                  "tracks added; 2.1/2.2 downgraded to part-built; emergency detection found "
+                  "unwired; the quote schema found unable to satisfy its own provenance rule; the "
+                  "control page rebuilt around six receptionist views. Decisions D14-D26. "
+                  "See docs/LAUNCH-PLAN.md."),
+    ("Cumulative", "<b>8.5 engineering days delivered. ~43.75 remaining.</b>"),
 ):
     story.append(Paragraph(f"<b>{label}:</b> {text}", NOTE))
     story.append(Spacer(1, 4))
