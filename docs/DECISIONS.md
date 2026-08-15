@@ -42,6 +42,7 @@ thinking and the tool call together, would truncate the classification rather th
 | D3‑a | ASR provider | **Whisper API** (SaaS) · faster‑whisper (self‑hosted) | Strong Arabic; self‑hostable path for no‑egress tier |
 | D13‑a | Eval in CI | **Recorded fixtures in CI; live key nightly** | Deterministic, cheap, no live key on every PR |
 | — | Schema shape | **Flat (addendum §4)** | One model backs LLM output + DB row + REST contract |
+| — | DB connection path | **Assume a transaction‑mode pooler** (`NullPool` + `prepare_threshold=None`); `DATABASE_POOL_MODE=session` opts out | Supabase's app URI is pgbouncer in transaction mode, where prepared statements and a client‑side pool both break — intermittently, under load. Safe default; the cost is a handshake per checkout, to be measured in B1/B3 |
 
 ---
 
@@ -51,6 +52,8 @@ thinking and the tool call together, would truncate the classification rather th
 - [ ] Change `MEDIUM_CONFIDENCE_THRESHOLD` **0.60 → 0.5** (`schemas/common.py`); converge `band_for()` with the classifier's `escalation_threshold`.
 - [x] Implement **AnthropicProvider** + **OpenAIProvider** behind the `LLMProvider` seam, reading the pinned model IDs from config. *(roadmap A3 — `classifier/anthropic.py`, `classifier/openai.py`, wired by `classifier/factory.py`; the OpenAI provider doubles as the vLLM/Qwen path)*
 - [x] Add a typed **Settings** object in `core/` (extend `MetaSettings`) reading the pinned model/ASR config. *(roadmap A1 — `core/config.py`; `Settings.meta()` returns the existing `MetaSettings`)*
+- [x] Wire the **engine and session scope** over `DATABASE_URL`, pooler‑safe by default. *(roadmap A2 — `db/engine.py`)*
+- [x] Build the **composition root**: the first production caller of `create_app()`. *(roadmap A4 — `main.py`, run as `uvicorn apps.api.main:create_application --factory`)*
 - [ ] Alembic target + Render Postgres URL wired in deploy.
 
 ---

@@ -9,15 +9,18 @@ and process loses nothing (§5) — and runs it through the :class:`Orchestrator
   200 before classification runs (§5). It is bound to a single request's ``BackgroundTasks``.
 * :class:`InlineClassificationQueue` — runs the consumer synchronously; for single-process dev and
   for wiring ``create_app`` without a live request.
+* :class:`ThreadPoolClassificationQueue` — the same fast-200 behaviour for a queue that is built
+  once and lives as long as the process, which is what the composition root (A4) needs.
 
-Both satisfy the existing ``ClassificationQueue`` seam, so ingestion is unchanged. The durable swap
-— an arq/Redis worker for multi-process scale — calls the same ``MessageConsumer.consume`` on a
-worker, so nothing else changes.
+All three satisfy the existing ``ClassificationQueue`` seam, so ingestion is unchanged. The durable
+swap — an arq/Redis worker for multi-process scale — calls the same ``MessageConsumer.consume`` on
+a worker, so nothing else changes.
 """
 
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -90,3 +93,58 @@ class InlineClassificationQueue:
 
     def enqueue(self, tenant_id: str, external_id: str) -> None:
         self._consumer.consume(tenant_id, external_id)
+
+
+#: Concurrent classifications in one process. Each one is mostly waiting on a model, so this is a
+#: cap on in-flight work rather than on CPU; small enough that a burst queues instead of opening a
+#: connection per message, since ``NullPool`` gives every session its own.
+DEFAULT_QUEUE_WORKERS = 4
+
+
+class ThreadPoolClassificationQueue:
+    """``ClassificationQueue`` on a small thread pool — the process-level fast-200 path.
+
+    ``create_app`` is handed one queue for the lifetime of the application, and
+    ``BackgroundTasksQueue`` cannot be that queue: it is bound to a single request's
+    ``BackgroundTasks``, which only exists once a request is in flight. Consuming inline instead
+    would make the webhook wait for two model calls before answering, and the platform retries a
+    slow webhook — turning one guest's message into several (§5 is explicit that 200 comes before
+    classification). So the composition root gets a pool, and the request thread's involvement
+    ends at ``submit``.
+
+    In-flight work is lost on restart. That is the honest cost of an in-process queue and it is
+    what B5 replaces with arq/Redis, against this same seam; persistence-before-enqueue means the
+    row survives, so a lost message is a message not yet classified, not a message not received.
+    """
+
+    def __init__(
+        self,
+        consumer: MessageConsumer,
+        *,
+        max_workers: int = DEFAULT_QUEUE_WORKERS,
+        logger: logging.Logger = _logger,
+    ) -> None:
+        self._consumer = consumer
+        self._logger = logger
+        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="classify")
+
+    def enqueue(self, tenant_id: str, external_id: str) -> None:
+        self._executor.submit(self._consume, tenant_id, external_id)
+
+    def _consume(self, tenant_id: str, external_id: str) -> None:
+        """Consume one message, logging anything that escapes.
+
+        A future whose exception is never retrieved is a silent failure: the message is simply
+        never classified and nothing anywhere says so. Nothing retrieves these futures — the
+        webhook has long since answered — so the logging has to happen in the worker.
+        """
+        try:
+            self._consumer.consume(tenant_id, external_id)
+        except Exception:
+            self._logger.exception(
+                "classification failed: tenant=%s external_id=%s", tenant_id, external_id
+            )
+
+    def shutdown(self, *, wait: bool = True) -> None:
+        """Drain in-flight work. Called from the application's shutdown handler."""
+        self._executor.shutdown(wait=wait)
