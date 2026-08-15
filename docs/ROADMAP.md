@@ -1,11 +1,20 @@
 # Watcher — Implementation Roadmap
 
 **Status:** Planning artifact. Sequences every track/point from the architecture review into a
-build order with owners, dependencies, and a Day‑0 board. Updated 2026‑06‑10.
+build order with owners, dependencies, and a Day‑0 board. Updated 2026‑08‑15.
 
-**Where we are:** ~45% of the MVP is built — 248 backend tests green, full conversation layer ported,
-receptionist reply path wired as fourth orchestrator outcome. What's missing is the concrete adapters
-(LLM providers, pywa, gspread, httpx), intent taxonomy unification, REST API, and the entire frontend.
+> **Read `LAUNCH-PLAN.md` first.** A code audit on 2026‑08‑15 found that the "5.75 days remaining"
+> headline in `Watcher_v2_Roadmap.pdf` counted only the numbered Track 0–3 work items and excluded
+> everything needed to *run* the system. The honest remaining figure is **~36 engineering days**.
+> The gaps were not new — §7 "Next up" below has listed most of them for weeks — they were simply
+> never priced. `LAUNCH-PLAN.md` prices them and phases them.
+
+**Where we are:** the business logic is largely built and well tested — 277 backend tests green,
+conversation layer ported, receptionist reply path wired as fourth orchestrator outcome, prompt v3
+rendered from the vocabulary. **Nothing runs yet.** There is no LLM client, no database connection,
+no application entrypoint, no container, and no frontend. What's missing is the concrete adapters
+(LLM providers, Meta outbound, PMS), the composition root, hosting, the REST API, and the entire
+control page.
 
 **The one thing that gates the calendar:** Meta WABA verification is 1–4 weeks of *waiting*. It does not
 block engineering (use the dev test number), but it blocks the first real pilot. **Start it on Day 0.**
@@ -168,13 +177,17 @@ Each numbered item is one PR‑sized slice. Items map 1:1 to the review's Tracks
 
 ---
 
-## 7. Progress log — RESUME HERE (updated 2026‑08‑14)
+## 7. Progress log — RESUME HERE (updated 2026‑08‑15)
 
-> A fresh session has no chat memory; this section + `DECISIONS.md` + `AGENTS.md` + `docs/HANDOFF.md` are the handoff.
+> A fresh session has no chat memory; this section + `LAUNCH-PLAN.md` + `DECISIONS.md` + `AGENTS.md`
+> + `docs/HANDOFF.md` are the handoff.
 
-**Repo state:** PR [#13](https://github.com/amahmoudosman96-lgtm/Watcher/pull/13) on
-`claude/file-review-planning-dcyb2g` — 5 commits (Items 1.1, 1.3, 2.1, 2.2, 2.3). **248 backend
-tests green**; `ruff` + `ruff format` + `mypy --strict` all clean.
+**Repo state:** `main` at PR [#16](https://github.com/amahmoudosman96-lgtm/Watcher/pull/16) —
+prompt v3. **277 backend tests green**; `ruff` + `mypy --strict` clean. Sessions 1–3 delivered
+8.5 engineering days of business logic.
+
+**Stack decisions locked 2026‑08‑15:** Supabase Postgres · Render API · Clerk auth · all five
+control‑page views · multi‑tenant and multi‑property from day one, nothing hardcoded.
 
 **Done (all behind ports, fully unit‑tested):**
 - Schemas · ingestion/webhook · classifier tiering (slices 1–3) — *merged*
@@ -192,19 +205,29 @@ tests green**; `ruff` + `ruff format` + `mypy --strict` all clean.
 - **Receptionist reply path** (Item 2.2) — tool registry, `receptionist.py`, `ChannelSender` protocol — *in PR #13*
 - **Autonomy gate wiring** (Item 2.3) — `RECEPTIONIST_REPLY` fourth outcome, `decide_autonomy()` before rules — *in PR #13*
 
-**Known design gap:** `IntentType` (classification enum) and vocabulary intents (receptionist taxonomy)
-are separate. The autonomy gate returns `hand_off` for any intent not in the vocabulary, so the
-receptionist path only fires when the classifier produces a vocabulary‑recognized intent. Unifying
-the two taxonomies is prerequisite to the receptionist handling real traffic.
+**Known design gaps (verified against the code 2026‑08‑15 — see `LAUNCH-PLAN.md` §2):**
 
-**Next up:**
-1. **Intent taxonomy unification** — merge `IntentType` with vocabulary intents so `decide_autonomy()`
-   recognises classified intents and the receptionist fires on real messages.
-2. **Concrete LLM providers** (Anthropic/OpenAI) against the `LLMProvider` seam — *needs API keys*.
-3. **Grow golden set 8 → 50** (10/intent, EN/AR/mixed) → lock the real baseline accuracy number.
-4. **DB‑backed `MessageLoader`** for `orchestration/queue.py` + wire into webhook route.
-5. **Real `ChannelSender`** for WhatsApp (Meta Cloud API outbound).
-6. **REST API** for control page + Inbox view.
+- ~~Intent taxonomy split~~ — **closed** by Item 2.6.
+- **Conversation continuity is not wired.** `ConversationRepository` is never called outside tests;
+  `orchestration/worker.py` passes `extracted_slots={}` and `task=None` hardcoded, so every message
+  is treated as turn one. Items 2.1/2.2 are built but not connected.
+- **`InlineClassificationQueue` raises at runtime.** `worker.py::process()` calls `asyncio.run()`
+  from inside the `async def receive` handler. Fixed by making the orchestrator async.
+- **No RLS in any migration**, though `AGENTS.md` calls tenant isolation non‑negotiable.
+- The roadmap assumed **one property**; the goal is many per client. Needs a `properties` table and
+  per‑property fact scoping.
+
+**Next up — phased in `LAUNCH-PLAN.md`. Phase A is the unblocker:**
+1. **Configuration + DB session** (A1/A2) — `pydantic-settings`; engine, `sessionmaker`,
+   `get_session`. Nothing in app code opens a database today.
+2. **Concrete LLM providers** (A3, Anthropic/OpenAI) against the `LLMProvider` seam — *needs API
+   keys*. Mark the ~5k‑token system block cacheable.
+3. **Composition root** (A4) — `apps/api/main.py`, the first production caller of `create_app()`.
+4. **Wire `ConversationRepository`** into the orchestrator (A5) — this is what makes it hold a
+   conversation. Convert `process` to `async`.
+5. **Real `ChannelSender`** for WhatsApp Cloud API outbound (A6).
+6. **Host it** (B) — Supabase, RLS, Dockerfile, Render, domain, durable queue.
+7. **REST API + all five control‑page views** (D) — ~25 endpoints, none of which exist yet.
 
 **Build‑loop working agreement (match this style):** Python‑only backend; each slice = ports + Pydantic v2,
 fully unit‑tested; `ruff` + `ruff format` + `mypy --strict` + `pytest` all green before commit; line‑length
