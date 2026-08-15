@@ -76,38 +76,29 @@ def assemble(settings: Settings, database: Database, classifier: Classifier) -> 
     and a stub model without a Postgres URL or an API key. This is the function under test; the one
     above is the four lines that decide what to pass it.
     """
+    # Two scopes, and which one a collaborator gets is a security decision (B2). `tenant_scope`
+    # stamps `app.current_tenant` on the transaction, so the RLS policies in migration 004 are
+    # enforcing on every one of these. The resolver gets the unstamped scope because it is the one
+    # question asked *before* a tenant is known — which tenant owns this endpoint — and migration
+    # 004 gives that lookup a policy of its own.
+    tenant_scope = database.tenant_session
     scope = database.session
     sender = build_sender(settings)
 
     orchestrator = Orchestrator(
         classifier,
-        SqlAlchemyAuditLog(scope),
-        SqlAlchemyInboxWriter(scope),
-        SqlAlchemyCrmLookup(scope),
+        SqlAlchemyAuditLog(tenant_scope),
+        SqlAlchemyInboxWriter(tenant_scope),
+        SqlAlchemyCrmLookup(tenant_scope),
         policy=settings.tenant_policy(),
         receptionist=handle,
-        conversations=SqlAlchemyConversationStore(scope),
+        conversations=SqlAlchemyConversationStore(tenant_scope),
         sender=sender,
-        classifications=SqlAlchemyClassificationWriter(scope),
+        classifications=SqlAlchemyClassificationWriter(tenant_scope),
     )
     queue = ThreadPoolClassificationQueue(
-        MessageConsumer(SqlAlchemyMessageLoader(scope), orchestrator)
+        MessageConsumer(SqlAlchemyMessageLoader(tenant_scope), orchestrator)
     )
-
-    app = create_app(
-        settings.meta(),
-        SessionScopedMessageRepository(scope),
-        queue,
-        ChannelConfigTenantResolver(scope),
-    )
-
-    # Held on the application so nothing here is collected while the process is still serving, and
-    # so a test can reach the queue to drain it. Shutdown order is not arbitrary: the pool has to
-    # finish the messages it accepted before the engine those messages are writing through closes,
-    # and before the sender those messages are replying through closes its connections.
-    app.state.database = database
-    app.state.queue = queue
-    app.state.sender = sender
 
     def _shutdown() -> None:
         queue.shutdown()
@@ -115,5 +106,21 @@ def assemble(settings: Settings, database: Database, classifier: Classifier) -> 
             sender.close()
         database.dispose()
 
-    app.add_event_handler("shutdown", _shutdown)
+    app = create_app(
+        settings.meta(),
+        SessionScopedMessageRepository(tenant_scope),
+        queue,
+        ChannelConfigTenantResolver(scope),
+        on_shutdown=_shutdown,
+    )
+
+    # Held on the application so nothing here is collected while the process is still serving, and
+    # so a test can reach the queue to drain it. Shutdown order is not arbitrary: the pool has to
+    # finish the messages it accepted before the engine those messages are writing through closes,
+    # and before the sender those messages are replying through closes its connections. That order
+    # lives in `_shutdown` above, which `create_app` runs from the application's lifespan.
+    app.state.database = database
+    app.state.queue = queue
+    app.state.sender = sender
+
     return app

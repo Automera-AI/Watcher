@@ -10,6 +10,10 @@ that already has a session, and the shape the tests use. :class:`SessionScopedMe
 is handed a *scope* and opens one per call, which is what a long-lived object held by the
 application can safely do: a session pinned for the process's lifetime would hold one pgbouncer
 server connection forever and would accumulate every object it ever loaded.
+
+Since B2 that scope is a :data:`~apps.api.db.engine.TenantScope`: the tenant both methods are
+already given is handed to the session as well as to the query, so RLS enforces in Postgres what
+the ``WHERE`` clause asserts in Python.
 """
 
 from __future__ import annotations
@@ -19,7 +23,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from apps.api.db.engine import SessionScope
+from apps.api.db.engine import TenantScope
 from apps.api.db.models import Message
 from apps.api.schemas.message import MessageEnvelope
 
@@ -65,13 +69,13 @@ class SessionScopedMessageRepository:
     once, and the two objects cannot answer the same question differently.
     """
 
-    def __init__(self, scope: SessionScope) -> None:
+    def __init__(self, scope: TenantScope) -> None:
         self._scope = scope
 
     def exists(self, tenant_id: str, external_id: str) -> bool:
-        with self._scope() as session:
+        with self._scope(tenant_id) as session:
             return SqlAlchemyMessageRepository(session).exists(tenant_id, external_id)
 
     def save(self, tenant_id: str, message: MessageEnvelope) -> None:
-        with self._scope() as session:
+        with self._scope(tenant_id) as session:
             SqlAlchemyMessageRepository(session).save(tenant_id, message)

@@ -1,0 +1,23 @@
+# What never belongs in the build context (roadmap B3).
+#
+# `.env` first and for the obvious reason: the build context is uploaded to whatever is doing the
+# building, and a secret that reaches a layer is a secret in the registry.
+
+.env
+.env.*
+!.env.example
+
+.git
+.github
+.venv
+venv
+docs
+eval-out
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.db
