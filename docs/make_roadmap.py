@@ -1,6 +1,6 @@
 """Generate the Watcher v2 roadmap PDF: urgency, ease, effort, per work item.
 
-**v2.4 — 15 August 2026.** This generator is the single source of the roadmap PDF. Edit this file
+**v2.5 — 15 August 2026.** This generator is the single source of the roadmap PDF. Edit this file
 and re-run it rather than producing another version by hand; v2.2 flagged that three roadmap
 artifacts disagreed, and regenerating from here is what keeps that closed.
 
@@ -24,7 +24,7 @@ from reportlab.platypus import (
 )
 
 OUT = "/home/user/Watcher/docs/Watcher_v2_Roadmap.pdf"
-VERSION = "v2.4"
+VERSION = "v2.5"
 DATED = "15 August 2026"
 
 INK = colors.HexColor("#12171f")
@@ -162,24 +162,25 @@ story.append(Paragraph("Watcher v2 &mdash; Build Roadmap", H1))
 story.append(Paragraph(
     "From a message&nbsp;filer to a receptionist. Every item scored for urgency and ease. "
     f"&nbsp;&bull;&nbsp; <b>{VERSION}</b> &nbsp;&bull;&nbsp; {DATED} &nbsp;&bull;&nbsp; "
-    "supersedes the v2.3 PDF of the same date", LEAD))
+    "supersedes the v2.4 PDF of the same date", LEAD))
 story.append(Spacer(1, 10))
 
 story.append(banner(
-    "<b>What this revision does.</b> v2.3 named A5 and A6 as the whole of the remaining critical "
-    "path and put the honest total at ~40.25 engineering days. Session&nbsp;7 built both. "
-    "<b>The application now answers.</b> A guest's message is classified, joined to the "
-    "conversation it belongs to, continued as a task that survives between turns, answered by the "
-    "receptionist and put on the wire &mdash; and the v1 filer that used to route it to a "
-    "spreadsheet instead is gone. <b>Track&nbsp;A is complete.</b> "
-    "<b>Remaining: ~37 engineering days.</b>"))
+    "<b>What this revision does.</b> v2.4 put the critical path outside Track&nbsp;A for the first "
+    "time: host it, then make it safe. Session&nbsp;8 built the hosting half. <b>The schema now "
+    "exists on a real database</b> (Supabase, eu-central-1, migrated and stamped), <b>tenant "
+    "isolation is enforced by Postgres rather than by convention</b> (RLS forced on all 20 tables, "
+    "behind a role that cannot bypass it), and <b>the API is a container image</b> at the path "
+    "cd.yml has been waiting on since it was written. What is left of Track&nbsp;B is a card on "
+    "the Render account, a domain, and the durable queue. "
+    "<b>Remaining: ~34.5 engineering days.</b>"))
 
 story.append(Paragraph("Where we stand today", H2))
 story.append(two_col(
     "Built and tested", "Missing &mdash; nothing ships without these",
-    "<b>406 passing tests</b>, no DB or network needed<br/>"
+    "<b>417 passing tests</b>, no DB or network needed<br/>"
     "86 source files across 20 modules (125 with tests)<br/>"
-    "19 DB tables + 3 migrations<br/>"
+    "19 DB tables + 4 migrations, <b>applied to a live database</b><br/>"
     "Every external system behind a swappable seam<br/>"
     "Eval runner + CI accuracy gate, 50 golden cases<br/>"
     "Receptionist vocabulary: 19 intents, data not code<br/>"
@@ -194,8 +195,13 @@ story.append(two_col(
     "starts and files a message end to end (A4)<br/>"
     f'<font color="{DONE_GREEN.hexval()}"><b>NEW</b></font> &bull; Conversation continuity: one '
     "task carried across turns, classifications recorded (A5)<br/>"
-    f'<font color="{DONE_GREEN.hexval()}"><b>NEW</b></font> &bull; Outbound sender &mdash; the '
-    "reply reaches the guest (A6)",
+    "Outbound sender &mdash; the reply reaches the guest (A6)<br/>"
+    f'<font color="{DONE_GREEN.hexval()}"><b>NEW</b></font> &bull; Supabase project, migrated, '
+    "with the channel_configs row (B1)<br/>"
+    f'<font color="{DONE_GREEN.hexval()}"><b>NEW</b></font> &bull; RLS forced on every table, '
+    "per-transaction tenant GUC, cross-tenant test (B2)<br/>"
+    f'<font color="{DONE_GREEN.hexval()}"><b>NEW</b></font> &bull; Container image; the project '
+    "installs from pyproject (B3)",
 
     f'<font color="{DONE_GREEN.hexval()}"><b>No DB connection &mdash; done (A2)</b></font><br/>'
     f'<font color="{DONE_GREEN.hexval()}"><b>No entrypoint &mdash; done (A4)</b></font><br/>'
@@ -205,44 +211,48 @@ story.append(two_col(
     "<b>No emergency detection</b> &mdash; emergency=False is still hardcoded (G3)<br/>"
     "<b>No slot extraction</b> &mdash; the model emits no slots, so a task fills only by "
     "handing off (2.x)<br/>"
-    "No Dockerfile &mdash; so cd.yml has never deployed anything<br/>"
-    "No Supabase project &mdash; and <b>no channel_configs row</b>, without which "
-    "every webhook 500s (B1)<br/>"
-    "No RLS &mdash; no policy in any migration<br/>"
+    f'<font color="{DONE_GREEN.hexval()}"><b>No database &mdash; done (B1)</b></font><br/>'
+    f'<font color="{DONE_GREEN.hexval()}"><b>No RLS &mdash; done (B2)</b></font><br/>'
+    f'<font color="{DONE_GREEN.hexval()}"><b>No Dockerfile &mdash; done (B3)</b></font><br/>'
+    "<b>No running service</b> &mdash; Render wants billing details before it will create one, "
+    "free plan included (B3)<br/>"
+    "No public URL &mdash; so nothing can reach the webhook yet (B4)<br/>"
     "No control page &mdash; one CSS file, no package.json<br/>"
     "No control-page API &mdash; ~25 endpoints, none written<br/>"
     "Knowledge &mdash; zero tables, zero rows<br/>"
     "Live availability &mdash; no read path to any PMS<br/>"
     "A measured prompt &mdash; the gate replays v2 fixtures, so 88% is not v3's number"))
 
-story.append(Paragraph("What changed in this revision (v2.3 &rarr; v2.4)", H2))
+story.append(Paragraph("What changed in this revision (v2.4 &rarr; v2.5)", H2))
 story.append(two_col(
     "Delivered", "Consequences",
-    "<b>A5 and A6 delivered</b> &mdash; 3.25 engineering days. "
-    "Total 40.25&nbsp;&rarr;&nbsp;<b>37</b><br/>"
-    "<b>Track A: 3.25&nbsp;&rarr;&nbsp;0 days. The track is complete</b><br/>"
-    "Tests 375 &rarr; <b>406</b> (+31). Source files 83 &rarr; 86<br/>"
-    "<b>classifications</b> is written to for the first time; conversations, turns and task_rows "
-    "join it<br/>"
-    "The rules/destinations threading is gone from the message path (D24)",
+    "<b>B1, B2 and B3 delivered</b> &mdash; 2.5 engineering days. "
+    "Total 37&nbsp;&rarr;&nbsp;<b>34.5</b><br/>"
+    "<b>Track B: 4.25&nbsp;&rarr;&nbsp;1.75 days</b><br/>"
+    "Tests 406 &rarr; <b>417</b> (+11). Migration 004 is the first one nothing autogenerated<br/>"
+    "<b>watcher_app</b> &mdash; the application connects as a role that cannot bypass RLS; "
+    "Supabase's postgres role can, which would have made the policies decorative<br/>"
+    "Every tenant-facing adapter now takes a TenantScope rather than a SessionScope",
 
-    "<b>The milestone &ldquo;holds a conversation&rdquo; is now true</b> &mdash; a task survives "
-    "between messages and the reply reaches the guest<br/>"
-    "<b>KNOWN_LEAKS is empty</b>, which closes roadmap item 1.1: no core file names a channel<br/>"
-    "<b>G3 is now the last safety gap</b> &mdash; a receptionist that answers but cannot recognise "
-    "an emergency is more dangerous than one that stays silent<br/>"
-    "<b>A task fills only by handing off</b> until the model emits slots (2.x) &mdash; bounded, "
-    "and it escalates cleanly<br/>"
+    "<b>Tenant isolation is a property of the database</b> now, not of remembering the WHERE "
+    "clause &mdash; the claim AGENTS.md calls non-negotiable is enforced and tested<br/>"
+    "<b>Building the image found two defects the pinned test environment hides</b>: the intent "
+    "vocabulary was missing from the wheel, and Starlette 1.0 removed add_event_handler<br/>"
+    "<b>G3 is now the only thing between here and a number a guest can message</b> &mdash; B4 is "
+    "half a day of DNS once a service exists<br/>"
+    "<b>The Render service is blocked on billing, not engineering</b> &mdash; everything it needs "
+    "is written down in the deploy runbook<br/>"
     "Unchanged: 2.4 is still the last item before a demo; 3.1 still blocked on P1; the "
     "scope guard still holds &mdash; no PDF handbook ingestion"))
 
 story.append(Spacer(1, 10))
 story.append(Paragraph(
-    "<b>Totals:</b> ~37 engineering days remaining. At the observed 2&ndash;3 engineering days "
-    "per working session that is <b>12&ndash;18 sessions</b>; at the six-day week these estimates "
-    "assume, ~6.2 weeks of pure build &mdash; so plan <b>~8 weeks to sellable</b> and "
-    "<b>~6.75 days to a real number that answers safely</b>. The critical path leaves Track&nbsp;A "
-    "for the first time: it is now <b>B1&ndash;B4 to host it, G3 to make it safe, and 2.4</b>.",
+    "<b>Totals:</b> ~34.5 engineering days remaining. At the observed 2&ndash;3 engineering days "
+    "per working session that is <b>11&ndash;17 sessions</b>; at the six-day week these estimates "
+    "assume, ~5.8 weeks of pure build &mdash; so plan <b>~7.5 weeks to sellable</b> and "
+    "<b>~4.25 days to a real number that answers safely</b>. The critical path is now "
+    "<b>G3 to make it safe, B4 to expose it, and 2.4</b> &mdash; G3 first, because the system "
+    "already answers.",
     BODY))
 
 story.append(PageBreak())
@@ -295,16 +305,18 @@ story.extend(section(
     "Stack locked 15 August 2026. B2 must land before a second client exists. B1 grew one "
     "precondition this session &mdash; see its note.",
     [
-        ("B1", "Supabase project and migrations", "NOW", "Easy", "0.5",
-         "<b>NOT STARTED</b> &mdash; provision, set DATABASE_URL, run the 3 existing migrations. "
-         "<b>And insert one channel_configs row per endpoint</b>: tenant resolution reads that "
-         "table and raises rather than guessing, so without the row every inbound message 500s"),
-        ("B2", "Row-Level Security", "NOW", "Moderate", "1.5",
-         "<b>NOT BUILT</b> &mdash; no policy in any migration, though AGENTS.md calls tenant "
-         "isolation non-negotiable. Per-session GUC + a cross-tenant read test"),
-        ("B3", "Dockerfile and Render service", "HIGH", "Easy", "0.75",
-         "<b>NOT BUILT</b> &mdash; the Dockerfile alone activates the dormant cd.yml image job. "
-         "The start command is now a known quantity (uvicorn --factory)"),
+        ("B1", "Supabase project and migrations", "DONE", "Easy", "0",
+         "<b>DONE</b> &mdash; watcher-prod in eu-central-1, migrations applied and stamped, one "
+         "enabled channel_configs row. Its external_id is a placeholder until the Meta "
+         "phone-number id replaces it &mdash; one UPDATE, in the deploy runbook"),
+        ("B2", "Row-Level Security", "DONE", "Moderate", "0",
+         "<b>DONE</b> &mdash; migration 004: enabled and forced on all 20 tables, policies on "
+         "app.current_tenant, and a watcher_app role that cannot bypass them (Supabase's postgres "
+         "role can, which is the trap). Verified cross-tenant on the live database"),
+        ("B3", "Dockerfile and Render service", "NOW", "Easy", "0.25",
+         "<b>IMAGE DONE</b> &mdash; apps/api/Dockerfile, which activates the cd.yml image job; "
+         "the project installs from pyproject. <b>The Render service is blocked on billing "
+         "details</b> (a card is required even on the free plan), not on engineering"),
         ("B4", "Domain, TLS, webhook subscription", "HIGH", "Easy", "0.5",
          "<b>NOT STARTED</b> &mdash; the platform needs a public HTTPS URL before anything arrives"),
         ("B5", "Durable queue (Redis + arq)", "MED", "Moderate", "1.0",
@@ -442,8 +454,8 @@ story.append(notes_table([
 
 story.append(Paragraph("How the total reconciles", H2))
 story.append(Paragraph(
-    "A 0 + B 4.25 + D 13.75 + E 4.5 + G 5.5 + (2.4, 2.7, 2.8) 3.5 + (3.1, 3.2, 3.3) 5.5 = "
-    "<b>37</b>", BODY))
+    "A 0 + B 1.75 + D 13.75 + E 4.5 + G 5.5 + (2.4, 2.7, 2.8) 3.5 + (3.1, 3.2, 3.3) 5.5 = "
+    "<b>34.5</b>", BODY))
 story.append(Spacer(1, 4))
 story.append(Paragraph(
     "Rows 2.1 and 2.2 show &ldquo;spent&rdquo; rather than a number because their days are already "
@@ -454,12 +466,12 @@ story.append(Paragraph(
 
 story.append(Paragraph("The dates", H2))
 dates = Table([
-    [Paragraph("<b>Milestone</b>", CELL), Paragraph("<b>v2.3 said</b>", CELL),
+    [Paragraph("<b>Milestone</b>", CELL), Paragraph("<b>v2.4 said</b>", CELL),
      Paragraph("<b>Now</b>", CELL), Paragraph("<b>Status</b>", CELL)],
     [Paragraph("M1 &mdash; answers a real message, safely", CELLB),
-     Paragraph("~10 days", CELL), Paragraph("<b>~6.75 days</b>", CELL),
-     Paragraph("<b>NEXT</b> &mdash; B1&ndash;B4 + G3 + 2.4. Track A is done; the emergency path "
-               "is what &ldquo;safely&rdquo; still depends on", NOTE)],
+     Paragraph("~6.75 days", CELL), Paragraph("<b>~4.25 days</b>", CELL),
+     Paragraph("<b>NEXT</b> &mdash; G3 + B4 + 2.4. The database and the image are done; the "
+               "emergency path is what &ldquo;safely&rdquo; still depends on", NOTE)],
     [Paragraph("M2 &mdash; you can watch and correct it", CELLB),
      Paragraph("+13.75 days", CELL), Paragraph("+13.75 days", CELL),
      Paragraph("PENDING &mdash; Track D, six receptionist views", NOTE)],
@@ -560,13 +572,22 @@ log = Table([
                "process-level worker pool so the webhook still answers before classification; "
                "alembic aligned to the same connection path", NOTE),
      Paragraph("325 &rarr; 375", NOTE), Paragraph("1.5", CELL)],
-    [Paragraph("7", CELLB),
-     Paragraph("<b>Items A5, A6 &mdash; Track A complete.</b> Conversation and task continuity in "
+    [Paragraph("7", CELL),
+     Paragraph("Items A5, A6 &mdash; Track A complete. Conversation and task continuity in "
                "the message path; the clarifying-turn budget honoured; classifications populated "
                "with measured telemetry; process() async; the v1 rules/destinations filer excised "
                "(D24); the outbound sender, and the channel credentials moved behind channels/, "
                "which emptied KNOWN_LEAKS and closed item 1.1", NOTE),
-     Paragraph("<b>375 &rarr; 406</b>", NOTE), Paragraph("3.25", CELLB)],
+     Paragraph("375 &rarr; 406", NOTE), Paragraph("3.25", CELL)],
+    [Paragraph("8", CELLB),
+     Paragraph("<b>Items B1, B2, B3.</b> Supabase project provisioned, migrated and stamped, with "
+               "the channel_configs row tenant resolution raises without; migration 004 &mdash; "
+               "RLS enabled and forced on all 20 tables behind a watcher_app role that cannot "
+               "bypass it, a per-transaction tenant GUC carried by every adapter, and one narrow "
+               "SELECT-only exception for the endpoint lookup that runs before a tenant is known; "
+               "the container image, whose first build exposed a missing package data file and a "
+               "removed Starlette API", NOTE),
+     Paragraph("<b>406 &rarr; 417</b>", NOTE), Paragraph("2.5", CELLB)],
 ], colWidths=[44, 296, 68, 48], hAlign="LEFT")
 log.setStyle(TableStyle([
     ("BACKGROUND", (0, 0), (-1, 0), BAND),
@@ -581,7 +602,7 @@ log.setStyle(TableStyle([
 story.append(log)
 story.append(Spacer(1, 6))
 story.append(Paragraph(
-    "<b>Cumulative: 15.25 engineering days delivered. ~37 remaining.</b>", SMALL))
+    "<b>Cumulative: 17.75 engineering days delivered. ~34.5 remaining.</b>", SMALL))
 
 
 # ---------------------------------------------------------------- chrome

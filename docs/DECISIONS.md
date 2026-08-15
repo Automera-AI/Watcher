@@ -48,6 +48,11 @@ thinking and the tool call together, would truncate the classification rather th
 | — | Clarifying‑turn budget | **`defaults.max_clarifying_turns` from the vocabulary**, then `defaults.on_max_turns` (hand off) | Once a task survives between messages, a task that cannot be filled asks the same question forever. The vocabulary declared this from item 0.3 and nothing read it until continuity made it load‑bearing |
 | — | A failed send | **Logged, reported on the outcome, not raised** | The message is classified, the reply is recorded and the decision is filed by the time the send runs. Raising would lose all of it to a transient 502 from the channel (roadmap A6) |
 | — | Channel credential fields | **Declared by `channels/config.py`, inherited by `Settings`** | An access token and a phone‑number id are facts about a channel. One object still reads one environment; the *knowledge* of what a channel needs sits with the channel. Emptied `KNOWN_LEAKS` (roadmap A6) |
+| D25 | The role the application connects as | **`watcher_app`** — no `BYPASSRLS`, owns no tables, password set by the deploy and never by a migration | Measured on the live project: Supabase's `postgres` role has `rolbypassrls = true`. An application using the URI from the dashboard is exempt from every policy, so RLS would be enforced in the schema and bypassed in production — the worst of both, because it reads as protection (roadmap B2) |
+| D26 | How a session says which tenant it is | **`app.current_tenant`, set per transaction by `Database.tenant_session`** | The addendum (§3) named a session GUC; `set_config(…, is_local => true)` is the form that cannot outlive its transaction, which matters behind a pooler that hands the connection to the next tenant. Every adapter already received a `tenant_id` and passed it no further than the `WHERE` clause |
+| D27 | Reading `channel_configs` before a tenant is known | **A second, `SELECT`‑only policy that applies only when no tenant is set** | Endpoint → tenant is the one question asked before the answer exists. The alternative (a blanket allow, or the app role bypassing RLS for one query) opens the whole table permanently. A session that has adopted a tenant sees only its own endpoints; one that has not sees endpoint rows and nothing else in the database (roadmap B2) |
+| D28 | Shutdown wiring | **A `lifespan` context manager passed to `create_app`**, not `add_event_handler` | Starlette 1.0 removed `add_event_handler`. The pinned CI versions kept passing while an image built from this repo's own dependency ranges crashed at startup — found by building it (roadmap B3) |
+| D29 | The image installs the project | **`pip install .`, with `pyproject.toml` as the only dependency list** | A Dockerfile with its own `pip install fastapi uvicorn …` is a second dependency list nobody updates. It also forced the packaging to be honest: `intents.yaml` is read off disk at import and had to be declared as package data (roadmap B3) |
 
 ---
 
@@ -61,7 +66,10 @@ thinking and the tool call together, would truncate the classification rather th
 - [x] Build the **composition root**: the first production caller of `create_app()`. *(roadmap A4 — `main.py`, run as `uvicorn apps.api.main:create_application --factory`)*
 - [x] Wire **conversation + task continuity** into the message path and populate `classifications`. *(roadmap A5 — `orchestration/ports.py`, `db/orchestration_repo.py`; `process()` is async and the v1 filer is gone)*
 - [x] Implement the **outbound sender** behind `ChannelSender` and move the channel credentials behind `channels/`. *(roadmap A6 — `channels/whatsapp.py`, `channels/config.py`, `channels/factory.py`)*
-- [ ] Alembic target + Render Postgres URL wired in deploy.
+- [x] Provision the database and apply the migrations, plus the `channel_configs` row tenant resolution needs. *(roadmap B1 — Supabase `watcher-prod`, eu‑central‑1, stamped at `003`)*
+- [x] **Row‑Level Security**: policies on every table, a session GUC, and a cross‑tenant read test. *(roadmap B2 — `alembic/versions/004_row_level_security.py`, `db/engine.py`, `apps/api/tests/test_rls.py`)*
+- [x] Containerize the API at the path `cd.yml` waits on. *(roadmap B3 — `apps/api/Dockerfile`)*
+- [ ] Alembic target + Render Postgres URL wired in deploy. *(the Render service itself is blocked on billing details; see `docs/specs/b1-b3-hosting-and-isolation.md`)*
 
 ---
 
