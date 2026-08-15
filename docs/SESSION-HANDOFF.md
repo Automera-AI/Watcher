@@ -1,8 +1,8 @@
 # Session handoff — read this first
 
 **Updated:** end of session 7, 15 August 2026
-**Branch:** `claude/a5-a6-implementation-tb5s5e` — one commit, pushed. **No PR opened yet.**
-**`main` is at:** `0542375` — session-7 work is not on `main`; see §8 before branching
+**Branch:** `claude/a5-a6-implementation-tb5s5e` — one commit, pushed, **open as PR #19**
+**`main` is at:** `0542375` — session-7 work is not on `main` until #19 merges; see §8 before branching
 **Start at §2 for status, §8 for what to do first.**
 
 Purpose: let a new session pick up without re-deriving anything. Companion documents are
@@ -234,9 +234,8 @@ Also worth doing in 2.7: add Franco-Arabic cases to the golden set.
 
 ## 8. First five minutes of the next session
 
-1. **Session-7 work is not on `main`.** Either open and merge a PR for
-   `claude/a5-a6-implementation-tb5s5e` first, or branch from it:
-   `git fetch origin && git checkout -B <new-branch> origin/claude/a5-a6-implementation-tb5s5e`.
+1. **Session-7 work is not on `main` until PR #19 merges.** Either merge it first, or branch from
+   the branch: `git fetch origin && git checkout -B <new-branch> origin/claude/a5-a6-implementation-tb5s5e`.
    Do **not** branch from `main` — you would be building on a tree that cannot reply.
 2. Rebuild the venv from §1 and confirm **406 passed**.
 3. Read §3 (traps), particularly the first item about G3.
