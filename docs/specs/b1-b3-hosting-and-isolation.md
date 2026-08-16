@@ -244,8 +244,24 @@ to.
 
    Then update `DATABASE_URL`. Nothing else holds it.
 
-6. **B4** — custom domain, TLS, and the webhook subscription pointed at
-   `https://<host>/webhooks/whatsapp`, with the verify token from step 3.
+6. **B4** — the webhook subscription, pointed at `https://<host>/webhook` — singular, and no
+   channel in the path, because `ingestion/router.py` registers `GET`/`POST /webhook` on a router
+   with no prefix. Verify it before handing the URL to Meta:
+
+   ```
+   https://<host>/webhook?hub.mode=subscribe&hub.verify_token=<token>&hub.challenge=hello
+   ```
+
+   which echoes `hello` when the token matches and returns `403 verification failed` when it does
+   not. A bare `GET /webhook` in a browser also returns 403 — three query parameters are missing,
+   which is the endpoint working rather than failing.
+
+   **No custom domain is required.** Meta needs a publicly reachable HTTPS URL with a trusted
+   certificate on port 443, and Render provides exactly that on `*.onrender.com`. A subdomain
+   (`api.automera.co` CNAME'd to the service) is a later cosmetic improvement; the webhook URL is
+   machine-facing and no customer ever sees it. What *does* matter before a real number: the free
+   plan spins down after ~15 minutes idle and takes 30–60s to wake, which Meta sees as a timeout
+   and retries. Move to a paid instance first.
 
 ### Operational note
 
