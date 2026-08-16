@@ -1,6 +1,6 @@
 """Generate the Watcher v2 roadmap PDF: urgency, ease, effort, per work item.
 
-**v2.6 — 16 August 2026.** This generator is the single source of the roadmap PDF. Edit this file
+**v2.7 — 16 August 2026.** This generator is the single source of the roadmap PDF. Edit this file
 and re-run it rather than producing another version by hand; v2.2 flagged that three roadmap
 artifacts disagreed, and regenerating from here is what keeps that closed.
 
@@ -24,7 +24,7 @@ from reportlab.platypus import (
 )
 
 OUT = "/home/user/Watcher/docs/Watcher_v2_Roadmap.pdf"
-VERSION = "v2.6"
+VERSION = "v2.7"
 DATED = "16 August 2026"
 
 INK = colors.HexColor("#12171f")
@@ -162,7 +162,7 @@ story.append(Paragraph("Watcher v2 &mdash; Build Roadmap", H1))
 story.append(Paragraph(
     "From a message&nbsp;filer to a receptionist. Every item scored for urgency and ease. "
     f"&nbsp;&bull;&nbsp; <b>{VERSION}</b> &nbsp;&bull;&nbsp; {DATED} &nbsp;&bull;&nbsp; "
-    "supersedes the v2.5 PDF of 15 August", LEAD))
+    "supersedes the v2.6 PDF of the same date", LEAD))
 story.append(Spacer(1, 10))
 
 story.append(banner(
@@ -247,6 +247,8 @@ story.append(two_col(
     "half a day of DNS once a service exists<br/>"
     "<b>The service is live</b> &mdash; four deploys to get there, three of which failed on the "
     "config gate refusing to start without its secrets, which is the gate working<br/>"
+    "<b>Tracks D, G, E and 3 are itemised</b> for the first time since v2.1, at unchanged "
+    "track totals &mdash; 27 items that were four summary lines<br/>"
     "Unchanged: 2.4 is still the last item before a demo; 3.1 still blocked on P1; the "
     "scope guard still holds &mdash; no PDF handbook ingestion"))
 
@@ -375,23 +377,142 @@ story.append(banner(
     "correctly records claude-haiku-4-5-20251001 as the model that produced those fixtures.",
     URG["MED"]))
 
-story.append(Paragraph("Tracks D, G, E and 3 &mdash; unchanged from v2.1", H2))
-story.append(Paragraph("Summarised here; the v2.1 PDF carries the full per-item detail.", SUBT))
-story.append(Spacer(1, 5))
-story.append(notes_table([
-    ("D &mdash; The control page (D0&ndash;D10) &nbsp; 13.75d",
-     "Six receptionist views. <b>D2 (REST API, 3.0d) is the hidden half</b> &mdash; "
-     "&ldquo;build the control page&rdquo; reads as frontend work; three of its days are backend "
-     "endpoints that do not exist. Still the item most likely to be cut by accident"),
-    ("G &mdash; Receptionist guardrails (G1&ndash;G4) &nbsp; 5.5d",
-     "Not new features &mdash; these enforce rules intents.yaml states and schema.py validates and "
-     "nothing in apps/ honours. <b>G3 (emergency path, 1.5d) is not optional before a real "
-     "guest</b>: worker.py hardcodes emergency=False, so a gas leak files a maintenance ticket"),
-    ("E &mdash; What makes it sellable (E1&ndash;E5) &nbsp; 4.5d",
-     "Tenant onboarding, usage metering, billing, observability, backups and residency"),
-    ("3 &mdash; Integration and measurement (3.1&ndash;3.3) &nbsp; 5.5d",
-     "3.1 blocked on P1. Base360.ai ruled out; Hostaway, Guesty and Cloudbeds all publish APIs"),
-], first_col=150))
+story.append(banner(
+    "<b>Tracks D, G, E and 3 are itemised below for the first time since v2.1.</b> Earlier "
+    "revisions summarised them in four lines and pointed at an older PDF, which made half the "
+    "remaining plan unreadable without a second document. The items are re-derived here from "
+    "DESIGN-SPEC&nbsp;&sect;8, the build-spec addendum and the current code &mdash; <b>track "
+    "totals are unchanged</b> (D&nbsp;13.75, G&nbsp;5.5, E&nbsp;4.5, 3&nbsp;5.5), so the "
+    "arithmetic on the previous page still reconciles. Where the numbering differs from v2.1, "
+    "this supersedes it."))
+
+story.append(PageBreak())
+
+# ---------------------------------------------------------------- Track G
+story.extend(section(
+    "Track G &mdash; Receptionist guardrails &nbsp; 5.5d",
+    "Not new features. Every one of these enforces a rule that intents.yaml already states and "
+    "schema.py already validates, and that nothing in apps/ honours &mdash; the vocabulary is "
+    "obeyed when composing a reply and ignored when deciding whether to send one. G3 is first on "
+    "the critical path.",
+    [
+        ("G3", "Emergency detection and the alert path", "NOW", "Moderate", "1.5",
+         "<b>worker.py hardcodes emergency=False</b>, at one named line with a comment. The "
+         "vocabulary already declares the triggers and the alert; core/autonomy.py already takes "
+         "an emergency flag and short-circuits everything on it. Missing: the detector, and who "
+         "gets woken. <b>Answering raised the cost of this</b> &mdash; before A6 a gas leak was "
+         "filed in silence; now it gets a confident note about maintenance"),
+        ("G1", "Sensitivity and disclosure gate", "HIGH", "Moderate", "1.5",
+         "A door code is not an ordinary fact. Facts carry sensitivity flags (2.4) and nothing "
+         "yet refuses to say one to an unverified guest. Also the identity-verified flag on "
+         "conversations, written and never read"),
+        ("G2", "Autonomy ceilings in the reply path", "HIGH", "Easy", "1.0",
+         "Money and owner matters must reach a human <i>before</i> confidence is consulted. The "
+         "gate exists (2.3) and the vocabulary declares per-intent ceilings; what is missing is "
+         "the enforcement that a ceiling cannot be raised by a confident model"),
+        ("G4", "Anti-loop and abuse controls", "MED", "Moderate", "1.5",
+         "The clarifying-turn budget bounds one task. It does not bound a guest who sends forty "
+         "messages, a channel that redelivers, or two tasks that hand off to each other. Cheap to "
+         "add now, expensive to retrofit after a bill arrives"),
+    ]))
+
+story.append(PageBreak())
+
+# ---------------------------------------------------------------- Track D
+story.extend(section(
+    "Track D &mdash; The control page &nbsp; 13.75d",
+    "The largest remaining track, and the one whose shape is most often misread. "
+    "<b>D2 is three backend days inside an item everyone reads as frontend work</b> &mdash; the "
+    "views cannot be built against endpoints that do not exist. Views follow DESIGN-SPEC &sect;8, "
+    "re-ordered for the receptionist: what the product does now is hold conversations, not file "
+    "messages.",
+    [
+        ("D0", "Frontend scaffold and design tokens", "MED", "Easy", "1.0",
+         "One CSS file and no package.json today. Tokens, type scale and the confidence chip come "
+         "straight from DESIGN-SPEC &sect;2&ndash;&sect;6; the chip is the signature component and "
+         "the bands are semantic, never reused"),
+        ("D1", "Auth and tenant binding", "MED", "Moderate", "1.25",
+         "Clerk (D2-a), one auth org to one tenant. This is where the RLS session GUC (B2) gets "
+         "its value from an authenticated principal rather than from the message"),
+        ("D2", "The REST API behind the page", "HIGH", "Hard", "3.0",
+         "<b>~25 endpoints, none written.</b> Inbox list and detail, confirm/correct/route, "
+         "conversations and turns, knowledge CRUD, sources, destinations, rules, eval. The hidden "
+         "half of this track and the item most likely to be cut by accident"),
+        ("D3", "Inbox view", "HIGH", "Hard", "2.0",
+         "The triage queue and the product's centre of gravity. Two-pane desktop, single-column "
+         "mobile, optimistic confirm. Auto-handled items still appear, marked, for audit"),
+        ("D4", "Conversations view", "HIGH", "Moderate", "1.5",
+         "New since v2.1 and it did not exist as a view when the track was first costed: the "
+         "thread, its turns, the task in flight and its slots. Where a human sees <i>why</i> the "
+         "receptionist asked what it asked"),
+        ("D5", "Knowledge view", "MED", "Moderate", "1.0",
+         "The editor for 2.4's facts, including the sensitivity flags G1 enforces. Without it, "
+         "changing a check-in time is a database write"),
+        ("D6", "Sources view", "LOW", "Easy", "0.75",
+         "Opt-out model (addendum &sect;4): a settings page listing threads with a mute toggle, "
+         "plus the first-run exclusion pass. Deliberately not a workflow"),
+        ("D7", "Destinations and recipes", "MED", "Moderate", "1.0",
+         "Sheets/webhook config and field mapping. The tables and the engine survived D24 for "
+         "exactly this: routing a message deliberately, by a human"),
+        ("D8", "Rules builder", "MED", "Moderate", "1.0",
+         "The condition/action builder over rules. SqlAlchemyRulesProvider and the evaluator are "
+         "already written and already tested &mdash; this is the surface for them"),
+        ("D9", "Admin / eval dashboard", "LOW", "Easy", "0.75",
+         "Founder-only, role-gated, visually distinct: accuracy, per-language breakdown, "
+         "calibration, confusion matrix, and per-tenant model spend"),
+        ("D10", "Arabic, RTL and the accessibility pass", "MED", "Moderate", "0.5",
+         "Not cosmetic for this market. Bidi text, mirrored layout, and the &sect;10 baseline "
+         "(focus order, contrast, target sizes) applied once across the views rather than per view"),
+    ]))
+
+story.append(PageBreak())
+
+# ---------------------------------------------------------------- Track E and Track 3
+story.extend(section(
+    "Track E &mdash; What makes it sellable &nbsp; 4.5d",
+    "None of this is visible to a guest and none of it can be added after the first paying "
+    "tenant without a migration. Sequenced after P1 because onboarding shape depends on who the "
+    "first client is.",
+    [
+        ("E1", "Tenant onboarding and per-tenant secrets", "MED", "Moderate", "1.25",
+         "Creating a tenant is currently an INSERT by hand. Includes envelope encryption for WABA "
+         "tokens and destination credentials (addendum &sect;3: never plaintext) &mdash; the "
+         "reason channel_configs.config is the one table B2 grants a pre-tenant read on"),
+        ("E2", "Usage metering", "MED", "Easy", "0.75",
+         "usage_events exists, is indexed, and is written to by nothing. Messages, model tokens "
+         "and ASR minutes per tenant per period &mdash; the input to both billing and the soft cap"),
+        ("E3", "Billing and plan limits", "MED", "Moderate", "1.0",
+         "Plans, the soft cap and what happens at it. The number itself is still a founder "
+         "decision (DECISIONS.md, still open) &mdash; the mechanism is not"),
+        ("E4", "Observability", "HIGH", "Easy", "1.0",
+         "Structured logs with tenant and message ids, error tracking, and per-tenant model spend. "
+         "Today a failed classification is a line in a Render log and nothing else. This is what "
+         "makes a pilot debuggable at a distance"),
+        ("E5", "Retention, residency and subject deletion", "MED", "Moderate", "0.5",
+         "Addendum &sect;14: a configurable retention default, hard deletion of raw bodies and "
+         "media after it, and a &ldquo;delete everything for this contact&rdquo; operation. GCC "
+         "regulated buyers ask for this in the first meeting"),
+    ]))
+
+story.append(Spacer(1, 4))
+
+story.extend(section(
+    "Track 3 &mdash; Integration and measurement &nbsp; 5.5d",
+    "Base360.ai is ruled out as a partner: their product is substantially ours and their client "
+    "base is closed to us. Hostaway, Guesty and Cloudbeds all publish APIs, so the capability is "
+    "available without the strategic cost.",
+    [
+        ("3.1", "PropertySystemPort and the first adapter", "MED", "Moderate", "2.5",
+         "<b>Build the port, not a Hostaway integration</b> &mdash; the vendor-neutral routes and "
+         "schemas already landed (PR #14). Blocked on P1: which PMS the first client runs decides "
+         "which adapter gets written. Cache facts; never cache availability"),
+        ("3.2", "End to end on a real number, then measure", "HIGH", "Moderate", "1.0",
+         "The point at which the eval number stops being a replay of recorded fixtures and starts "
+         "being this product's accuracy. Needs B4, G3 and the send credentials first"),
+        ("3.3", "Live availability and write-back", "MED", "Hard", "2.0",
+         "Reading a calendar is half of it; holding a booking is the half that makes the "
+         "receptionist worth paying for, and the half that must never act on a stale cache"),
+    ]))
 
 story.append(PageBreak())
 

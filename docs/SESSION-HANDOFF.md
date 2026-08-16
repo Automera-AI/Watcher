@@ -7,7 +7,7 @@
 **Start at §2 for status, §8 for what to do first.**
 
 Purpose: let a new session pick up without re-deriving anything. Companion documents are
-`docs/Watcher_v2_Roadmap.pdf` (**v2.6**, regenerated from `docs/make_roadmap.py` this session) and
+`docs/Watcher_v2_Roadmap.pdf` (**v2.7**, regenerated from `docs/make_roadmap.py` this session — tracks D, G, E and 3 are itemised for the first time since v2.1) and
 the four specs in `docs/specs/` — why the code is shaped the way it is. The one written this
 session, `b1-b3-hosting-and-isolation.md`, ends in a **deploy runbook** — most of it is now done,
 and its remaining steps are the placeholder endpoint, the send credentials, and B4.
@@ -245,7 +245,7 @@ Also worth doing in 2.7: add Franco-Arabic cases to the golden set.
 
 ---
 
-## 7. Roadmap status against v2.6
+## 7. Roadmap status against v2.7
 
 | Track | Remaining | Note |
 |---|---|---|
