@@ -7,7 +7,7 @@
 **Start at §2 for status, §8 for what to do first.**
 
 Purpose: let a new session pick up without re-deriving anything. Companion documents are
-`docs/Watcher_v2_Roadmap.pdf` (**v2.7**, regenerated from `docs/make_roadmap.py` this session — tracks D, G, E and 3 are itemised for the first time since v2.1) and
+`docs/Watcher_v2_Roadmap.pdf` (**v2.8**, regenerated from `docs/make_roadmap.py` this session — tracks D, G, E and 3 are itemised for the first time since v2.1) and
 the four specs in `docs/specs/` — why the code is shaped the way it is. The one written this
 session, `b1-b3-hosting-and-isolation.md`, ends in a **deploy runbook** — most of it is now done,
 and its remaining steps are the placeholder endpoint, the send credentials, and B4.
@@ -31,6 +31,7 @@ Measured by running it, not read off a document.
 | Database | **live** — Supabase `watcher-prod`, `qjpjxspycuafqqgudsiv`, eu-central-1, PG 17 |
 | Schema | `alembic_version` = **`004_row_level_security`** |
 | Service | **live** — Render `watcher-api`, `srv-da0a81jl550s73d0b1i0`, Frankfurt, free plan |
+| Webhook | `GET /webhook` handshake **verified** against the live service |
 | Python | 3.13 |
 
 To get green in a fresh container:
@@ -153,6 +154,13 @@ refusing to start a process that could accept a message it cannot classify.
   Connect; the `aws-N-eu-central-1` prefix is per-cluster and should not be guessed.
 - **The `channel_configs` row is a placeholder.** Until step 1 of the runbook, no real endpoint
   resolves — by design, it fails loudly rather than guessing a tenant.
+- **The webhook path is `/webhook`** — singular, no prefix, no channel in it (`ingestion/router.py`
+  registers `GET`/`POST /webhook` on a router with no prefix). `/webhooks/whatsapp` returns a 404
+  that looks like a broken deploy and is not one. A bare browser `GET /webhook` returns
+  `403 verification failed` because the three `hub.*` parameters are absent — also not a fault.
+- **`<angle brackets>` around a configured value mean "unset".** `is_placeholder()` treats
+  `<TOKEN>` as absent, so the process refuses to start rather than comparing against a literal.
+  The same brackets pasted into a *URL* fail quietly instead — that cost a debugging round.
 - **The deployed `DATABASE_URL`'s pooler host is unverified.** It was set to
   `aws-1-eu-central-1.pooler.supabase.com` without being reachable from the build environment, and
   SQLAlchemy connects lazily — so startup proves nothing and the first tenant query is the test. If
@@ -194,10 +202,16 @@ refusing to start a process that could accept a message it cannot classify.
 §3. The vocabulary already declares the triggers and the alert; `core/autonomy.py` already takes
 `emergency` and short-circuits everything on it. What is missing is the detector and the alert path.
 
-**B4 — domain, TLS, webhook subscription (0.5d).** The service is live; what is missing is anything
-that routes a guest to it. `docs/specs/b1-b3-hosting-and-isolation.md §6` has the remaining steps —
-including the two that are still open regardless of B4: the placeholder `channel_configs.external_id`
-(step 1) and the send credentials (step 3).
+**B4 — the webhook subscription (0.5d).** Mostly de-risked: the handshake is verified end to end
+against the live service, and **no custom domain is needed** — Meta wants a publicly reachable HTTPS
+URL with a trusted certificate, which Render provides on `*.onrender.com`, and the URL is
+machine-facing. Three things stand between here and a guest, none of them large:
+
+1. **The real phone-number id** in `channel_configs.external_id`, replacing the placeholder.
+2. **Send credentials** — `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`. Without them the
+   reply is composed, recorded, and never delivered, which is silent from the guest's side.
+3. **A paid Render instance.** The free one sleeps after ~15 minutes; a 30–60s cold start reads to
+   Meta as a timeout and earns a retry. This is the real B4 blocker, not DNS.
 
 **Then 2.4** (knowledge base). **2.7 remains unblocked** and needs only a key and a decision to
 spend it; see §5.
@@ -239,13 +253,13 @@ Also worth doing in 2.7: add Franco-Arabic cases to the golden set.
 | Why A5/A6 are shaped this way | `docs/specs/a5-continuity-and-a6-outbound-sender.md` |
 | Why A2/A4 are shaped this way | `docs/specs/a2-database-and-a4-composition-root.md` |
 | Why A1/A3 are shaped this way | `docs/specs/a1-configuration-and-a3-llm-providers.md` |
-| Current plan | `docs/Watcher_v2_Roadmap.pdf` (v2.5) ← `docs/make_roadmap.py` |
+| Current plan | `docs/Watcher_v2_Roadmap.pdf` (v2.8) ← `docs/make_roadmap.py` |
 | Locked decisions | `docs/DECISIONS.md` (D25–D29 are this session's) |
 | Channel-boundary rules | `apps/api/tests/test_boundary.py` |
 
 ---
 
-## 7. Roadmap status against v2.7
+## 7. Roadmap status against v2.8
 
 | Track | Remaining | Note |
 |---|---|---|

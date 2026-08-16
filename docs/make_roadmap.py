@@ -1,6 +1,6 @@
 """Generate the Watcher v2 roadmap PDF: urgency, ease, effort, per work item.
 
-**v2.7 — 16 August 2026.** This generator is the single source of the roadmap PDF. Edit this file
+**v2.8 — 16 August 2026.** This generator is the single source of the roadmap PDF. Edit this file
 and re-run it rather than producing another version by hand; v2.2 flagged that three roadmap
 artifacts disagreed, and regenerating from here is what keeps that closed.
 
@@ -24,7 +24,7 @@ from reportlab.platypus import (
 )
 
 OUT = "/home/user/Watcher/docs/Watcher_v2_Roadmap.pdf"
-VERSION = "v2.7"
+VERSION = "v2.8"
 DATED = "16 August 2026"
 
 INK = colors.HexColor("#12171f")
@@ -162,7 +162,7 @@ story.append(Paragraph("Watcher v2 &mdash; Build Roadmap", H1))
 story.append(Paragraph(
     "From a message&nbsp;filer to a receptionist. Every item scored for urgency and ease. "
     f"&nbsp;&bull;&nbsp; <b>{VERSION}</b> &nbsp;&bull;&nbsp; {DATED} &nbsp;&bull;&nbsp; "
-    "supersedes the v2.6 PDF of the same date", LEAD))
+    "supersedes the v2.7 PDF of the same date", LEAD))
 story.append(Spacer(1, 10))
 
 story.append(banner(
@@ -172,8 +172,8 @@ story.append(banner(
     "isolation is enforced by Postgres rather than by convention</b> (RLS forced on all 20 tables, "
     "behind a role that cannot bypass it), and <b>the API is a container image</b> at the path "
     "cd.yml has been waiting on since it was written &mdash; and <b>the API is deployed and "
-    "serving</b> at watcher-api-lup7.onrender.com. What is left of Track&nbsp;B is a domain and "
-    "the durable queue. "
+    "serving</b> at watcher-api-lup7.onrender.com, with Meta's webhook handshake verified "
+    "against it. What is left of Track&nbsp;B is the subscription itself and the durable queue. "
     "<b>Remaining: ~34.25 engineering days.</b>"))
 
 story.append(Paragraph("Where we stand today", H2))
@@ -221,7 +221,8 @@ story.append(two_col(
     "and records replies it cannot deliver<br/>"
     "<b>The database path is unproven</b> &mdash; SQLAlchemy connects lazily, so the pooler host "
     "is tested by the first message, not by startup<br/>"
-    "No custom domain, no webhook subscription &mdash; nothing routes a guest to it yet (B4)<br/>"
+    "No webhook subscription &mdash; nothing routes a guest to it yet, though the handshake "
+    "itself is now verified (B4)<br/>"
     "No control page &mdash; one CSS file, no package.json<br/>"
     "No control-page API &mdash; ~25 endpoints, none written<br/>"
     "Knowledge &mdash; zero tables, zero rows<br/>"
@@ -249,6 +250,8 @@ story.append(two_col(
     "config gate refusing to start without its secrets, which is the gate working<br/>"
     "<b>Tracks D, G, E and 3 are itemised</b> for the first time since v2.1, at unchanged "
     "track totals &mdash; 27 items that were four summary lines<br/>"
+    "<b>The webhook handshake is verified</b> against the deployed service, which takes most of "
+    "the risk out of B4<br/>"
     "Unchanged: 2.4 is still the last item before a demo; 3.1 still blocked on P1; the "
     "scope guard still holds &mdash; no PDF handbook ingestion"))
 
@@ -324,8 +327,13 @@ story.extend(section(
          "<b>DONE</b> &mdash; apps/api/Dockerfile, which activates the cd.yml image job, and the "
          "service is live in Frankfurt on the free plan. Sending is still degraded until "
          "WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID are set"),
-        ("B4", "Domain, TLS, webhook subscription", "HIGH", "Easy", "0.5",
-         "<b>NOT STARTED</b> &mdash; the platform needs a public HTTPS URL before anything arrives"),
+        ("B4", "Webhook subscription and a warm instance", "NOW", "Easy", "0.5",
+         "<b>PART-VERIFIED</b> &mdash; the handshake is proven against the live service: "
+         "GET /webhook with Meta's three hub.* parameters echoes the challenge. <b>No custom "
+         "domain is needed</b> (Render's TLS on *.onrender.com satisfies Meta; the URL is "
+         "machine-facing). What remains: the subscription in Meta, the real phone-number id in "
+         "channel_configs, and a paid instance &mdash; the free one sleeps after ~15 minutes and "
+         "a 30&ndash;60s cold start reads to Meta as a timeout"),
         ("B5", "Durable queue (Redis + arq)", "MED", "Moderate", "1.0",
          "<b>NOT BUILT</b> &mdash; the in-process worker pool A4 ships loses in-flight "
          "classifications on every deploy. Persist-before-enqueue means a message is never lost, "
