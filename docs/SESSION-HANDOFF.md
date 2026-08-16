@@ -1,15 +1,16 @@
 # Session handoff — read this first
 
-**Updated:** end of session 8, 15 August 2026
-**Branch:** `claude/roadmap-b1-b2-b3-dzai70` — one commit, pushed. **No PR opened yet.**
-**`main` is at:** `8d3298c` — PR #19 (A5+A6) is merged, so this branch is a clean descendant of `main`
+**Updated:** end of session 8, 16 August 2026
+**Branch:** `claude/roadmap-b1-b2-b3-dzai70` — restarted from `main` after PR #20 merged
+**`main` is at:** `db94f01` — PR #20 (B1+B2+B3) is merged, so sessions 1–8 are all on `main`
+**Deployed:** https://watcher-api-lup7.onrender.com — live and serving
 **Start at §2 for status, §8 for what to do first.**
 
 Purpose: let a new session pick up without re-deriving anything. Companion documents are
-`docs/Watcher_v2_Roadmap.pdf` (**v2.5**, regenerated from `docs/make_roadmap.py` this session) and
+`docs/Watcher_v2_Roadmap.pdf` (**v2.6**, regenerated from `docs/make_roadmap.py` this session) and
 the four specs in `docs/specs/` — why the code is shaped the way it is. The one written this
-session, `b1-b3-hosting-and-isolation.md`, ends in a **deploy runbook**; that is the document to
-follow when the Render account is ready.
+session, `b1-b3-hosting-and-isolation.md`, ends in a **deploy runbook** — most of it is now done,
+and its remaining steps are the placeholder endpoint, the send credentials, and B4.
 
 Overwrite this file at the end of each session.
 
@@ -21,14 +22,15 @@ Measured by running it, not read off a document.
 
 | | |
 |---|---|
-| Branch | **`claude/roadmap-b1-b2-b3-dzai70`** — pushed, unmerged |
-| `main` | `8d3298c` — sessions 1–7 |
+| Branch | **`claude/roadmap-b1-b2-b3-dzai70`** — restarted from `main`; PR #20 merged |
+| `main` | `db94f01` — sessions 1–8 |
 | Tests | **417 passing** (was 406), 2 skipped without a Postgres |
 | Python files | 126 total; 87 source across 20 modules |
 | Lint / types | ruff clean; strict mypy clean on 124 files |
 | Recorded baseline | **88%** intent accuracy, gate passing — **still v2's number**, see §5 |
 | Database | **live** — Supabase `watcher-prod`, `qjpjxspycuafqqgudsiv`, eu-central-1, PG 17 |
 | Schema | `alembic_version` = **`004_row_level_security`** |
+| Service | **live** — Render `watcher-api`, `srv-da0a81jl550s73d0b1i0`, Frankfurt, free plan |
 | Python | 3.13 |
 
 To get green in a fresh container:
@@ -49,16 +51,19 @@ nothing imports either, and the two skipped tests are the RLS ones that need a r
 to re-run `docs/make_roadmap.py`.
 
 **The product gap, restated.** The application starts, connects, files, and answers. As of this
-session it also has **somewhere to connect to**: a migrated database that enforces tenant isolation
-itself, and an image that runs. What it still cannot do is be *reached* — no Render service, no
-public URL (B3's second half and B4) — and it **cannot tell an emergency from a maintenance
-request** (G3). Read §3 before pointing a real number at it.
+session it also has **somewhere to connect to and somewhere to run**: a migrated database that
+enforces tenant isolation itself, and a deployed service that starts, wires and serves.
+
+Two things it still cannot do. It **cannot deliver a reply** — the process warns
+`no send credentials configured` at startup, so replies are composed and recorded and never sent —
+and it **cannot tell an emergency from a maintenance request** (G3). Nothing routes a guest to it
+yet either (B4). Read §3 before pointing a real number at it.
 
 ---
 
 ## 2. What session 8 delivered
 
-**Roadmap items B1 (0.5d), B2 (1.5d) and B3's image half (0.5d) — 2.5 engineering days.**
+**Roadmap items B1 (0.5d), B2 (1.5d) and B3 (0.75d) — 2.75 engineering days. The service is live.**
 
 Full reasoning and the deploy runbook: `docs/specs/b1-b3-hosting-and-isolation.md`.
 
@@ -97,7 +102,7 @@ Verified on the live database, not asserted: tenant A sees only A's rows, a cros
 refused (`42501`), and a session with no tenant sees zero messages, zero tenants, and exactly the
 endpoint row the resolver needs.
 
-### B3 — the image, and the two bugs building it found
+### B3 — the image, the deploy, and the two bugs building it found
 
 `apps/api/Dockerfile` — that exact path, because `cd.yml` has been checking for it since it was
 written; the image job activates on merge. The project installs from `pyproject.toml`, so there is
@@ -111,6 +116,14 @@ Installing it as a package exposed two things the pinned test environment hides:
 2. **Starlette 1.0 removed `add_event_handler`.** CI pins `fastapi==0.115.0`; the image resolves
    0.141. Shutdown is now a `lifespan` context manager passed to `create_app` — which also means
    `create_app` takes an `on_shutdown` callback.
+
+**The deploy.** Render service `watcher-api` (Frankfurt, free plan), native Python runtime:
+`pip install .` and `uvicorn apps.api.main:create_application --factory --host 0.0.0.0 --port $PORT`,
+auto-deploying from `main`. Four deploys to get there and the three failures are worth knowing,
+because each was a gate doing its job: two `build_failed` on the pre-merge `main` (no
+`[build-system]`, so `pip install .` cannot work), then `update_failed` on
+`ConfigError: Missing required environment variable: ANTHROPIC_API_KEY` — A1's per-subsystem check
+refusing to start a process that could accept a message it cannot classify.
 
 ### Decisions made this session
 
@@ -140,6 +153,14 @@ Installing it as a package exposed two things the pinned test environment hides:
   Connect; the `aws-N-eu-central-1` prefix is per-cluster and should not be guessed.
 - **The `channel_configs` row is a placeholder.** Until step 1 of the runbook, no real endpoint
   resolves — by design, it fails loudly rather than guessing a tenant.
+- **The deployed `DATABASE_URL`'s pooler host is unverified.** It was set to
+  `aws-1-eu-central-1.pooler.supabase.com` without being reachable from the build environment, and
+  SQLAlchemy connects lazily — so startup proves nothing and the first tenant query is the test. If
+  the first real message fails on DNS or auth, this is the first thing to check, against
+  Supabase → Connect → Transaction pooler.
+- **Replies are composed and not delivered** until `WHATSAPP_ACCESS_TOKEN` and
+  `WHATSAPP_PHONE_NUMBER_ID` are set. The startup warning is the only sign; an end-to-end test looks
+  silent from the guest's side while every row is written correctly.
 - **A new adapter must take a `TenantScope`.** Opening an unstamped session over tenant data passes
   every test on SQLite and returns *nothing* in production. `test_rls.py` asserts this per adapter;
   add a case when you add one.
@@ -173,10 +194,10 @@ Installing it as a package exposed two things the pinned test environment hides:
 §3. The vocabulary already declares the triggers and the alert; `core/autonomy.py` already takes
 `emergency` and short-circuits everything on it. What is missing is the detector and the alert path.
 
-**The deploy (blocked on you, not on code).** Render returns `402: Payment information is required`
-— a card is needed on the workspace before it will create any service, free plan included. Once it
-is there, `docs/specs/b1-b3-hosting-and-isolation.md §6` is the whole checklist: service, env vars,
-`alembic upgrade head`, then **B4** (domain, TLS, webhook subscription, 0.5d).
+**B4 — domain, TLS, webhook subscription (0.5d).** The service is live; what is missing is anything
+that routes a guest to it. `docs/specs/b1-b3-hosting-and-isolation.md §6` has the remaining steps —
+including the two that are still open regardless of B4: the placeholder `channel_configs.external_id`
+(step 1) and the send credentials (step 3).
 
 **Then 2.4** (knowledge base). **2.7 remains unblocked** and needs only a key and a decision to
 spend it; see §5.
@@ -224,28 +245,28 @@ Also worth doing in 2.7: add Franco-Arabic cases to the golden set.
 
 ---
 
-## 7. Roadmap status against v2.5
+## 7. Roadmap status against v2.6
 
 | Track | Remaining | Note |
 |---|---|---|
 | **A — Make it run** | **0d** | complete since session 7 |
-| B — Host it | **1.75d** | B1 ✅ B2 ✅ B3 image ✅ — left: the Render service (billing), B4, B5 |
+| B — Host it | **1.5d** | B1 ✅ B2 ✅ B3 ✅ — left: B4 (0.5d), B5 (1.0d) |
 | 2 — Receptionist | 3.5d | 2.4 knowledge, 2.7 eval (unblocked), 2.8 many properties |
 | D — Control page | 13.75d | D2's 3 backend days are the hidden half |
 | G — Guardrails | 5.5d | **G3 is now first on the critical path** |
 | E — Sellable | 4.5d | Blocked on P1 for sequencing |
 | 3 — Integration | 5.5d | 3.1 blocked on P1 |
-| **Total** | **~34.5d** | 11–17 sessions at the observed rate; ~7.5 weeks to sellable |
+| **Total** | **~34.25d** | 11–17 sessions at the observed rate; ~7.5 weeks to sellable |
 
-**Milestone M1 — answers a real message, safely: ~4.25 days** (G3 + B4 + 2.4, plus the deploy).
+**Milestone M1 — answers a real message, safely: ~4 days** (G3 + B4 + 2.4).
 
 ---
 
 ## 8. First five minutes of the next session
 
-1. **This branch is not on `main`.** Open and merge a PR for `claude/roadmap-b1-b2-b3-dzai70`, or
-   branch from it. Branching from `main` loses the RLS work — and note that the database is already
-   at migration `004`, so a tree without that migration disagrees with the database it connects to.
+1. **`main` has everything through session 8**, so branch from it normally. Note that the deployed
+   database is at migration `004` and `main` auto-deploys to a live service — a push to `main` is a
+   deploy.
 2. Rebuild the venv from §1 and confirm **417 passed, 2 skipped**.
 3. Read §3, particularly the first two items: G3, and never connecting as `postgres`.
-4. Start G3. The deploy is a runbook waiting on a card, not engineering.
+4. Start G3. Everything else on Track B is either operational (B4) or deferred (B5).

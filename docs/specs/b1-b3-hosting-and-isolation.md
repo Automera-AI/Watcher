@@ -18,7 +18,8 @@ the code is the specification of what happens.
 | Tenant isolation | a `WHERE` clause, honour system | RLS forced on all 20 tables, 19 policies |
 | The app's database role | would have been `postgres` | `watcher_app` — no `BYPASSRLS`, owns nothing |
 | Which tenant a session is | nothing carried it | `app.current_tenant`, set per transaction |
-| Container image | none; `cd.yml`'s image job dormant | `apps/api/Dockerfile`, job activates on merge |
+| Container image | none; `cd.yml`'s image job dormant | `apps/api/Dockerfile`, job now active |
+| The service | none | live in Frankfurt: https://watcher-api-lup7.onrender.com |
 | Packaging | not a package | installable; `intents.yaml` shipped as package data |
 
 Tests: **406 → 417**. Strict mypy clean, ruff clean.
@@ -159,15 +160,34 @@ Both would have been visible on the first deploy, at the worst possible moment.
 
 ---
 
-## 5. What is not done
+## 5. The deploy, and what is still not done
 
-**The Render service.** Creating it returns `402: Payment information is required` — Render wants a
-card on the workspace before it will create any service, free plan included. Everything the service
-needs is ready; §6 is the checklist. The alternative to the MCP path is the dashboard, which also
-supports a Docker‑runtime service pointed at `apps/api/Dockerfile` — worth preferring, since it is
-the artefact CI publishes.
+`watcher-api` — Frankfurt, free plan, auto-deploying from `main` on the native Python runtime
+(`pip install .`, then `uvicorn … --factory`). The Dockerfile ships regardless: `cd.yml` publishes
+the image to GHCR, and it is the artefact the self-hosted tier needs. Moving the service itself onto
+the Docker runtime is a dashboard change whenever that is preferred.
 
-**B4** (domain, TLS, webhook subscription) is unstarted and needs a running service first.
+Four deploys, and the three failures are the interesting part — each was a gate doing its job. Two
+`build_failed` against the pre-merge `main`, which has no `[build-system]` and so cannot be
+`pip install`ed. Then `update_failed`:
+
+```
+apps.api.core.settings_base.ConfigError:
+  Missing required environment variable: ANTHROPIC_API_KEY. See .env.example.
+```
+
+That is A1's per-subsystem check refusing to start a process that could accept a message it cannot
+classify — at startup, before a guest is waiting, which is the whole reason it is written that way.
+
+**Still open:**
+
+* **The pooler host is unverified.** `DATABASE_URL` was set to `aws-1-eu-central-1`; the build
+  environment cannot reach Postgres to confirm it, and SQLAlchemy connects lazily, so a clean
+  startup proves nothing. The first tenant query is the test.
+* **Sending is degraded.** `no send credentials configured` at startup: replies are composed and
+  recorded, and not delivered, until `WHATSAPP_ACCESS_TOKEN` and `WHATSAPP_PHONE_NUMBER_ID` are set.
+* **The endpoint is still a placeholder** — step 1 below.
+* **B4** (domain, TLS, webhook subscription) — nothing routes a guest to the service yet.
 
 **G3** (emergency detection) is unchanged and is now the most urgent item on the board. See the
 handoff: the system answers, and answering a gas leak with a polite note about maintenance is worse
@@ -188,11 +208,11 @@ to.
     WHERE external_id = 'PLACEHOLDER_WHATSAPP_PHONE_NUMBER_ID';
    ```
 
-2. **Add a card to the Render workspace**, then create the service — Docker runtime,
-   `apps/api/Dockerfile`, region Frankfurt (co‑located with the database), branch `main`.
-   For the native Python runtime instead: build `pip install .`, start
+2. **The service** — done: `watcher-api`, Frankfurt (co‑located with the database), branch `main`,
+   build `pip install .`, start
    `uvicorn apps.api.main:create_application --factory --host 0.0.0.0 --port $PORT`,
-   `PYTHON_VERSION=3.13.5`.
+   `PYTHON_VERSION=3.13.5`. Worth setting its health check path to `/health`; Render currently pings
+   `/`, which correctly 404s.
 
 3. **Environment.** `DATABASE_URL` is the *transaction pooler* URI (port 6543), not the direct one:
    the direct host resolves to IPv6 only and Render's outbound is IPv4. The username is the app
