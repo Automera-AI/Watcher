@@ -23,10 +23,17 @@ would have forgotten the previous turn on every message, and would have had noth
 Both of those now exist, so the receptionist, the conversation store and the channel sender are
 wired here and the loop is closed: a guest who messages the number gets an answer.
 
-The one degraded state that is still allowed is a process with no send credentials. It ingests,
-classifies, continues conversations and records the replies it composed — it simply cannot put them
-on the wire, which is every deploy between B1 and B4. That is a loud warning at startup rather than
-a refusal to start, because everything except the last step still works.
+**What G3 added.** An emergency alerter, built from the sender and the operator's own number. It is
+the second thing on this list that can be absent, and the more serious of the two: without it the
+process still detects an emergency, still answers the guest and still files the item, but the only
+alert is a log line.
+
+The degraded states that are allowed are both about the last step, and both are a loud warning at
+startup rather than a refusal to start, because everything before that step still works: a process
+with no send credentials composes and records replies it cannot put on the wire, and a process with
+no operator number cannot tell a person about an emergency. Neither is a state to point a real
+guest's number at — see the B4 runbook — and neither is a reason for a service that ingests,
+classifies and files to refuse to run.
 """
 
 from __future__ import annotations
@@ -34,9 +41,10 @@ from __future__ import annotations
 import logging
 
 from fastapi import FastAPI
+from packages.intents.schema import default_vocabulary
 
 from apps.api.app import create_app
-from apps.api.channels.factory import build_sender
+from apps.api.channels.factory import build_alerter, build_sender
 from apps.api.classifier.factory import build_classifier
 from apps.api.classifier.service import Classifier
 from apps.api.conversations.receptionist import handle
@@ -84,6 +92,14 @@ def assemble(settings: Settings, database: Database, classifier: Classifier) -> 
     tenant_scope = database.tenant_session
     scope = database.session
     sender = build_sender(settings)
+    # The emergency alert path (G3). Built from the sender because the only way out of this
+    # process is the number it replies on; `build_alerter` decides what that means and warns when
+    # the answer is "nothing" — this file may not know what a channel is.
+    alerter = build_alerter(
+        sender,
+        settings.control_chat_phone_e164,
+        declared_channel=default_vocabulary().emergency.alert,
+    )
 
     orchestrator = Orchestrator(
         classifier,
@@ -95,6 +111,7 @@ def assemble(settings: Settings, database: Database, classifier: Classifier) -> 
         conversations=SqlAlchemyConversationStore(tenant_scope),
         sender=sender,
         classifications=SqlAlchemyClassificationWriter(tenant_scope),
+        alerter=alerter,
     )
     queue = ThreadPoolClassificationQueue(
         MessageConsumer(SqlAlchemyMessageLoader(tenant_scope), orchestrator)

@@ -40,10 +40,11 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import SettingsConfigDict
 
 from apps.api.channels.config import ChannelCredentials
+from apps.api.core.emergency import DEFAULT_TIMEZONE, timezone_is_known
 from apps.api.core.policy import TenantPolicy
 from apps.api.schemas.common import HIGH_CONFIDENCE_THRESHOLD, PhoneE164
 
@@ -85,7 +86,21 @@ class Settings(ChannelCredentials):
     )
 
     # ── The operator's own number for the control chat (addendum §10) ──────────────────────
+    #
+    # G3 gave this variable a second job and a much sharper edge: it is also the number an
+    # emergency alert goes to. Unset, the process still detects a gas leak, still answers the
+    # guest and still files the item — but the only alert is a log line. `build_alerter` says so
+    # loudly at startup.
     control_chat_phone_e164: PhoneE164 | None = None
+
+    # ── Where the properties are (roadmap G3) ─────────────────────────────────────────────
+    #
+    # An IANA zone name, because one emergency trigger fires only between 22:00 and 07:00 and
+    # "night" is the guest's clock, not the server's. Defaulted rather than required: a deploy
+    # that does not say lands in the first market's zone, which is a defensible hour or two of
+    # error, whereas refusing to start over a timezone would be a safety feature that stops the
+    # service running.
+    tenant_timezone: str = DEFAULT_TIMEZONE
 
     # ── Classifier tiering (addendum §8 / D8-a) ────────────────────────────────────────────
     anthropic_api_key: SecretStr | None = None
@@ -133,6 +148,23 @@ class Settings(ChannelCredentials):
     # derived from the URL, since a pooler can be put in front of any host on any port.
     database_pool_mode: Literal["transaction", "session"] = "transaction"
 
+    @field_validator("tenant_timezone")
+    @classmethod
+    def _resolvable_zone(cls, value: str) -> str:
+        """Refuse a zone name this machine cannot resolve.
+
+        The exception to "nothing is required to import": this field has a working default, so a
+        value being *present and wrong* is never a half-configured machine — it is a typo, and the
+        only place it would otherwise surface is the one trigger that needs a clock, at 2am. A
+        misspelled ``TENANT_TIMEZONE`` fails at startup where somebody is watching.
+        """
+        if not timezone_is_known(value):
+            raise ValueError(
+                f"TENANT_TIMEZONE={value!r} is not an IANA zone name this machine can resolve "
+                f"(e.g. {DEFAULT_TIMEZONE}, Africa/Cairo)"
+            )
+        return value
+
     # ── Per-subsystem accessors: this is where "required" is decided ───────────────────────
 
     def tenant_policy(self) -> TenantPolicy:
@@ -149,7 +181,8 @@ class Settings(ChannelCredentials):
         process default for every tenant it serves.
         """
         return TenantPolicy(
-            high_confidence_threshold=self.classifier_confidence_escalation_threshold
+            high_confidence_threshold=self.classifier_confidence_escalation_threshold,
+            timezone=self.tenant_timezone,
         )
 
     def database_dsn(self) -> str:

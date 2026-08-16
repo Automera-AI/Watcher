@@ -17,6 +17,8 @@ from apps.api.audit.log import AuditEntry
 from apps.api.classifier.service import Classifier
 from apps.api.conversations.receptionist import handle as receptionist_handle
 from apps.api.conversations.task import Task, TaskStatus
+from apps.api.core.alerts import AlertOutcome, EmergencyAlert
+from apps.api.core.emergency import EMERGENCY_REPLY
 from apps.api.identity.models import CrmRecord
 from apps.api.identity.resolver import IncomingContact
 from apps.api.orchestration.ports import (
@@ -110,10 +112,13 @@ class _FakeConversations:
         self,
         state: ConversationState,
         turn: InboundTurn,
-        task: Task,
+        task: Task | None,
         action: OutboundAction,
     ) -> None:
-        self.task = task
+        # `None` is the emergency path (G3): the reply belongs to the transcript and to no job,
+        # and the task already in flight is left exactly as it was.
+        if task is not None:
+            self.task = task
         self.replies.append(action)
         self.replies_sent += 1
 
@@ -310,6 +315,7 @@ def _conversing(
     *,
     conversations: _FakeConversations | None = None,
     sender: _FakeSender | None = None,
+    alerter: _FakeAlerter | None = None,
 ) -> tuple[Orchestrator, _FakeAudit, _FakeInbox, _FakeConversations]:
     classifier = Classifier(
         _ScriptedProvider("cheap", [_result_json(confidence, intent)]),
@@ -326,6 +332,7 @@ def _conversing(
         receptionist=receptionist_handle,
         conversations=store,
         sender=sender,
+        alerter=alerter,
     )
     return orch, audit, inbox, store
 
@@ -454,3 +461,158 @@ def test_tenant_id_reaches_the_turn_as_a_uuid() -> None:
     orch, _audit, _inbox, store = _conversing("property_question", 0.95)
     _converse(orch)
     assert store.inbound[0].tenant_id == uuid.UUID(TENANT_UUID)
+
+
+# ── The emergency path (roadmap G3) ────────────────────────────────────────────────────────
+
+
+class _FakeAlerter:
+    def __init__(self, *, delivered: bool = True, channel: str = "whatsapp_text") -> None:
+        self.alerts: list[EmergencyAlert] = []
+        self._outcome = AlertOutcome(delivered=delivered, channel=channel)
+
+    async def alert(self, alert: EmergencyAlert) -> AlertOutcome:
+        self.alerts.append(alert)
+        return self._outcome
+
+
+class _ExplodingProvider:
+    """A model that must not be called. An emergency is answered without one."""
+
+    model_id = "must-not-be-called"
+
+    def complete_json(self, value: Any) -> dict[str, Any]:
+        raise AssertionError("the classifier ran on an emergency")
+
+
+def _emergency_orchestrator(
+    *,
+    alerter: _FakeAlerter | None = None,
+    sender: _FakeSender | None = None,
+    conversations: _FakeConversations | None = None,
+    with_receptionist: bool = True,
+) -> tuple[Orchestrator, _FakeAudit, _FakeInbox, _FakeConversations | None]:
+    """An orchestrator whose classifier raises if anything reaches it."""
+    classifier = Classifier(_ExplodingProvider(), _ExplodingProvider())
+    audit, inbox = _FakeAudit(), _FakeInbox()
+    store = (conversations or _FakeConversations()) if with_receptionist else None
+    orch = Orchestrator(
+        classifier,
+        audit,
+        inbox,
+        crm_lookup=lambda _t, _c: [],
+        receptionist=receptionist_handle if with_receptionist else None,
+        conversations=store,
+        sender=sender,
+        alerter=alerter,
+    )
+    return orch, audit, inbox, store
+
+
+def test_an_emergency_is_answered_without_ever_being_classified() -> None:
+    """The ordering *is* the item: nothing may stand between a gas leak and an operator.
+
+    The classifier here raises on any call. A model is a network round trip that can be slow,
+    wrong or down, and the vocabulary has said "checked before intent, before confidence, before
+    anything" since item 0.3.
+    """
+    alerter = _FakeAlerter()
+    orch, audit, inbox, store = _emergency_orchestrator(alerter=alerter)
+
+    outcome = _converse(orch, "hi, there is a smell of gas in the kitchen")
+
+    assert outcome.action is RoutingAction.EMERGENCY
+    assert outcome.emergency is not None and outcome.emergency.trigger_id == "gas"
+    assert outcome.autonomy == "hand_off"
+    assert outcome.classification_id is None  # nothing was classified, so nothing to point at
+    assert audit.entries[0].action == "emergency"
+    assert inbox.drafts[0].status is InboxStatus.NEEDS_REVIEW
+    assert inbox.drafts[0].band is ConfidenceBand.HIGH
+    assert inbox.drafts[0].snapshot["trigger_id"] == "gas"
+    assert store is not None and store.replies  # the guest was answered, and it is on the record
+
+
+def test_the_guest_is_answered_and_a_person_is_alerted() -> None:
+    """Both halves of ``reply_immediately`` + ``alert``, in one message's worth of work."""
+    alerter, sender = _FakeAlerter(), _FakeSender()
+    orch, _audit, _inbox, _store = _emergency_orchestrator(alerter=alerter, sender=sender)
+
+    outcome = _converse(orch, "FIRE in the building")
+
+    assert outcome.delivered is True
+    assert outcome.alerted is True
+    action, turn = sender.sent[0]
+    assert action.text == EMERGENCY_REPLY
+    assert turn.channel_identity == "+966500000000"
+
+    alert = alerter.alerts[0]
+    assert alert.trigger_id == "fire"
+    assert alert.guest_identity == "+966500000000"
+    assert alert.text == "FIRE in the building"  # the operator gets the guest's own words
+    # What the vocabulary asked for is carried through, so the gap is visible rather than assumed.
+    assert alert.requested_channel == "phone_call_to_operator"
+
+
+def test_an_emergency_is_still_answered_and_filed_with_no_alerter() -> None:
+    """The degraded deploy. Detection does not depend on there being somewhere to send it."""
+    sender = _FakeSender()
+    orch, audit, inbox, _store = _emergency_orchestrator(alerter=None, sender=sender)
+
+    outcome = _converse(orch, "someone broke in")
+
+    assert outcome.action is RoutingAction.EMERGENCY
+    assert outcome.alerted is None  # nothing tried; distinct from "tried and failed"
+    assert outcome.delivered is True
+    assert audit.entries and inbox.drafts
+
+
+def test_an_undelivered_alert_is_reported_rather_than_raised() -> None:
+    """A failed alert must not cost the guest the reply, and must not be silent."""
+    alerter, sender = _FakeAlerter(delivered=False), _FakeSender()
+    orch, _audit, inbox, _store = _emergency_orchestrator(alerter=alerter, sender=sender)
+
+    outcome = _converse(orch, "we need an ambulance")
+
+    assert outcome.alerted is False
+    assert outcome.delivered is True
+    assert inbox.drafts[0].status is InboxStatus.NEEDS_REVIEW
+
+
+def test_an_emergency_is_detected_without_a_receptionist_wired() -> None:
+    """The file-only pipeline detects one too. The check is above that branch, not inside it."""
+    alerter = _FakeAlerter()
+    orch, audit, inbox, _store = _emergency_orchestrator(alerter=alerter, with_receptionist=False)
+
+    outcome = _converse(orch, "the pipe burst, water everywhere")
+
+    assert outcome.action is RoutingAction.EMERGENCY
+    assert alerter.alerts[0].trigger_id == "flood"
+    assert audit.entries[0].action == "emergency"
+    assert inbox.drafts[0].status is InboxStatus.NEEDS_REVIEW
+
+
+def test_the_job_in_flight_is_left_alone() -> None:
+    """A guest with a gas leak may still want their booking answered afterwards."""
+    running = Task(intent="availability_check", slots={"check_in": "4 June"})
+    store = _FakeConversations(task=running)
+    orch, _audit, _inbox, _store = _emergency_orchestrator(
+        alerter=_FakeAlerter(), conversations=store
+    )
+
+    _converse(orch, "there is a smell of gas")
+
+    assert store.task is running
+    assert store.task.slots["check_in"] == "4 June"
+    assert store.replies[0].text == EMERGENCY_REPLY  # the emergency reply is in the transcript
+
+
+def test_an_ordinary_message_still_takes_the_ordinary_path() -> None:
+    """The guard against the interesting failure: a detector that fires on everything."""
+    alerter = _FakeAlerter()
+    orch, _audit, _inbox, _store = _conversing("property_question", 0.95, alerter=alerter)
+
+    outcome = _converse(orch, "Is there a fireplace in the living room?")
+
+    assert outcome.action is RoutingAction.RECEPTIONIST_REPLY
+    assert outcome.emergency is None
+    assert alerter.alerts == []

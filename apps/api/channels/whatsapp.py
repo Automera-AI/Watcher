@@ -200,8 +200,17 @@ class WhatsAppSender:
 
     async def send(self, action: OutboundAction, turn: InboundTurn) -> None:
         """Send one reply, or raise :class:`ChannelSendError`."""
-        payload = to_payload(action, turn.channel_identity)
-        await asyncio.to_thread(self._post, payload)
+        await self.send_to(action, turn.channel_identity)
+
+    async def send_to(self, action: OutboundAction, recipient: str) -> None:
+        """Send one message to a number that is not necessarily the one that wrote to us.
+
+        ``send`` replies to whoever spoke; an emergency alert (G3) goes to the operator, who said
+        nothing and has no inbound turn to answer. Same credentials, same endpoint, same retries —
+        only the recipient differs, so it is one method with the recipient named rather than a
+        second sender that would drift.
+        """
+        await asyncio.to_thread(self._post, to_payload(action, recipient))
 
     def _post(self, payload: dict[str, Any]) -> None:
         headers = {

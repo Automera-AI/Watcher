@@ -65,10 +65,17 @@ class ConversationStore(Protocol):
         self,
         state: ConversationState,
         turn: InboundTurn,
-        task: Task,
+        task: Task | None,
         action: OutboundAction,
     ) -> None:
-        """Persist the updated task and the reply, keyed off the turn that prompted it."""
+        """Persist the updated task and the reply, keyed off the turn that prompted it.
+
+        ``task`` is ``None`` when the reply belongs to no job — which is the emergency path and
+        only the emergency path (roadmap G3). The transcript still needs both halves of the
+        exchange; what it must not acquire is a task row with an invented intent on it, so the
+        active task (if there is one) is left exactly as it was for whichever person picks the
+        conversation up.
+        """
         ...
 
 

@@ -166,6 +166,16 @@ def test_the_reply_goes_back_to_whoever_sent_the_message() -> None:
     assert json.loads(seen[0].content)["to"] == "+966500000000"
 
 
+def test_a_message_can_be_addressed_to_someone_who_did_not_write_to_us() -> None:
+    """``send_to`` is what an emergency alert rides on (G3): the operator sent no turn."""
+    transport, seen = _recording(200)
+    sender = WhatsAppSender(CREDENTIALS, client=httpx.Client(transport=transport))
+
+    asyncio.run(sender.send_to(OutboundAction(kind="say", text="EMERGENCY"), "+971500000001"))
+
+    assert json.loads(seen[0].content)["to"] == "+971500000001"
+
+
 # ── Choosing a sender at all ───────────────────────────────────────────────────────────────
 
 
