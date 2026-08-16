@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from apps.api.core.emergency import DEFAULT_TIMEZONE
 from apps.api.identity.models import CrmRecord, Resolution
 from apps.api.identity.resolver import MERGE_THRESHOLD, REVIEW_THRESHOLD, decide
 from apps.api.schemas.common import (
@@ -30,6 +31,16 @@ class TenantPolicy:
     control_token_ttl_seconds: int = 15 * 60
     classifier_max_attempts: int = 2
     delivery_max_attempts: int = 3
+
+    timezone: str = DEFAULT_TIMEZONE
+    """Where this tenant's properties are, as an IANA zone name (roadmap G3).
+
+    One emergency trigger is time-of-day dependent — locked out at 2pm is a support request, at
+    2am it is a person on a street — and "night" is a fact about the guest's local clock, not the
+    server's. A tenant in Cairo and a tenant in Dubai are an hour apart, which is an hour of the
+    window either side of midnight, so this is per tenant rather than per process even though the
+    control page is what will eventually set it.
+    """
 
     def band(self, confidence_overall: float) -> ConfidenceBand:
         """Routing band under this tenant's thresholds."""

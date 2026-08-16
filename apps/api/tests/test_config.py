@@ -88,6 +88,18 @@ def test_defaults_match_the_locked_decisions(_settings: SettingsFactory) -> None
     assert settings.asr_provider == "whisper-api"
 
 
+def test_the_tenant_timezone_reaches_the_policy(_settings: SettingsFactory) -> None:
+    """G3's one knob: the window on the night-time trigger is read in the guest's local time."""
+    assert _settings().tenant_policy().timezone == "Asia/Dubai"
+    assert _settings(TENANT_TIMEZONE="Africa/Cairo").tenant_policy().timezone == "Africa/Cairo"
+
+
+def test_an_unresolvable_timezone_fails_at_startup(_settings: SettingsFactory) -> None:
+    """A typo here would otherwise surface on the one trigger that needs a clock, at 2am."""
+    with pytest.raises(ValidationError, match="TENANT_TIMEZONE"):
+        _settings(TENANT_TIMEZONE="Asia/Dubay")
+
+
 def test_angle_bracket_placeholder_reads_as_unset(_settings: SettingsFactory) -> None:
     settings = _settings(ANTHROPIC_API_KEY="<ANTHROPIC_API_KEY>", META_APP_ID="<META_APP_ID>")
 

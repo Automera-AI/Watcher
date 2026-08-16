@@ -242,6 +242,41 @@ def test_a_signed_message_is_persisted_classified_and_answered(
     assert [call.text for call in provider.calls] == ["Any rooms free in June?"]
 
 
+def test_an_emergency_message_is_answered_and_filed_without_a_model(
+    app: FastAPI, client: TestClient, seeded: Database, provider: StubProvider
+) -> None:
+    """G3 through the real graph: a gas leak never reaches the classifier.
+
+    The assembled pipeline is the production one here — the same resolver, repository, queue,
+    orchestrator and conversation store — so this is the end-to-end statement that the check runs
+    where the module docstring says it does, and not merely that the detector works.
+    """
+    assert _post(client, _payload(text="there is a smell of gas in the kitchen")) == 200
+    _drain(app)
+
+    with seeded.session() as session:
+        audit = session.query(AuditLogRow).one()
+        assert audit.action == "emergency"
+        assert audit.classification_snapshot["trigger_id"] == "gas"
+
+        item = session.query(InboxItem).one()
+        assert item.status == InboxStatus.NEEDS_REVIEW.value
+        assert item.band == ConfidenceBand.HIGH.value
+        # No model ran, so there is no classification for the item to point at.
+        assert item.classification_id is None
+        assert session.query(Classification).count() == 0
+
+        # The guest was answered, and both halves are on the transcript.
+        turns = session.query(Turn).order_by(Turn.direction).all()
+        assert [t.direction for t in turns] == ["inbound", "outbound"]
+        assert "emergency" in (turns[1].body_text or "").lower()
+
+        # An emergency is nobody's job to progress, so no task row was opened for it.
+        assert session.query(TaskRow).count() == 0
+
+    assert provider.calls == []
+
+
 def test_a_second_message_continues_the_same_conversation(
     settings: Settings, seeded: Database, provider: StubProvider
 ) -> None:

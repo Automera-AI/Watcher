@@ -294,12 +294,19 @@ class SqlAlchemyConversationStore:
         self,
         state: ConversationState,
         turn: InboundTurn,
-        task: Task,
+        task: Task | None,
         action: OutboundAction,
     ) -> None:
         conversation_id = uuid.UUID(state.conversation_id)
         with self._scope(str(turn.tenant_id)) as session:
             repo = ConversationRepository(session)
+
+            if task is None:
+                # An emergency reply (G3): it belongs to the transcript and to no job. The active
+                # task is deliberately untouched — see the port's docstring.
+                repo.record_outbound_turn(conversation_id, turn, action)
+                return
+
             row = repo.get_active_task(conversation_id)
 
             if row is not None and row.intent != task.intent:
