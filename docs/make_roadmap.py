@@ -1,13 +1,17 @@
 """Generate the Watcher v2 roadmap PDF: urgency, ease, effort, per work item.
 
-**v2.10 — 22 August 2026.** This generator is the single source of the roadmap PDF. Edit this
+**v2.11 — 22 August 2026.** This generator is the single source of the roadmap PDF. Edit this
 file and re-run it rather than producing another version by hand; v2.2 flagged that three roadmap
 artifacts disagreed, and regenerating from here is what keeps that closed.
 
-**Scope note.** This revision folds in item 2.4 (the knowledge base), built on top of v2.9's
-state — Track A through G3, no further. A separate, not-yet-merged branch built roadmap item B5
-(the durable queue) from the same base; that work is not reflected here; whoever merges both
-reconciles the two revisions' numbers rather than either one guessing at the other's content.
+**Scope note, same as v2.10's.** This revision (and v2.10 before it) folds in item 2.4 (the
+knowledge base), built on top of v2.9's state — Track A through G3, no further. A separate,
+not-yet-merged branch built roadmap item B5 (the durable queue); that work is not reflected here.
+The webhook subscription this revision marks done on B4 is operator/Meta-side configuration, not
+code from either branch, and is not re-verifiable from this repository — it is carried forward
+from what the operator reported at session start, not independently confirmed this session.
+Whoever merges the outstanding branches reconciles the two revisions' numbers rather than either
+one guessing at the other's content.
 
     python docs/make_roadmap.py     # needs reportlab
 """
@@ -29,7 +33,7 @@ from reportlab.platypus import (
 )
 
 OUT = "/home/user/Watcher/docs/Watcher_v2_Roadmap.pdf"
-VERSION = "v2.10"
+VERSION = "v2.11"
 DATED = "22 August 2026"
 STAMP = "2026-08-22"
 
@@ -174,7 +178,7 @@ story.append(Paragraph("Watcher v2 &mdash; Build Roadmap", H1))
 story.append(Paragraph(
     "From a message&nbsp;filer to a receptionist. Every item scored for urgency and ease. "
     f"&nbsp;&bull;&nbsp; <b>{VERSION}</b> &nbsp;&bull;&nbsp; {DATED} &nbsp;&bull;&nbsp; "
-    "supersedes v2.9", LEAD))
+    "supersedes the v2.10 PDF of the same date", LEAD))
 story.append(Spacer(1, 10))
 
 story.append(banner(
@@ -185,9 +189,23 @@ story.append(banner(
     "sensitivity flag a fact can carry and a tool that treats an unverified match to one exactly "
     "like no match at all, and a real &ldquo;I don't know&rdquo; that fetches a person rather than "
     "guessing. Tested against a curated, committed export of one real property from the operator's "
-    "own sheet, not synthetic data. <b>What stands between here and a real guest is now entirely "
-    "B4</b>, and B4 is operational, not engineering. "
+    "own sheet, not synthetic data. Opened as PR #24, not yet merged. <b>What stands between here "
+    "and a real guest is now entirely B4</b>, and B4 is operational, not engineering. "
     "<b>Remaining: ~30.75 engineering days.</b>"))
+
+story.append(Spacer(1, 8))
+story.append(banner(
+    "<b>v2.11, same day.</b> Two of B4's four remaining checklist items closed directly against "
+    "the live systems, independent of PR #24 merging: the real WhatsApp phone-number id replaced "
+    "the placeholder in Supabase's channel_configs.external_id &mdash; the single highest-priority "
+    "item on the whole board, since every real inbound message was 500ing at the tenant resolver "
+    "until this ran &mdash; and WHATSAPP_ACCESS_TOKEN plus WHATSAPP_PHONE_NUMBER_ID are now set on "
+    "Render, confirmed by a clean live redeploy. Both verified by reading the live systems back, "
+    "not assumed. <b>What is not verified this session:</b> whether the webhook is actually "
+    "subscribed in Meta. The operator's own account, carried into this document from session "
+    "start, says it already is, via a custom domain &mdash; that claim is repeated here, not "
+    "re-checked against Meta directly.",
+    DONE_GREEN))
 
 story.append(Paragraph("Where we stand today", H2))
 story.append(two_col(
@@ -231,8 +249,10 @@ story.append(two_col(
     f'{done("No Dockerfile &mdash; done (B3)")}<br/>'
     f'{done("No running service &mdash; done (B3)")}<br/>'
     f'{done("Knowledge: zero tables, zero rows &mdash; done (2.4)")}<br/>'
-    "<b>No outbound credentials</b> &mdash; the deployed process warns at startup: it composes "
-    "and records replies it cannot deliver<br/>"
+    f'{done("No outbound credentials &mdash; set on Render this session (B4), verified by a "
+    "clean redeploy, not by a test send")}<br/>'
+    f'{done("No real endpoint id &mdash; the channel_configs placeholder is fixed (B4), "
+    "verified by reading the row back")}<br/>'
     "<b>No operator number</b> &mdash; NEW as a blocker, and the more serious of the two: without "
     "CONTROL_CHAT_PHONE_E164 an emergency is detected, answered and filed, and the only alert is "
     "a log line<br/>"
@@ -241,8 +261,10 @@ story.append(two_col(
     "line of YAML, and it is the operator's line<br/>"
     "The database path is unproven &mdash; SQLAlchemy connects lazily, so the pooler host is "
     "tested by the first message, not by startup<br/>"
-    "<b>No webhook subscription</b> &mdash; nothing routes a guest to it yet, though the "
-    "handshake itself is verified (B4)<br/>"
+    "<b>Webhook subscription &mdash; reported done, not independently verified this "
+    "session.</b> The handshake was proven end to end in an earlier session; the operator's own "
+    "account says Meta is now subscribed via a custom domain, but nothing this session checked "
+    "that against Meta directly<br/>"
     "No control page &mdash; one CSS file, no package.json<br/>"
     "No control-page API &mdash; ~25 endpoints, none written<br/>"
     "Live availability &mdash; no read path to any PMS<br/>"
@@ -251,7 +273,7 @@ story.append(two_col(
 story.append(PageBreak())
 
 # ---------------------------------------------------------------- page 2
-story.append(Paragraph("What changed in this revision (v2.9 &rarr; v2.10)", H2))
+story.append(Paragraph("What changed in this revision (v2.9 &rarr; v2.11)", H2))
 story.append(two_col(
     "Delivered", "Consequences",
     "<b>2.4 delivered</b> &mdash; 2.0 engineering days. "
@@ -356,8 +378,8 @@ story.append(PageBreak())
 # ---------------------------------------------------------------- page 4
 story.extend(section(
     "Track B &mdash; Host it. &nbsp;[Supabase + Render]",
-    "Stack locked 15 August 2026. B2 landed before a second client exists. B4 grew one "
-    "precondition this session &mdash; see its note.",
+    "Stack locked 15 August 2026. B2 landed before a second client exists. Two of B4's four "
+    "remaining checklist items closed this session &mdash; see its note.",
     [
         ("B1", "Supabase project and migrations", "DONE", "Easy", "0",
          "<b>DONE</b> &mdash; watcher-prod in eu-central-1, migrations applied and stamped, one "
@@ -369,16 +391,23 @@ story.extend(section(
          "role can, which is the trap). Verified cross-tenant on the live database"),
         ("B3", "Dockerfile and Render service", "DONE", "Easy", "0",
          "<b>DONE</b> &mdash; apps/api/Dockerfile, which activates the cd.yml image job, and the "
-         "service is live in Frankfurt on the free plan. Sending is still degraded until "
-         "WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID are set"),
+         "service is live in Frankfurt on the free plan. <b>Sending credentials are set as of "
+         "this session</b> (WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID on Render) &mdash; "
+         "confirmed by a clean live deploy, not by a test send"),
         ("B4", "Webhook subscription and a warm instance", "NOW", "Easy", "0.5",
          "<b>PART-VERIFIED</b> &mdash; the handshake is proven against the live service: GET "
          "/webhook with Meta's three hub.* parameters echoes the challenge. No custom domain is "
-         "needed (Render's TLS on *.onrender.com satisfies Meta; the URL is machine-facing). What "
-         "remains: the subscription in Meta, the real phone-number id in channel_configs, "
-         "<b>CONTROL_CHAT_PHONE_E164 so an emergency reaches a person (new, G3)</b>, and a paid "
-         "instance &mdash; the free one sleeps after ~15 minutes and a 30&ndash;60s cold start "
-         "reads to Meta as a timeout"),
+         "needed for that (Render's TLS on *.onrender.com satisfies Meta). <b>Two of four "
+         "remaining items closed this session, both confirmed by reading the live systems back:</b> "
+         "the real phone-number id now sits in channel_configs.external_id (Supabase, verified), "
+         "and the two send credentials are set on Render (verified by a clean redeploy). What is "
+         "reported but not independently re-verified this session: the operator's own account, "
+         "carried into this revision from session start, says the webhook is already subscribed "
+         "in Meta via a custom domain. What is still open regardless: "
+         "<b>CONTROL_CHAT_PHONE_E164 so an emergency reaches a person (G3)</b>, and a paid "
+         "instance &mdash; still on the free plan (confirmed via the Render MCP this session) "
+         "&mdash; the free one sleeps after ~15 minutes and a 30&ndash;60s cold start reads to "
+         "Meta as a timeout"),
         ("B5", "Durable queue (Redis + arq)", "MED", "Moderate", "1.0",
          "<b>NOT BUILT</b> &mdash; the in-process worker pool A4 ships loses in-flight "
          "classifications on every deploy. Persist-before-enqueue means a message is never lost, "
@@ -675,9 +704,10 @@ dates = Table([
      Paragraph("<b>Now</b>", CELL), Paragraph("<b>Status</b>", CELL)],
     [Paragraph("M1 &mdash; answers a real message, safely", CELLB),
      Paragraph("~4 days", NOTE), Paragraph("<b>~0.5 days</b>", NOTE),
-     Paragraph("<b>NEXT</b> &mdash; B4 alone. It is deployed, it answers, as of G3 it answers "
-               "<i>safely</i>, and as of 2.4 it has something true to say. What is left of this "
-               "milestone is a subscription and a checklist", NOTE)],
+     Paragraph("<b>NEXT</b> &mdash; B4 alone, and two of its four items closed this session. "
+               "It is deployed, it answers, as of G3 it answers <i>safely</i>, and as of 2.4 it "
+               "has something true to say. What is left: CONTROL_CHAT_PHONE_E164 and a paid "
+               "instance", NOTE)],
     [Paragraph("M2 &mdash; you can watch and correct it", CELLB),
      Paragraph("+13.75 days", NOTE), Paragraph("+13.75 days", NOTE),
      Paragraph("PENDING &mdash; Track D, six receptionist views", NOTE)],
@@ -771,14 +801,13 @@ story.append(notes_table([
 
 story.append(Spacer(1, 10))
 story.append(banner(
-    "<b>If you do only one thing next session: B4.</b> Not D, not G1, and not 2.4 &mdash; 2.4 is "
-    "done. The receptionist answers, it is deployed, it knows when to stop answering and fetch a "
-    "person, and it now has something true to say &mdash; to a number nobody can message yet. B4 "
-    "is half a day and a checklist: the subscription in Meta, the real phone-number id in "
-    "channel_configs, the two send credentials, the operator's number, and a paid instance so a "
-    "cold start does not read to Meta as a timeout. <b>And before any of it, spend thirty minutes "
-    "widening the emergency trigger phrases</b> &mdash; it is the operator's edit, it changes no "
-    "code, and it is the cheapest safety on the board.",
+    "<b>If you do only one thing next session: CONTROL_CHAT_PHONE_E164.</b> Not D, not G1, and "
+    "not 2.4 &mdash; 2.4 is done. The real phone-number id and the send credentials closed this "
+    "session; what is left on B4 is the operator's own number, so an emergency alert reaches a "
+    "person rather than only a log line, and a paid Render instance so a cold start does not read "
+    "to Meta as a timeout. <b>If the trigger phrases still haven't been widened, do that first "
+    "regardless</b> &mdash; it is the operator's edit, it changes no code, and it is the cheapest "
+    "safety on the board.",
     URG["NOW"]))
 
 story.append(PageBreak())
@@ -845,7 +874,10 @@ log = Table([
                "committed, curated fixture from one real property, exercised end to end in "
                "test_knowledge_integration.py. REGISTRY wired via configure_knowledge, not "
                "threaded through Orchestrator (D37); an autouse fixture keeps that process-global "
-               "state from leaking between tests. Decisions D35&ndash;D37", NOTE),
+               "state from leaking between tests. Decisions D35&ndash;D37. Opened as PR #24. Also "
+               "this session, against the live systems directly rather than through the PR: fixed "
+               "the channel_configs placeholder (Supabase) and set the two send credentials "
+               "(Render) &mdash; both confirmed by reading the systems back, not assumed", NOTE),
      Paragraph("<b>486 &rarr; 506</b>", NOTE), Paragraph("<b>2.0</b>", CELLB)],
 ], colWidths=[44, 296, 68, 48], hAlign="LEFT")
 log.setStyle(TableStyle([
