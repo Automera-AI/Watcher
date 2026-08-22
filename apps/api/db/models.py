@@ -320,6 +320,23 @@ class CorrectionRow(TimestampedTenantBase):
     promoted_to_golden: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class FactRow(TimestampedTenantBase):
+    """One row of a tenant's knowledge base (roadmap 2.4). Named ``FactRow`` to avoid colliding
+    with the in-memory ``Fact`` dataclass, the same way ``TaskRow`` sits beside ``Task``.
+
+    ``sensitive`` is unenforced outside ``answer_from_knowledge`` (``core/knowledge.py``) — the
+    reply-path-wide gate is roadmap G1, not yet built.
+    """
+
+    __tablename__ = "facts"
+
+    topic: Mapped[str] = mapped_column(String(64), index=True)
+    question: Mapped[str] = mapped_column(Text)
+    answer: Mapped[str] = mapped_column(Text)
+    sensitive: Mapped[bool] = mapped_column(Boolean, default=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class UsageEvent(Base):
     """Metered usage event; not tenant-scoped via the base class (uses BIGSERIAL PK)."""
 

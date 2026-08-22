@@ -48,8 +48,10 @@ from apps.api.channels.factory import build_alerter, build_sender
 from apps.api.classifier.factory import build_classifier
 from apps.api.classifier.service import Classifier
 from apps.api.conversations.receptionist import handle
+from apps.api.conversations.tools import configure_knowledge
 from apps.api.core.config import Settings, get_settings
 from apps.api.db.engine import Database, build_database
+from apps.api.db.knowledge_repo import SqlAlchemyFactRepository
 from apps.api.db.orchestration_repo import (
     SqlAlchemyAuditLog,
     SqlAlchemyClassificationWriter,
@@ -100,6 +102,11 @@ def assemble(settings: Settings, database: Database, classifier: Classifier) -> 
         settings.control_chat_phone_e164,
         declared_channel=default_vocabulary().emergency.alert,
     )
+    # The knowledge base (roadmap 2.4). A process-global registry entry rather than a collaborator
+    # threaded through the Orchestrator/Receptionist call chain — see `conversations/tools.py`;
+    # `configure_knowledge` is the named seam that swaps it in, the same way `register` already
+    # populates the registry at import time.
+    configure_knowledge(SqlAlchemyFactRepository(tenant_scope))
 
     orchestrator = Orchestrator(
         classifier,

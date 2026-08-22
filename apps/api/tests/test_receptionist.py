@@ -6,8 +6,12 @@ import asyncio
 import uuid
 from datetime import UTC, datetime
 
+import pytest
+
 from apps.api.conversations.receptionist import handle
 from apps.api.conversations.task import Task, TaskStatus
+from apps.api.conversations.tools import REGISTRY, AnswerFromKnowledge
+from apps.api.core.knowledge import Fact
 from apps.api.schemas.envelope import InboundTurn
 
 TENANT_ID = uuid.uuid4()
@@ -100,10 +104,91 @@ def test_emergency_always_hands_off() -> None:
     assert task.status == TaskStatus.HANDED_OFF
 
 
-def test_no_required_slots_executes_directly() -> None:
+class _FakeKnowledge:
+    def __init__(self, facts: list[Fact]) -> None:
+        self._facts = facts
+
+    def search(self, tenant_id: str) -> list[Fact]:
+        return self._facts
+
+
+def test_a_matched_fact_is_said(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``directions`` names ``answer_from_knowledge`` (roadmap 2.4) — a real match is answered."""
+    fact = Fact(
+        id="1",
+        topic="directions",
+        question="how do I get there",
+        answer="Take the M1.",
+        sensitive=False,
+    )
+    monkeypatch.setitem(
+        REGISTRY, "answer_from_knowledge", AnswerFromKnowledge(_FakeKnowledge([fact]))
+    )
     action, task = asyncio.run(handle(_turn("how do I get there"), "directions", 0.95, {}, None))
     assert action.kind == "say"
+    assert action.text == "Take the M1."
     assert task.status == TaskStatus.COMPLETED
+
+
+def test_no_matching_fact_fetches_a_person(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real "I don't know" (``on_no_knowledge``) — not a guess, not a false "All set"."""
+    monkeypatch.setitem(REGISTRY, "answer_from_knowledge", AnswerFromKnowledge(_FakeKnowledge([])))
+    action, task = asyncio.run(handle(_turn("how do I get there"), "directions", 0.95, {}, None))
+    assert action.kind == "handoff"
+    assert task.status == TaskStatus.HANDED_OFF
+
+
+#: Deliberately *not* a door code, a key box code or a unit number: ``intents.yaml`` forbids
+#: ``check_in_support`` from ever giving those out via ``answer_from_knowledge``, verified or not
+#: — that disclosure belongs to ``access_code_request``'s own tool (``lookup_reservation``,
+#: roadmap 3.1, unimplemented), gated on a real booking reference rather than a bool. A wifi
+#: password is a fact this tool may legitimately hold and gate on ``identity_verified``.
+_WIFI_PASSWORD = Fact(
+    id="1",
+    topic="wifi",
+    question="what's the wifi password",
+    answer="Flex2026",
+    sensitive=True,
+)
+
+
+def test_a_sensitive_match_is_withheld_from_an_unverified_guest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """G1 is not built yet (roadmap track G) — until it is, a sensitive fact is never disclosed."""
+    monkeypatch.setitem(
+        REGISTRY, "answer_from_knowledge", AnswerFromKnowledge(_FakeKnowledge([_WIFI_PASSWORD]))
+    )
+    action, task = asyncio.run(
+        handle(
+            _turn("what's the wifi password"),
+            "property_question",
+            0.95,
+            {},
+            None,
+            identity_verified=False,
+        )
+    )
+    assert action.kind == "handoff"
+    assert task.status == TaskStatus.HANDED_OFF
+
+
+def test_a_sensitive_match_is_said_to_a_verified_guest(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(
+        REGISTRY, "answer_from_knowledge", AnswerFromKnowledge(_FakeKnowledge([_WIFI_PASSWORD]))
+    )
+    action, task = asyncio.run(
+        handle(
+            _turn("what's the wifi password"),
+            "property_question",
+            0.95,
+            {},
+            None,
+            identity_verified=True,
+        )
+    )
+    assert action.kind == "say"
+    assert action.text == "Flex2026"
 
 
 def test_new_intent_creates_new_task() -> None:

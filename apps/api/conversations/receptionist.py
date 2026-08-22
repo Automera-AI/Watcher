@@ -10,6 +10,16 @@ guest the same question every time they reply. The vocabulary has always declare
 ``defaults.max_clarifying_turns`` and ``defaults.on_max_turns`` and nothing has ever read them;
 they are read here, because this is the file that decides what to say next. A receptionist that
 has asked three times and learned nothing fetches a person.
+
+**What 2.4 changed, and what it deliberately left alone.** Every intent that reached ``execute``
+used to get the same reply — "All set! I've noted everything down." — whether or not that was
+true. For the five intents whose ``terminal_tool`` is ``answer_from_knowledge`` that was a
+standing lie: "is there parking?" was never looked up anywhere. ``_execute`` now actually calls
+the tool the vocabulary names for that one case and hands off on a real "I don't know"
+(``defaults.on_no_knowledge``). Every other ``terminal_tool`` (``check_availability``,
+``lookup_reservation``, ``quote_price``, ``hold_slot``, ``confirm_booking``, ``create_ticket``) has
+no implementation yet — that is roadmap 3.1, not 2.4 — and keeps the old placeholder reply rather
+than being silently widened into a promise this item does not keep.
 """
 
 from __future__ import annotations
@@ -22,6 +32,13 @@ from apps.api.core.autonomy import Autonomy, decide_autonomy
 from apps.api.schemas.envelope import InboundTurn, OutboundAction
 
 HANDOFF_TEXT = "Let me connect you with someone who can help."
+
+
+#: Intents whose vocabulary-declared tool this file actually runs. The other terminal tools
+#: (``check_availability``, ``lookup_reservation``, ``quote_price``, ``hold_slot``,
+#: ``confirm_booking``, ``create_ticket``) are unimplemented — roadmap 3.1 — and fall through to
+#: the placeholder reply below rather than being dispatched to nothing.
+_IMPLEMENTED_TOOL = "answer_from_knowledge"
 
 
 async def _hand_off(task: Task, tool_name: str) -> tuple[OutboundAction, Task]:
@@ -104,6 +121,13 @@ async def handle(
         )
 
     task.status = TaskStatus.EXECUTING
+
+    intent_def = next((i for i in vocab.intents if i.name == intent), None)
+    tool_name = intent_def.terminal_tool if intent_def is not None else None
+
+    if tool_name == _IMPLEMENTED_TOOL:
+        return await _answer_from_knowledge(task, turn, identity_verified, vocab)
+
     take_message = REGISTRY.get("take_message")
     if take_message is not None:
         await take_message.run()
@@ -116,3 +140,30 @@ async def handle(
         ),
         task,
     )
+
+
+async def _answer_from_knowledge(
+    task: Task, turn: InboundTurn, identity_verified: bool, vocab: Vocabulary
+) -> tuple[OutboundAction, Task]:
+    """Run the knowledge lookup (roadmap 2.4) and say what it found, or fetch a person.
+
+    ``turn.text`` rather than a ``topic`` slot: ``property_question`` declares one, but slot
+    extraction (item 2.x) does not exist, so ``extracted_slots`` is always ``{}`` and the raw
+    message is the only signal the tool has to match against.
+    """
+    tool = REGISTRY.get(_IMPLEMENTED_TOOL)
+    result = (
+        await tool.run(
+            tenant_id=str(turn.tenant_id),
+            question=turn.text or "",
+            identity_verified=identity_verified,
+        )
+        if tool is not None
+        else None
+    )
+
+    if result is None or not result.ok:
+        return await _hand_off(task, vocab.defaults.on_no_knowledge)
+
+    task.status = TaskStatus.COMPLETED
+    return OutboundAction(kind="say", text=result.human_summary or ""), task
