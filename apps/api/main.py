@@ -34,6 +34,11 @@ with no send credentials composes and records replies it cannot put on the wire,
 no operator number cannot tell a person about an emergency. Neither is a state to point a real
 guest's number at — see the B4 runbook — and neither is a reason for a service that ingests,
 classifies and files to refuse to run.
+
+**What B5 added.** The receptionist, conversation store, sender and alerter above are now wired
+here only when there is no ``REDIS_URL`` — that wiring moved to
+``orchestration/composition.build_consumer`` so ``apps/api/worker.py`` can build the identical
+graph in its own process. See ``assemble``'s docstring for which queue gets built and why.
 """
 
 from __future__ import annotations
@@ -41,27 +46,21 @@ from __future__ import annotations
 import logging
 
 from fastapi import FastAPI
-from packages.intents.schema import default_vocabulary
 
 from apps.api.app import create_app
-from apps.api.channels.factory import build_alerter, build_sender
 from apps.api.classifier.factory import build_classifier
 from apps.api.classifier.service import Classifier
-from apps.api.conversations.receptionist import handle
 from apps.api.core.config import Settings, get_settings
 from apps.api.db.engine import Database, build_database
-from apps.api.db.orchestration_repo import (
-    SqlAlchemyAuditLog,
-    SqlAlchemyClassificationWriter,
-    SqlAlchemyConversationStore,
-    SqlAlchemyCrmLookup,
-    SqlAlchemyInboxWriter,
-    SqlAlchemyMessageLoader,
-)
 from apps.api.db.repository import SessionScopedMessageRepository
 from apps.api.db.tenant_resolver import ChannelConfigTenantResolver
-from apps.api.orchestration.queue import MessageConsumer, ThreadPoolClassificationQueue
-from apps.api.orchestration.worker import Orchestrator
+from apps.api.ingestion.ports import ClassificationQueue
+from apps.api.orchestration.composition import build_consumer
+from apps.api.orchestration.queue import (
+    RedisClassificationQueue,
+    ThreadPoolClassificationQueue,
+    build_redis_pool,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -83,59 +82,60 @@ def assemble(settings: Settings, database: Database, classifier: Classifier) -> 
     Separate from :func:`create_application` so the wiring itself can be exercised against SQLite
     and a stub model without a Postgres URL or an API key. This is the function under test; the one
     above is the four lines that decide what to pass it.
+
+    **Which queue, and why this is the only branch in the file (roadmap B5).** ``REDIS_URL`` unset
+    is not a degraded state, unlike a missing sender or alerter below — it is the same in-process
+    path this service has run on since A4, chosen deliberately for single-instance/dev. Set, this
+    process becomes a thin producer: no orchestrator, no sender, no alerter, no per-message DB
+    repos — those are the arq worker's job now (`apps/api/worker.py`, wired from the identical
+    `orchestration/composition.build_consumer` this branch calls when there is no Redis). Building
+    them here anyway would leave an idle sender client open in a process that never uses it.
     """
-    # Two scopes, and which one a collaborator gets is a security decision (B2). `tenant_scope`
-    # stamps `app.current_tenant` on the transaction, so the RLS policies in migration 004 are
-    # enforcing on every one of these. The resolver gets the unstamped scope because it is the one
-    # question asked *before* a tenant is known — which tenant owns this endpoint — and migration
-    # 004 gives that lookup a policy of its own.
-    tenant_scope = database.tenant_session
+    # The tenant resolver gets the unstamped scope deliberately (B2): it answers the one question
+    # asked *before* a tenant is known — which tenant owns this endpoint — and migration 004 gives
+    # that lookup a policy of its own. Every tenant-scoped collaborator below (built inside
+    # `build_consumer`, or just `SessionScopedMessageRepository` here) gets `tenant_session`
+    # instead, which stamps `app.current_tenant` so RLS enforces on it.
     scope = database.session
-    sender = build_sender(settings)
-    # The emergency alert path (G3). Built from the sender because the only way out of this
-    # process is the number it replies on; `build_alerter` decides what that means and warns when
-    # the answer is "nothing" — this file may not know what a channel is.
-    alerter = build_alerter(
-        sender,
-        settings.control_chat_phone_e164,
-        declared_channel=default_vocabulary().emergency.alert,
-    )
 
-    orchestrator = Orchestrator(
-        classifier,
-        SqlAlchemyAuditLog(tenant_scope),
-        SqlAlchemyInboxWriter(tenant_scope),
-        SqlAlchemyCrmLookup(tenant_scope),
-        policy=settings.tenant_policy(),
-        receptionist=handle,
-        conversations=SqlAlchemyConversationStore(tenant_scope),
-        sender=sender,
-        classifications=SqlAlchemyClassificationWriter(tenant_scope),
-        alerter=alerter,
-    )
-    queue = ThreadPoolClassificationQueue(
-        MessageConsumer(SqlAlchemyMessageLoader(tenant_scope), orchestrator)
-    )
+    redis_dsn = settings.redis_dsn()
+    if redis_dsn is not None:
+        pool = build_redis_pool(redis_dsn)
+        redis_queue = RedisClassificationQueue(pool)
+        queue: ClassificationQueue = redis_queue
+        sender = None
 
-    def _shutdown() -> None:
-        queue.shutdown()
+        async def _close_queue() -> None:
+            await redis_queue.aclose()
+    else:
+        graph = build_consumer(settings, database, classifier)
+        pool_queue = ThreadPoolClassificationQueue(graph.consumer)
+        queue = pool_queue
+        sender = graph.sender
+
+        async def _close_queue() -> None:
+            pool_queue.shutdown()
+
+    async def _shutdown() -> None:
+        await _close_queue()
         if sender is not None:
             sender.close()
         database.dispose()
 
     app = create_app(
         settings.meta(),
-        SessionScopedMessageRepository(tenant_scope),
+        SessionScopedMessageRepository(database.tenant_session),
         queue,
         ChannelConfigTenantResolver(scope),
         on_shutdown=_shutdown,
     )
 
     # Held on the application so nothing here is collected while the process is still serving, and
-    # so a test can reach the queue to drain it. Shutdown order is not arbitrary: the pool has to
-    # finish the messages it accepted before the engine those messages are writing through closes,
-    # and before the sender those messages are replying through closes its connections. That order
-    # lives in `_shutdown` above, which `create_app` runs from the application's lifespan.
+    # so a test can reach the queue to drain it. Shutdown order is not arbitrary: the queue has to
+    # finish (or, for Redis, hand off) the messages it accepted before the engine those messages
+    # are writing through closes, and before the sender those messages are replying through closes
+    # its connections. That order lives in `_shutdown` above, which `create_app` runs from the
+    # application's lifespan.
     app.state.database = database
     app.state.queue = queue
     app.state.sender = sender

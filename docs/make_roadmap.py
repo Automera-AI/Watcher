@@ -1,14 +1,15 @@
 """Generate the Watcher v2 roadmap PDF: urgency, ease, effort, per work item.
 
-**v2.9 — 16 August 2026.** This generator is the single source of the roadmap PDF. Edit this file
+**v2.10 — 22 August 2026.** This generator is the single source of the roadmap PDF. Edit this file
 and re-run it rather than producing another version by hand; v2.2 flagged that three roadmap
 artifacts disagreed, and regenerating from here is what keeps that closed.
 
 **A note on how v2.9 came to be, because it is the risk this file exists to prevent.** The v2.8
 PDF circulated while its generator stayed on a laptop, so the repository's copy of this file was
-still v2.5 and could not reproduce the document anyone was reading. v2.9 re-derives v2.8's content
-from the PDF itself and folds session 9 into it, so generator and artifact agree again. Do not let
-them drift a second time: if you edit the PDF, you have created a version this file cannot make.
+still v2.5 and could not reproduce the document anyone was reading. v2.9 re-derived v2.8's content
+from the PDF itself and folded session 9 into it, so generator and artifact agreed again. v2.10
+folds in session 10 (B5) the ordinary way — this file changed, then ran. Do not let the two drift a
+second time: if you edit the PDF, you have created a version this file cannot make.
 
     python docs/make_roadmap.py     # needs reportlab
 """
@@ -30,9 +31,9 @@ from reportlab.platypus import (
 )
 
 OUT = "/home/user/Watcher/docs/Watcher_v2_Roadmap.pdf"
-VERSION = "v2.9"
-DATED = "16 August 2026"
-STAMP = "2026-08-16"
+VERSION = "v2.10"
+DATED = "22 August 2026"
+STAMP = "2026-08-22"
 
 INK = colors.HexColor("#12171f")
 MUTED = colors.HexColor("#5b6675")
@@ -175,24 +176,24 @@ story.append(Paragraph("Watcher v2 &mdash; Build Roadmap", H1))
 story.append(Paragraph(
     "From a message&nbsp;filer to a receptionist. Every item scored for urgency and ease. "
     f"&nbsp;&bull;&nbsp; <b>{VERSION}</b> &nbsp;&bull;&nbsp; {DATED} &nbsp;&bull;&nbsp; "
-    "supersedes the v2.8 PDF of the same date", LEAD))
+    "supersedes the v2.9 PDF of 16 August 2026", LEAD))
 story.append(Spacer(1, 10))
 
 story.append(banner(
-    "<b>What this revision does.</b> v2.8 put the critical path at <b>G3 to make it safe, B4 to "
-    "expose it, and 2.4</b>. Session&nbsp;9 built the first of those. <b>The receptionist can now "
-    "tell an emergency from a maintenance request</b>: the six triggers intents.yaml has declared "
-    "since item&nbsp;0.3 are read, matched before the classifier rather than after it, answered "
-    "immediately in both languages, and escalated to a named operator &mdash; and the one gap that "
-    "remains, that the vocabulary asks for a phone call this process cannot place, is reported "
-    "rather than hidden. <b>What stands between here and a real guest is now operational, not "
-    "engineering.</b> "
-    "<b>Remaining: ~32.75 engineering days.</b>"))
+    "<b>What this revision does.</b> v2.9 put the critical path at <b>B4 and 2.4</b>, both "
+    "operational rather than engineering, with B5 sitting off to the side as the one remaining "
+    "engineering item on Track B. Session&nbsp;10 built that one. <b>The durable queue exists</b>: "
+    "an arq/Redis producer and its own worker process, built from the identical wiring the "
+    "in-process pool already used (orchestration/composition.py), so nothing about the pipeline "
+    "changed &mdash; only what survives a restart did. Unset, the API stays on the in-process pool "
+    "it has run on since A4; set REDIS_URL and it becomes a thin producer. <b>What stands between "
+    "here and a real guest is still entirely operational.</b> "
+    "<b>Remaining: ~31.75 engineering days.</b>"))
 
 story.append(Paragraph("Where we stand today", H2))
 story.append(two_col(
     "Built and tested", "Missing &mdash; nothing ships without these",
-    "<b>486 passing tests</b>, no DB or network needed<br/>"
+    "<b>499 passing tests</b>, no DB or network needed<br/>"
     "89 source files across 20 modules (131 with tests)<br/>"
     "19 DB tables + 4 migrations, <b>applied to a live database</b><br/>"
     "Every external system behind a swappable seam<br/>"
@@ -211,10 +212,13 @@ story.append(two_col(
     "RLS forced on every table, per-transaction tenant GUC, cross-tenant test (B2)<br/>"
     "Container image; the project installs from pyproject (B3)<br/>"
     "Deployed and serving on Render, Frankfurt (B3)<br/>"
-    f"{NEW}<b>Emergency detection</b> &mdash; the declared triggers matched before the "
-    "classifier, in two scripts and Franco-Arabic (G3)<br/>"
-    f"{NEW}<b>The alert path</b> &mdash; an operator seam, an implementation, and an honest "
-    "report of which channel was used (G3)",
+    "Emergency detection &mdash; the declared triggers matched before the classifier, in two "
+    "scripts and Franco-Arabic (G3)<br/>"
+    "The alert path &mdash; an operator seam, an implementation, and an honest report of which "
+    "channel was used (G3)<br/>"
+    f"{NEW}<b>Durable queue</b> &mdash; an arq/Redis producer and worker process, built from the "
+    "same wiring the in-process pool uses, so a deploy no longer loses in-flight classifications "
+    "when REDIS_URL is set (B5)",
 
     f'{done("No DB connection &mdash; done (A2)")}<br/>'
     f'{done("No entrypoint &mdash; done (A4)")}<br/>'
@@ -248,50 +252,54 @@ story.append(two_col(
 story.append(PageBreak())
 
 # ---------------------------------------------------------------- page 2
-story.append(Paragraph("What changed in this revision (v2.8 &rarr; v2.9)", H2))
+story.append(Paragraph("What changed in this revision (v2.9 &rarr; v2.10)", H2))
 story.append(two_col(
     "Delivered", "Consequences",
-    "<b>G3 delivered</b> &mdash; 1.5 engineering days. "
-    "Total 34.25&nbsp;&rarr;&nbsp;<b>32.75</b><br/>"
-    "<b>Track G: 5.5&nbsp;&rarr;&nbsp;4.0 days</b>, and nothing left in it is on the critical "
-    "path<br/>"
-    "Tests 417 &rarr; <b>486</b> (+69). The detector is parametrised over intents.yaml itself, so "
-    "a trigger that is added and not matchable fails the build<br/>"
-    "<b>The check runs before the classifier</b> &mdash; after the media pipeline, so a "
-    "transcribed voice note is covered, and before the model, so nothing about it depends on a "
-    "network call succeeding<br/>"
-    "A new per-tenant timezone, validated at startup, because one trigger fires only at night and "
-    "night is the guest's clock",
+    "<b>B5 delivered</b> &mdash; 1.0 engineering day. "
+    "Total 32.75&nbsp;&rarr;&nbsp;<b>31.75</b><br/>"
+    "<b>Track B: 1.5&nbsp;&rarr;&nbsp;0.5 days</b>, and the one day left in it (B4) is entirely "
+    "operational<br/>"
+    "Tests 486 &rarr; <b>499</b> (+13)<br/>"
+    "<b>The seam did the job it was built for.</b> orchestration/queue.py already had three "
+    "in-process transports behind one ClassificationQueue Protocol; the fourth is "
+    "RedisClassificationQueue, and ingestion did not change at all<br/>"
+    "<b>One wiring, two processes.</b> orchestration/composition.py builds the orchestrator, "
+    "sender and alerter exactly once; main.py calls it for the in-process fallback, "
+    "apps/api/worker.py calls it for the arq worker, so a collaborator added to one can no longer "
+    "go silently missing from the other<br/>"
+    "REDIS_URL unset is a mode, not a degraded state &mdash; the API stays a full pipeline on the "
+    "in-process pool; set, it becomes a thin producer with no sender, alerter or DB repos of its "
+    "own",
 
-    "<b>M1 is now ~2.5 days and both of them are operational</b> &mdash; a webhook subscription "
-    "and a knowledge base, not a safety gap<br/>"
-    "<b>An emergency is never classified.</b> No intent, no confidence, no classifications row "
-    "&mdash; the vocabulary's instruction is to stop being useful at the safety line, and a row "
-    "claiming a model judged the message would be a fiction the control page then displays<br/>"
-    "<b>CONTROL_CHAT_PHONE_E164 is now a safety variable</b>, not a convenience. It joins the "
-    "send credentials on the list of things a deploy a guest can reach must have<br/>"
-    "<b>The trigger list is the operator's to widen</b> and it is narrower than it reads. That is "
-    "asserted in the suite rather than left to be discovered<br/>"
+    "<b>Nothing about M1 moved.</b> B5 was never on the critical path to a first safe answer "
+    "&mdash; it sits under Track B's remaining 0.5 day for the same reason B1&ndash;B3 do<br/>"
+    "<b>Two new Render resources, not provisioned this session.</b> A worker process and a Redis "
+    "instance are both required before REDIS_URL means anything in production; deploying them was "
+    "deliberately left to the operator (billing decision) &mdash; see the B4 checklist, which now "
+    "also names them<br/>"
+    "<b>The concurrent-message race is still open.</b> A durable queue is not an ordering "
+    "guarantee: two turns in one thread can still be picked up by two workers at once. See page "
+    "11<br/>"
     "Unchanged: 2.4 is still the last item before a demo; 3.1 still blocked on P1; the scope "
     "guard still holds &mdash; no PDF handbook ingestion"))
 
 story.append(Spacer(1, 10))
 story.append(Paragraph(
-    "<b>Totals:</b> ~32.75 engineering days remaining. At the observed 2&ndash;3 engineering days "
+    "<b>Totals:</b> ~31.75 engineering days remaining. At the observed 2&ndash;3 engineering days "
     "per working session that is <b>11&ndash;16 sessions</b>; at the six-day week these estimates "
-    "assume, ~5.5 weeks of pure build &mdash; so plan <b>~7 weeks to sellable</b> and "
-    "<b>~2.5 days to a real number that answers safely</b>. The critical path is now "
-    "<b>B4 to expose it and 2.4 to give it something to say</b> &mdash; and neither of them is "
-    "the reason to hold a pilot back any more.",
+    "assume, ~5.3 weeks of pure build &mdash; so plan <b>~7 weeks to sellable</b> and "
+    "<b>~2.5 days to a real number that answers safely</b>. The critical path is unchanged from "
+    "v2.9: <b>B4 to expose it and 2.4 to give it something to say</b> &mdash; B5 was never on it.",
     BODY))
 
 story.append(Spacer(1, 8))
 story.append(banner(
-    "<b>What G3 changed about the shape of the risk.</b> Before it, every remaining item was a "
-    "feature and one of them was a hazard: the system answered confidently about maintenance when "
-    "a guest reported a gas leak. That is closed. What is left in front of a pilot is a "
-    "subscription in Meta, two credentials, an operator's phone number, and a paid instance "
-    "&mdash; a checklist rather than a build.",
+    "<b>What B5 changed about the shape of the risk.</b> Before it, a Render redeploy silently "
+    "dropped whatever was mid-classification &mdash; a message already answered a guest would "
+    "never see re-asked, but its record could sit unclassified until someone noticed. That risk "
+    "now has an off switch: set REDIS_URL and a deploy stops being able to lose it. What is left "
+    "in front of a pilot is unchanged from v2.9 &mdash; a subscription in Meta, two credentials, "
+    "an operator's phone number, and a paid instance.",
     DONE_GREEN))
 
 story.append(PageBreak())
@@ -344,8 +352,8 @@ story.append(PageBreak())
 # ---------------------------------------------------------------- page 4
 story.extend(section(
     "Track B &mdash; Host it. &nbsp;[Supabase + Render]",
-    "Stack locked 15 August 2026. B2 landed before a second client exists. B4 grew one "
-    "precondition this session &mdash; see its note.",
+    "Stack locked 15 August 2026. B2 landed before a second client exists. B5 is now the "
+    "seam it was designed to be; what remains on this track is entirely operational.",
     [
         ("B1", "Supabase project and migrations", "DONE", "Easy", "0",
          "<b>DONE</b> &mdash; watcher-prod in eu-central-1, migrations applied and stamped, one "
@@ -364,13 +372,20 @@ story.extend(section(
          "/webhook with Meta's three hub.* parameters echoes the challenge. No custom domain is "
          "needed (Render's TLS on *.onrender.com satisfies Meta; the URL is machine-facing). What "
          "remains: the subscription in Meta, the real phone-number id in channel_configs, "
-         "<b>CONTROL_CHAT_PHONE_E164 so an emergency reaches a person (new, G3)</b>, and a paid "
-         "instance &mdash; the free one sleeps after ~15 minutes and a 30&ndash;60s cold start "
-         "reads to Meta as a timeout"),
-        ("B5", "Durable queue (Redis + arq)", "MED", "Moderate", "1.0",
-         "<b>NOT BUILT</b> &mdash; the in-process worker pool A4 ships loses in-flight "
-         "classifications on every deploy. Persist-before-enqueue means a message is never lost, "
-         "only its classification. Same seam, same consumer"),
+         "CONTROL_CHAT_PHONE_E164 so an emergency reaches a person (G3), and a paid instance "
+         "&mdash; the free one sleeps after ~15 minutes and a 30&ndash;60s cold start reads to "
+         "Meta as a timeout. <b>Turning REDIS_URL on (B5) is a separate decision</b>, not a "
+         "precondition of this one &mdash; it needs its own Render worker service and Redis "
+         "instance, each its own line item, not bundled into the API's plan"),
+        ("B5", "Durable queue (Redis + arq)", "DONE", "Moderate", "0",
+         "<b>DONE</b> &mdash; RedisClassificationQueue (orchestration/queue.py) is the fourth "
+         "transport behind the existing ClassificationQueue seam; apps/api/worker.py is its "
+         "consumer, run as its own process (<font name='Courier'>arq apps.api.worker."
+         "WorkerSettings</font>) over the identical wiring orchestration/composition.py now "
+         "shares with the in-process fallback. REDIS_URL unset keeps the API on the pool it has "
+         "run on since A4 &mdash; this is a mode switch, not a migration. Not yet deployed: no "
+         "worker service or Redis instance exists in Render yet, and that provisioning is billing, "
+         "left to the operator"),
     ]))
 
 story.append(Spacer(1, 10))
@@ -628,8 +643,8 @@ story.append(notes_table([
 
 story.append(Paragraph("How the total reconciles", H2))
 story.append(Paragraph(
-    "A 0 + B 1.5 + D 13.75 + E 4.5 + G 4.0 + (2.4, 2.7, 2.8) 3.5 + (3.1, 3.2, 3.3) 5.5 = "
-    "<b>32.75</b>", BODY))
+    "A 0 + B 0.5 + D 13.75 + E 4.5 + G 4.0 + (2.4, 2.7, 2.8) 3.5 + (3.1, 3.2, 3.3) 5.5 = "
+    "<b>31.75</b>", BODY))
 story.append(Spacer(1, 4))
 story.append(Paragraph(
     "Rows 2.1 and 2.2 show &ldquo;spent&rdquo; rather than a number because their days are already "
@@ -685,7 +700,7 @@ story.append(PageBreak())
 
 # ---------------------------------------------------------------- page 11
 story.append(Paragraph("What would actually move these dates", H2))
-story.append(Paragraph("The risks v2.3 named, re-scored against what session 9 learned.", SUBT))
+story.append(Paragraph("The risks v2.3 named, re-scored against what session 10 learned.", SUBT))
 story.append(Spacer(1, 5))
 story.append(notes_table([
     ("A receptionist that answers but cannot recognise an emergency",
@@ -734,10 +749,10 @@ story.append(notes_table([
      "had no source. v2.9 re-derives v2.8 and folds session 9 into it. The rule stands: edit "
      "docs/make_roadmap.py and re-run it; never hand-edit the PDF"),
     ("Two messages arriving at once",
-     "Unchanged and bounded. Two turns in one thread classified concurrently can race and open two "
-     "conversations. Ordering is the queue's job and the queue is an in-process pool until "
-     "<b>B5</b>. Recorded rather than papered over with a lock that would not survive a second "
-     "process"),
+     "<b>STILL OPEN, and B5 does not close it.</b> Two turns in one thread classified concurrently "
+     "can still race and open two conversations. B5 made the queue durable, not ordered &mdash; "
+     "arq gives no per-key ordering across its workers any more than the in-process pool did. "
+     "Recorded rather than papered over with a lock that would not survive a second process"),
 ], first_col=132))
 
 story.append(Spacer(1, 10))
@@ -797,15 +812,26 @@ log = Table([
                "known; the container image, whose first build exposed a missing package data file "
                "and a removed Starlette API; deployed to Render, Frankfurt, and serving", NOTE),
      Paragraph("406 &rarr; 417", NOTE), Paragraph("2.75", CELL)],
-    [Paragraph("9", CELLB),
-     Paragraph("<b>PR #21 &mdash; item G3.</b> The emergency path: a detector over the declared "
+    [Paragraph("9", CELL),
+     Paragraph("PR #21 &mdash; item G3. The emergency path: a detector over the declared "
                "triggers, matched in Arabic, Latin and Franco-Arabic and placed before the "
                "classifier; an immediate bilingual reply; an operator alert on a seam in the core "
                "with its implementation in channels/, reporting which channel it used because the "
                "vocabulary asks for a phone call nothing wired can place; a per-tenant timezone "
                "for the one trigger with a clock, validated at startup. An emergency is never "
-               "classified. Decisions D30&ndash;D34", NOTE),
-     Paragraph("<b>417 &rarr; 486</b>", NOTE), Paragraph("<b>1.5</b>", CELLB)],
+               "classified. Decisions D30&ndash;D34. Also PR #23: the CD image job's GHCR tag was "
+               "invalid (capital letters in an OCI repo name) on every run since B3; fixed", NOTE),
+     Paragraph("417 &rarr; 486", NOTE), Paragraph("1.5", CELL)],
+    [Paragraph("10", CELLB),
+     Paragraph("<b>Item B5.</b> RedisClassificationQueue, the fourth transport behind the "
+               "existing ClassificationQueue seam, and apps/api/worker.py, its own arq worker "
+               "process. Wiring shared to a new module (orchestration/composition.py) so the "
+               "in-process fallback and the worker build the identical orchestrator rather than "
+               "two copies drifting apart. REDIS_URL unset changes nothing; set, the API sheds its "
+               "sender, alerter and DB repos and becomes a thin producer. Not deployed &mdash; the "
+               "worker service and the Redis instance are new Render resources, left to the "
+               "operator as a billing decision", NOTE),
+     Paragraph("<b>486 &rarr; 499</b>", NOTE), Paragraph("<b>1.0</b>", CELLB)],
 ], colWidths=[44, 296, 68, 48], hAlign="LEFT")
 log.setStyle(TableStyle([
     ("BACKGROUND", (0, 0), (-1, 0), BAND),
@@ -820,7 +846,7 @@ log.setStyle(TableStyle([
 story.append(log)
 story.append(Spacer(1, 6))
 story.append(Paragraph(
-    "<b>Cumulative: 19.5 engineering days delivered. ~32.75 remaining.</b> Nine sessions, and the "
+    "<b>Cumulative: 20.5 engineering days delivered. ~31.75 remaining.</b> Ten sessions, and the "
     "observed rate holds at 2&ndash;3 days each.", SMALL))
 
 

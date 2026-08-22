@@ -100,6 +100,17 @@ def test_an_unresolvable_timezone_fails_at_startup(_settings: SettingsFactory) -
         _settings(TENANT_TIMEZONE="Asia/Dubay")
 
 
+def test_redis_dsn_is_none_rather_than_an_error_when_unset(_settings: SettingsFactory) -> None:
+    """B5: absence is a mode (stay on the in-process queue), not a misconfiguration."""
+    assert _settings().redis_dsn() is None
+
+
+def test_redis_dsn_unwraps_the_secret(_settings: SettingsFactory) -> None:
+    settings = _settings(REDIS_URL="redis://user:pw@host:6379/0")
+    assert settings.redis_dsn() == "redis://user:pw@host:6379/0"
+    assert "pw" not in repr(settings)
+
+
 def test_angle_bracket_placeholder_reads_as_unset(_settings: SettingsFactory) -> None:
     settings = _settings(ANTHROPIC_API_KEY="<ANTHROPIC_API_KEY>", META_APP_ID="<META_APP_ID>")
 
