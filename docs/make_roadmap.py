@@ -1,6 +1,6 @@
 """Generate the Watcher v2 roadmap PDF: urgency, ease, effort, per work item.
 
-**v2.10 — 22 August 2026.** This generator is the single source of the roadmap PDF. Edit this file
+**v2.11 — 22 August 2026.** This generator is the single source of the roadmap PDF. Edit this file
 and re-run it rather than producing another version by hand; v2.2 flagged that three roadmap
 artifacts disagreed, and regenerating from here is what keeps that closed.
 
@@ -8,8 +8,10 @@ artifacts disagreed, and regenerating from here is what keeps that closed.
 PDF circulated while its generator stayed on a laptop, so the repository's copy of this file was
 still v2.5 and could not reproduce the document anyone was reading. v2.9 re-derived v2.8's content
 from the PDF itself and folded session 9 into it, so generator and artifact agreed again. v2.10
-folds in session 10 (B5) the ordinary way — this file changed, then ran. Do not let the two drift a
-second time: if you edit the PDF, you have created a version this file cannot make.
+folded in session 10 (B5). v2.11, same session and same day, folds in an operational change with no
+engineering-day cost — the webhook is subscribed and live — and one risk it exposed. Do not let
+generator and PDF drift a second time: if you edit the PDF, you have created a version this file
+cannot make.
 
     python docs/make_roadmap.py     # needs reportlab
 """
@@ -31,7 +33,7 @@ from reportlab.platypus import (
 )
 
 OUT = "/home/user/Watcher/docs/Watcher_v2_Roadmap.pdf"
-VERSION = "v2.10"
+VERSION = "v2.11"
 DATED = "22 August 2026"
 STAMP = "2026-08-22"
 
@@ -176,7 +178,7 @@ story.append(Paragraph("Watcher v2 &mdash; Build Roadmap", H1))
 story.append(Paragraph(
     "From a message&nbsp;filer to a receptionist. Every item scored for urgency and ease. "
     f"&nbsp;&bull;&nbsp; <b>{VERSION}</b> &nbsp;&bull;&nbsp; {DATED} &nbsp;&bull;&nbsp; "
-    "supersedes the v2.9 PDF of 16 August 2026", LEAD))
+    "supersedes the v2.10 PDF of the same date", LEAD))
 story.append(Spacer(1, 10))
 
 story.append(banner(
@@ -189,6 +191,19 @@ story.append(banner(
     "it has run on since A4; set REDIS_URL and it becomes a thin producer. <b>What stands between "
     "here and a real guest is still entirely operational.</b> "
     "<b>Remaining: ~31.75 engineering days.</b>"))
+
+story.append(Spacer(1, 6))
+story.append(banner(
+    "<b>v2.11, same day.</b> The operator subscribed the webhook &mdash; a custom domain "
+    "(webhook.automera.co) live on Render, DNS pointed at it, verified against Meta with no code "
+    "changes needed (the endpoint was already domain-agnostic). <b>Moves no engineering total</b> "
+    "&mdash; this is B4's first checklist item done, not new scope &mdash; but it changes what is "
+    "at stake in the rest of the checklist: Meta can now reach this service for real, and "
+    "<b>channel_configs.external_id is still the placeholder</b>. A real inbound message names the "
+    "actual phone_number_id, that resolves against no enabled row, and ChannelConfigTenantResolver "
+    "raises by design &mdash; every real message until that row is fixed gets a 500, not silence. "
+    "Meta retries, so nothing is unrecoverable, but it is no longer a theoretical risk.",
+    URG["NOW"]))
 
 story.append(Paragraph("Where we stand today", H2))
 story.append(two_col(
@@ -212,6 +227,7 @@ story.append(two_col(
     "RLS forced on every table, per-transaction tenant GUC, cross-tenant test (B2)<br/>"
     "Container image; the project installs from pyproject (B3)<br/>"
     "Deployed and serving on Render, Frankfurt (B3)<br/>"
+    "Webhook subscribed and reachable at webhook.automera.co, verified against Meta (B4, v2.11)<br/>"
     "Emergency detection &mdash; the declared triggers matched before the classifier, in two "
     "scripts and Franco-Arabic (G3)<br/>"
     "The alert path &mdash; an operator seam, an implementation, and an honest report of which "
@@ -241,8 +257,10 @@ story.append(two_col(
     "line of YAML, and it is the operator's line<br/>"
     "The database path is unproven &mdash; SQLAlchemy connects lazily, so the pooler host is "
     "tested by the first message, not by startup<br/>"
-    "<b>No webhook subscription</b> &mdash; nothing routes a guest to it yet, though the "
-    "handshake itself is verified (B4)<br/>"
+    "<b>The placeholder endpoint row</b> &mdash; NEW as the live blocker: the webhook is "
+    "<b>subscribed and reachable</b> (webhook.automera.co, v2.11), so a real message now reaches "
+    "the tenant resolver and finds channel_configs.external_id still a placeholder. One UPDATE "
+    "away, but it is what stands between here and a 500 on a real guest's first message (B4)<br/>"
     "No control page &mdash; one CSS file, no package.json<br/>"
     "No control-page API &mdash; ~25 endpoints, none written<br/>"
     "Knowledge &mdash; zero tables, zero rows<br/>"
@@ -368,11 +386,14 @@ story.extend(section(
          "service is live in Frankfurt on the free plan. Sending is still degraded until "
          "WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID are set"),
         ("B4", "Webhook subscription and a warm instance", "NOW", "Easy", "0.5",
-         "<b>PART-VERIFIED</b> &mdash; the handshake is proven against the live service: GET "
-         "/webhook with Meta's three hub.* parameters echoes the challenge. No custom domain is "
-         "needed (Render's TLS on *.onrender.com satisfies Meta; the URL is machine-facing). What "
-         "remains: the subscription in Meta, the real phone-number id in channel_configs, "
-         "CONTROL_CHAT_PHONE_E164 so an emergency reaches a person (G3), and a paid instance "
+         "<b>SUBSCRIBED (v2.11)</b> &mdash; the operator put a custom domain (webhook.automera.co) "
+         "on Render, pointed DNS at it, and Meta's subscription verified against it with no code "
+         "change needed; a custom domain was never required for this (Render's TLS on "
+         "*.onrender.com already satisfied Meta) but is what got used. <b>What remains, in order "
+         "of what breaks first:</b> the real phone-number id in channel_configs &mdash; without it "
+         "a real message 500s at the tenant resolver, today, now that Meta can reach this service; "
+         "the two send credentials, so a reply is delivered rather than only composed; "
+         "CONTROL_CHAT_PHONE_E164 so an emergency reaches a person (G3); and a paid instance "
          "&mdash; the free one sleeps after ~15 minutes and a 30&ndash;60s cold start reads to "
          "Meta as a timeout. <b>Turning REDIS_URL on (B5) is a separate decision</b>, not a "
          "precondition of this one &mdash; it needs its own Render worker service and Redis "
@@ -757,11 +778,14 @@ story.append(notes_table([
 
 story.append(Spacer(1, 10))
 story.append(banner(
-    "<b>If you do only one thing next session: B4.</b> Not D, and not G1. The receptionist "
-    "answers, it is deployed, and as of this session it knows when to stop answering and fetch a "
-    "person &mdash; to a number nobody can message yet. B4 is half a day and a checklist: the "
-    "subscription in Meta, the real phone-number id in channel_configs, the two send credentials, "
-    "the operator's number, and a paid instance so a cold start does not read to Meta as a "
+    "<b>If you do only one thing next session: the channel_configs row.</b> Not D, not G1, and "
+    "as of v2.11 not even the rest of B4 first. The webhook is subscribed and Meta can reach this "
+    "service right now &mdash; the one thing standing between that and a real guest's first "
+    "message being silently 500'd is a single UPDATE replacing the placeholder external_id with "
+    "the real phone-number id. Everything else on B4 degrades gracefully (no reply sent, no "
+    "alert reached); this one does not process the message at all. Then the rest of the "
+    "checklist: the two send credentials, the operator's number, and a paid instance so a cold "
+    "start does not read to Meta as a "
     "timeout. Then 2.4, so it has something to say. <b>And before any of it, spend thirty minutes "
     "widening the emergency trigger phrases</b> &mdash; it is the operator's edit, it changes no "
     "code, and it is the cheapest safety on the board.",

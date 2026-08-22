@@ -6,11 +6,13 @@
 **`main` is at:** `6affc37` as of this session's start — PRs #20 (B1+B2+B3), #21 (G3), #22 (docs)
 and #23 (CD fix) are all on `main`. This session's commits are B5, on top of that.
 **Deployed:** https://watcher-api-lup7.onrender.com — live, serving from `6affc37` (this session's
-work is not deployed; see §4)
-**Start at §2 for status, §8 for what to do first.**
+B5 work is not deployed; see §4). **Also reachable as `https://webhook.automera.co`** — a custom
+domain the operator put in front of the same Render service and subscribed with Meta, same day,
+after B5 shipped. No code change was needed or made for this.
+**Start at §2 for status, §8 for what to do first — §8 changed shape today, read it before acting.**
 
 Purpose: let a new session pick up without re-deriving anything. Companion documents are
-`docs/Watcher_v2_Roadmap.pdf` (**v2.10**) and the five specs in `docs/specs/` — why the code is
+`docs/Watcher_v2_Roadmap.pdf` (**v2.11**) and the five specs in `docs/specs/` — why the code is
 shaped the way it is.
 
 **This file was stale before this session started, independent of anything B5 touches.** The copy
@@ -35,6 +37,8 @@ Measured by running it, not read off a document.
 | Recorded baseline | **88%** intent accuracy, gate passing — still v2's number, unchanged this session (see §5) |
 | Database | live — Supabase `watcher-prod`, `qjpjxspycuafqqgudsiv`, eu-central-1, PG 17 (unchanged) |
 | Service | live — Render `watcher-api`, `srv-da0a81jl550s73d0b1i0`, **plan: `free`** (confirmed via the Render MCP this session — still the B4 cold-start blocker) |
+| **Webhook** | **subscribed and live** — `webhook.automera.co`, custom domain on Render, DNS pointed, Meta verification confirmed by the operator. Not tested by this session directly (outbound to it is blocked from this sandbox by org egress policy) |
+| **`channel_configs.external_id`** | **still the placeholder** — `PLACEHOLDER_WHATSAPP_PHONE_NUMBER_ID`. With the webhook now live this is an active bug, not a future one: see §3 |
 | Redis / worker | **not provisioned** — no Key Value instance, no worker service exist in this Render workspace yet |
 | Python | 3.13 |
 
@@ -102,6 +106,35 @@ pool (no real Redis needed for any test) and is safe to turn on the moment both 
 **Roadmap regenerated.** `docs/make_roadmap.py` → **v2.10**: B5 moved to DONE, Track B 1.5d → 0.5d,
 total 32.75d → **31.75d**. M1 is unaffected — B5 was never on the path to a first safe answer.
 
+### Part two: the webhook went live, same day, no code involved
+
+Right after B5 shipped, the operator put a custom domain (`webhook.automera.co`) on the
+`watcher-api` Render service, pointed DNS at it, and completed the Meta webhook subscription —
+verified working. Asked whether the FastAPI endpoint needed anything for this: it did not.
+`ingestion/router.py` has no host/domain logic, no `TrustedHostMiddleware` is wired, and
+`ingestion/security.py`'s signature check is over the raw body and `META_APP_SECRET` only — the
+endpoint was already domain-agnostic. Confirmed by code review, not by hitting the live URL: this
+session's outbound network is policy-blocked from reaching both `webhook.automera.co` and the
+existing `onrender.com` URL (confirmed via the proxy status endpoint, not a retry-able failure).
+
+**What this actually changes: not scope, but stakes.** B4's remaining checklist items didn't
+shrink by much (one of four sub-items — "subscribe it" — is now done), but the risk profile of the
+*other* three inverted. Before today they were latent: nothing could reach the service to expose
+them. Now Meta can, for real, at any moment. Read through `db/tenant_resolver.py`:
+`ChannelConfigTenantResolver.__call__` raises `UnknownEndpoint` when no enabled `channel_configs`
+row matches the inbound `phone_number_id`, and nothing in `ingestion/router.py` catches it — it
+propagates to an unhandled exception, which FastAPI turns into a 500. Since
+`channel_configs.external_id` is still `PLACEHOLDER_WHATSAPP_PHONE_NUMBER_ID`, **every real
+message Meta delivers right now will 500 at the tenant resolver, before persistence, before
+anything else runs.** Meta retries on a 500, so nothing is unrecoverable and no message is silently
+dropped forever — but nothing gets processed either, and it will keep failing on every retry until
+the row is fixed. This is now the single highest-priority item on the board — see §4.
+
+**Roadmap updated again, same day.** `docs/make_roadmap.py` → **v2.11**: no engineering-day change
+(this was operational, not a build item), but the webhook line moved from "missing" to "built," the
+placeholder risk moved from a background note to the page-1 banner, and B4's checklist was
+reordered to put the placeholder fix first.
+
 ### Decisions made this session
 
 | Decision | Choice | Where it lives |
@@ -113,6 +146,14 @@ total 32.75d → **31.75d**. M1 is unaffected — B5 was never on the path to a 
 ---
 
 ## 3. Traps and things not to re-litigate
+
+- **URGENT — real inbound messages 500 right now.** The webhook is live (`webhook.automera.co`)
+  but `channel_configs.external_id` is still the placeholder. `ChannelConfigTenantResolver` raises
+  `UnknownEndpoint` for an unrecognized `phone_number_id`, `ingestion/router.py` does not catch it,
+  and FastAPI turns that into a 500. This was always true; what changed today is that Meta can now
+  actually trigger it. Fix: one `UPDATE channel_configs SET external_id = '<real phone_number_id>'
+  WHERE external_id = 'PLACEHOLDER_WHATSAPP_PHONE_NUMBER_ID'`. Do this before anyone messages the
+  number, not after.
 
 Everything in session 9's list still holds (narrow `intents.yaml` triggers, `CONTROL_CHAT_PHONE_E164`
 as a safety variable, `DATABASE_URL` must name `watcher_app` not `postgres`, the transaction-pooler
@@ -146,26 +187,31 @@ measuring the prompt). This session adds:
 
 ---
 
-## 4. What to do first — still B4, now with two more line items
+## 4. What to do first — the placeholder row, before anything else
+
+**0. `channel_configs.external_id` (5 minutes, whoever has DB access).** Not B4's item 1 anymore —
+it is its own, ahead of everything, because it is the only item on this list where the failure mode
+is "does not process the message" rather than "processes it but degrades." See §3. Do this first,
+full stop, even before the trigger-phrase edit below.
 
 **The trigger phrases (30 minutes, operator).** Unchanged from session 9. Still the cheapest safety
 work on the board; still not done.
 
-**B4 — the webhook subscription (0.5d).** Unchanged from session 9's checklist, plus B5 is now a
-separate, optional decision layered on top rather than a precondition:
+**B4 — the rest of the checklist (~0.4d now that the subscription itself is done).**
 
-1. The real phone-number id in `channel_configs.external_id`.
-2. Send credentials — `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`.
-3. `CONTROL_CHAT_PHONE_E164`.
-4. Upgrade `watcher-api` off the free Render plan (confirmed still `free` this session).
+1. Send credentials — `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID` — so a reply is
+   delivered rather than only composed and recorded.
+2. `CONTROL_CHAT_PHONE_E164` — so an emergency reaches a person, not only a log line.
+3. Upgrade `watcher-api` off the free Render plan (confirmed still `free` this session) — the
+   cold-start-as-timeout risk is now live traffic risk, not a hypothetical one.
 
 **B5 — turning the durable queue on (optional, separate billing decision).** The code is done and
 merged; deploying it needs:
 
-5. A Redis/Key Value instance on Render (free/ephemeral tier is fine to start).
-6. A worker service on Render running `arq apps.api.worker.WorkerSettings` (Starter tier — no free
+1. A Redis/Key Value instance on Render (free/ephemeral tier is fine to start).
+2. A worker service on Render running `arq apps.api.worker.WorkerSettings` (Starter tier — no free
    tier for background workers).
-7. `REDIS_URL` set on **both** the API service and the worker service, pointing at the same Redis
+3. `REDIS_URL` set on **both** the API service and the worker service, pointing at the same Redis
    instance.
 
 This session's user explicitly deferred provisioning all of the above (both B4's Render upgrade and
@@ -204,11 +250,12 @@ Unchanged from sessions 5–9. Not touched this session.
 | CD — image build + push | `.github/workflows/cd.yml` (unchanged this session) |
 | CI — dependency install list | `.github/workflows/ci.yml` (added `arq` this session) |
 | Locked decisions | `docs/DECISIONS.md` (D35–D36 are this session's) |
-| The roadmap | `docs/make_roadmap.py` → `docs/Watcher_v2_Roadmap.pdf` (**v2.10**) |
+| The roadmap | `docs/make_roadmap.py` → `docs/Watcher_v2_Roadmap.pdf` (**v2.11**) |
+| Tenant resolution (relevant to §3's urgent item) | `apps/api/db/tenant_resolver.py` — `ChannelConfigTenantResolver` |
 
 ---
 
-## 7. Roadmap status against v2.10
+## 7. Roadmap status against v2.11 (no day totals moved since v2.10 — see §2 part two)
 
 | Track | Remaining | Note |
 |---|---|---|
@@ -229,13 +276,18 @@ there's a real guest to lose.
 
 ## 8. First five minutes of the next session
 
-1. Check whether this session's branch (`claude/session-handoff-demo-timeline-goqvbe`) has been
+1. **Check whether `channel_configs.external_id` still reads the placeholder.** If it does, and
+   the webhook has been live and reachable since this session, real messages have been 500ing the
+   whole time — check Render's logs for `UnknownEndpoint` before doing anything else, and fix the
+   row immediately. This is the one item that can't wait for the rest of this list.
+2. Check whether this session's branch (`claude/session-handoff-demo-timeline-goqvbe`) has been
    merged. If yes, branch from `main` normally. If not, either continue it or ask before branching
    from `main` and leaving it stranded.
-2. Rebuild the venv from §1 and confirm **499 passed, 2 skipped**.
-3. Read §3, particularly: `REDIS_URL` unset is a mode not a bug, B5 needs two *separate* new Render
-   resources (not bundled into any existing plan), and B5 does not solve message ordering.
-4. Check whether the operator has done any of §4's checklist (Render plan, worker service, Redis
-   instance, WhatsApp credentials, `CONTROL_CHAT_PHONE_E164`) — none of it was done as of this
-   session's end, all of it was explicitly left to them.
-5. Do the operator's `intents.yaml` edit if nobody has, then B4.
+3. Rebuild the venv from §1 and confirm **499 passed, 2 skipped**.
+4. Read §3, particularly the urgent item above, plus: `REDIS_URL` unset is a mode not a bug, B5
+   needs two *separate* new Render resources (not bundled into any existing plan), and B5 does not
+   solve message ordering.
+5. Check whether the operator has done the rest of §4's checklist (send credentials,
+   `CONTROL_CHAT_PHONE_E164`, the Render plan upgrade) — none of it was done as of this session's
+   end, all of it was explicitly left to them.
+6. Do the operator's `intents.yaml` edit if nobody has, then the rest of B4.
