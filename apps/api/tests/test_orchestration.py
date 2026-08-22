@@ -13,12 +13,16 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+import pytest
+
 from apps.api.audit.log import AuditEntry
 from apps.api.classifier.service import Classifier
 from apps.api.conversations.receptionist import handle as receptionist_handle
 from apps.api.conversations.task import Task, TaskStatus
+from apps.api.conversations.tools import REGISTRY, AnswerFromKnowledge
 from apps.api.core.alerts import AlertOutcome, EmergencyAlert
 from apps.api.core.emergency import EMERGENCY_REPLY
+from apps.api.core.knowledge import Fact
 from apps.api.identity.models import CrmRecord
 from apps.api.identity.resolver import IncomingContact
 from apps.api.orchestration.ports import (
@@ -135,6 +139,17 @@ class _FakeSender:
 
     def close(self) -> None:
         return None
+
+
+class _FakeKnowledge:
+    """A knowledge base with exactly one fact, for tests that need ``property_question`` to
+    resolve to an actual answer rather than a hand-off (roadmap 2.4)."""
+
+    def __init__(self, question: str, answer: str = "Yes.") -> None:
+        self._fact = Fact(id="1", topic="test", question=question, answer=answer, sensitive=False)
+
+    def search(self, tenant_id: str) -> list[Fact]:
+        return [self._fact]
 
 
 def _message(text: str = "Need a quote") -> MessageEnvelope:
@@ -341,7 +356,10 @@ def _converse(orch: Orchestrator, text: str = "Need a quote") -> ProcessOutcome:
     return asyncio.run(orch.process(TENANT_UUID, MSG_ID, _message(text)))
 
 
-def test_acting_intent_returns_receptionist_reply() -> None:
+def test_acting_intent_returns_receptionist_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(
+        REGISTRY, "answer_from_knowledge", AnswerFromKnowledge(_FakeKnowledge("Need a quote"))
+    )
     orch, audit, _inbox, store = _conversing("property_question", 0.95)
     outcome = _converse(orch)
     assert outcome.action is RoutingAction.RECEPTIONIST_REPLY
@@ -606,8 +624,15 @@ def test_the_job_in_flight_is_left_alone() -> None:
     assert store.replies[0].text == EMERGENCY_REPLY  # the emergency reply is in the transcript
 
 
-def test_an_ordinary_message_still_takes_the_ordinary_path() -> None:
+def test_an_ordinary_message_still_takes_the_ordinary_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The guard against the interesting failure: a detector that fires on everything."""
+    monkeypatch.setitem(
+        REGISTRY,
+        "answer_from_knowledge",
+        AnswerFromKnowledge(_FakeKnowledge("Is there a fireplace in the living room?")),
+    )
     alerter = _FakeAlerter()
     orch, _audit, _inbox, _store = _conversing("property_question", 0.95, alerter=alerter)
 

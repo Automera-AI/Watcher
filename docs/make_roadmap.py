@@ -1,14 +1,13 @@
 """Generate the Watcher v2 roadmap PDF: urgency, ease, effort, per work item.
 
-**v2.9 — 16 August 2026.** This generator is the single source of the roadmap PDF. Edit this file
-and re-run it rather than producing another version by hand; v2.2 flagged that three roadmap
+**v2.10 — 22 August 2026.** This generator is the single source of the roadmap PDF. Edit this
+file and re-run it rather than producing another version by hand; v2.2 flagged that three roadmap
 artifacts disagreed, and regenerating from here is what keeps that closed.
 
-**A note on how v2.9 came to be, because it is the risk this file exists to prevent.** The v2.8
-PDF circulated while its generator stayed on a laptop, so the repository's copy of this file was
-still v2.5 and could not reproduce the document anyone was reading. v2.9 re-derives v2.8's content
-from the PDF itself and folds session 9 into it, so generator and artifact agree again. Do not let
-them drift a second time: if you edit the PDF, you have created a version this file cannot make.
+**Scope note.** This revision folds in item 2.4 (the knowledge base), built on top of v2.9's
+state — Track A through G3, no further. A separate, not-yet-merged branch built roadmap item B5
+(the durable queue) from the same base; that work is not reflected here; whoever merges both
+reconciles the two revisions' numbers rather than either one guessing at the other's content.
 
     python docs/make_roadmap.py     # needs reportlab
 """
@@ -30,9 +29,9 @@ from reportlab.platypus import (
 )
 
 OUT = "/home/user/Watcher/docs/Watcher_v2_Roadmap.pdf"
-VERSION = "v2.9"
-DATED = "16 August 2026"
-STAMP = "2026-08-16"
+VERSION = "v2.10"
+DATED = "22 August 2026"
+STAMP = "2026-08-22"
 
 INK = colors.HexColor("#12171f")
 MUTED = colors.HexColor("#5b6675")
@@ -175,24 +174,25 @@ story.append(Paragraph("Watcher v2 &mdash; Build Roadmap", H1))
 story.append(Paragraph(
     "From a message&nbsp;filer to a receptionist. Every item scored for urgency and ease. "
     f"&nbsp;&bull;&nbsp; <b>{VERSION}</b> &nbsp;&bull;&nbsp; {DATED} &nbsp;&bull;&nbsp; "
-    "supersedes the v2.8 PDF of the same date", LEAD))
+    "supersedes v2.9", LEAD))
 story.append(Spacer(1, 10))
 
 story.append(banner(
-    "<b>What this revision does.</b> v2.8 put the critical path at <b>G3 to make it safe, B4 to "
-    "expose it, and 2.4</b>. Session&nbsp;9 built the first of those. <b>The receptionist can now "
-    "tell an emergency from a maintenance request</b>: the six triggers intents.yaml has declared "
-    "since item&nbsp;0.3 are read, matched before the classifier rather than after it, answered "
-    "immediately in both languages, and escalated to a named operator &mdash; and the one gap that "
-    "remains, that the vocabulary asks for a phone call this process cannot place, is reported "
-    "rather than hidden. <b>What stands between here and a real guest is now operational, not "
-    "engineering.</b> "
-    "<b>Remaining: ~32.75 engineering days.</b>"))
+    "<b>What this revision does.</b> v2.9 put the critical path at <b>B4 to expose it and 2.4 to "
+    "give it something to say</b>. This session built the second of those. <b>The receptionist "
+    "can now actually answer a guest</b>: a facts table behind row-level security, fuzzy matching "
+    "over a guest's own words (no slot extraction to lean on &mdash; that is still item 2.x), a "
+    "sensitivity flag a fact can carry and a tool that treats an unverified match to one exactly "
+    "like no match at all, and a real &ldquo;I don't know&rdquo; that fetches a person rather than "
+    "guessing. Tested against a curated, committed export of one real property from the operator's "
+    "own sheet, not synthetic data. <b>What stands between here and a real guest is now entirely "
+    "B4</b>, and B4 is operational, not engineering. "
+    "<b>Remaining: ~30.75 engineering days.</b>"))
 
 story.append(Paragraph("Where we stand today", H2))
 story.append(two_col(
     "Built and tested", "Missing &mdash; nothing ships without these",
-    "<b>486 passing tests</b>, no DB or network needed<br/>"
+    "<b>506 passing tests</b>, no DB or network needed<br/>"
     "89 source files across 20 modules (131 with tests)<br/>"
     "19 DB tables + 4 migrations, <b>applied to a live database</b><br/>"
     "Every external system behind a swappable seam<br/>"
@@ -211,10 +211,13 @@ story.append(two_col(
     "RLS forced on every table, per-transaction tenant GUC, cross-tenant test (B2)<br/>"
     "Container image; the project installs from pyproject (B3)<br/>"
     "Deployed and serving on Render, Frankfurt (B3)<br/>"
-    f"{NEW}<b>Emergency detection</b> &mdash; the declared triggers matched before the "
-    "classifier, in two scripts and Franco-Arabic (G3)<br/>"
-    f"{NEW}<b>The alert path</b> &mdash; an operator seam, an implementation, and an honest "
-    "report of which channel was used (G3)",
+    "Emergency detection &mdash; the declared triggers matched before the classifier, in two "
+    "scripts and Franco-Arabic (G3)<br/>"
+    "The alert path &mdash; an operator seam, an implementation, and an honest report of which "
+    "channel was used (G3)<br/>"
+    f"{NEW}<b>Knowledge base</b> &mdash; a facts table behind RLS, fuzzy-matched against a "
+    "guest's own words, a sensitivity flag a fact can carry, and a real &ldquo;I don't "
+    "know&rdquo; (2.4)",
 
     f'{done("No DB connection &mdash; done (A2)")}<br/>'
     f'{done("No entrypoint &mdash; done (A4)")}<br/>'
@@ -227,6 +230,7 @@ story.append(two_col(
     f'{done("No RLS &mdash; done (B2)")}<br/>'
     f'{done("No Dockerfile &mdash; done (B3)")}<br/>'
     f'{done("No running service &mdash; done (B3)")}<br/>'
+    f'{done("Knowledge: zero tables, zero rows &mdash; done (2.4)")}<br/>'
     "<b>No outbound credentials</b> &mdash; the deployed process warns at startup: it composes "
     "and records replies it cannot deliver<br/>"
     "<b>No operator number</b> &mdash; NEW as a blocker, and the more serious of the two: without "
@@ -241,57 +245,65 @@ story.append(two_col(
     "handshake itself is verified (B4)<br/>"
     "No control page &mdash; one CSS file, no package.json<br/>"
     "No control-page API &mdash; ~25 endpoints, none written<br/>"
-    "Knowledge &mdash; zero tables, zero rows<br/>"
     "Live availability &mdash; no read path to any PMS<br/>"
     "A measured prompt &mdash; the gate replays v2 fixtures, so 88% is not v3's number"))
 
 story.append(PageBreak())
 
 # ---------------------------------------------------------------- page 2
-story.append(Paragraph("What changed in this revision (v2.8 &rarr; v2.9)", H2))
+story.append(Paragraph("What changed in this revision (v2.9 &rarr; v2.10)", H2))
 story.append(two_col(
     "Delivered", "Consequences",
-    "<b>G3 delivered</b> &mdash; 1.5 engineering days. "
-    "Total 34.25&nbsp;&rarr;&nbsp;<b>32.75</b><br/>"
-    "<b>Track G: 5.5&nbsp;&rarr;&nbsp;4.0 days</b>, and nothing left in it is on the critical "
-    "path<br/>"
-    "Tests 417 &rarr; <b>486</b> (+69). The detector is parametrised over intents.yaml itself, so "
-    "a trigger that is added and not matchable fails the build<br/>"
-    "<b>The check runs before the classifier</b> &mdash; after the media pipeline, so a "
-    "transcribed voice note is covered, and before the model, so nothing about it depends on a "
-    "network call succeeding<br/>"
-    "A new per-tenant timezone, validated at startup, because one trigger fires only at night and "
-    "night is the guest's clock",
+    "<b>2.4 delivered</b> &mdash; 2.0 engineering days. "
+    "Total 32.75&nbsp;&rarr;&nbsp;<b>30.75</b><br/>"
+    "<b>Track 2: 3.5&nbsp;&rarr;&nbsp;1.5 days</b>, and 2.4 leaves the board the same way 2.1/2.2 "
+    "did &mdash; &ldquo;spent&rdquo;, not zero<br/>"
+    "Tests 486 &rarr; <b>506</b> (+20). Matching, sensitivity gating and dispatch are covered by "
+    "small fakes; one more file runs the whole path &mdash; JSON export, RLS-scoped DB, real "
+    "repository, real tool, real receptionist &mdash; against a curated, committed export of one "
+    "real property<br/>"
+    "<b>The receptionist actually answers now.</b> Every intent whose terminal_tool is "
+    "answer_from_knowledge used to reach &ldquo;execute&rdquo; and say the same thing &mdash; "
+    "&ldquo;All set! I've noted everything down.&rdquo; &mdash; whether or not that was true. It "
+    "was never looked up anywhere. Every other terminal_tool (roadmap 3.1) keeps that placeholder "
+    "deliberately, rather than being silently widened into a promise this item did not keep<br/>"
+    "A one-off import script turns a property-management export into facts, and a documented "
+    "exclusion: a door code, a key box code or a unit number is left out of the table entirely, "
+    "not marked sensitive &mdash; intents.yaml forbids answer_from_knowledge from ever giving one "
+    "out, verified or not",
 
-    "<b>M1 is now ~2.5 days and both of them are operational</b> &mdash; a webhook subscription "
-    "and a knowledge base, not a safety gap<br/>"
-    "<b>An emergency is never classified.</b> No intent, no confidence, no classifications row "
-    "&mdash; the vocabulary's instruction is to stop being useful at the safety line, and a row "
-    "claiming a model judged the message would be a fiction the control page then displays<br/>"
-    "<b>CONTROL_CHAT_PHONE_E164 is now a safety variable</b>, not a convenience. It joins the "
-    "send credentials on the list of things a deploy a guest can reach must have<br/>"
-    "<b>The trigger list is the operator's to widen</b> and it is narrower than it reads. That is "
-    "asserted in the suite rather than left to be discovered<br/>"
-    "Unchanged: 2.4 is still the last item before a demo; 3.1 still blocked on P1; the scope "
-    "guard still holds &mdash; no PDF handbook ingestion"))
+    "<b>M1 is now B4 alone.</b> The receptionist has something to say; what is left is entirely "
+    "operational<br/>"
+    "<b>A sensitive fact is not yet fully gated &mdash; it is narrowly gated.</b> An unverified "
+    "match to a sensitive fact is refused, the same &ldquo;I don't know&rdquo; as a genuine miss. "
+    "That is one tool refusing to guess, not G1's reply-path-wide disclosure gate, which is still "
+    "open<br/>"
+    "<b>Matching is fuzzy and unmodelled</b>, by design (roadmap G3's ordering argument applies "
+    "here too: a lookup should not depend on a network call succeeding). A real test against the "
+    "operator's own sheet found the first matching attempt confused &ldquo;is there parking?&rdquo; "
+    "with &ldquo;is there a garden&rdquo; &mdash; both scored identically until the scorer stopped "
+    "weighing the words two unrelated questions share<br/>"
+    "Unchanged: 3.1 still blocked on P1; the scope guard still holds &mdash; no PDF handbook "
+    "ingestion; slot extraction (item 2.x) is still unwritten, so matching still runs on a guest's "
+    "raw message rather than an extracted topic"))
 
 story.append(Spacer(1, 10))
 story.append(Paragraph(
-    "<b>Totals:</b> ~32.75 engineering days remaining. At the observed 2&ndash;3 engineering days "
-    "per working session that is <b>11&ndash;16 sessions</b>; at the six-day week these estimates "
-    "assume, ~5.5 weeks of pure build &mdash; so plan <b>~7 weeks to sellable</b> and "
-    "<b>~2.5 days to a real number that answers safely</b>. The critical path is now "
-    "<b>B4 to expose it and 2.4 to give it something to say</b> &mdash; and neither of them is "
-    "the reason to hold a pilot back any more.",
+    "<b>Totals:</b> ~30.75 engineering days remaining. At the observed 2&ndash;3 engineering days "
+    "per working session that is <b>~11&ndash;15 sessions</b>; at the six-day week these estimates "
+    "assume, ~5.1 weeks of pure build &mdash; so plan <b>~7 weeks to sellable</b> and "
+    "<b>~0.5 days to a real number that answers safely</b>. The critical path is now "
+    "<b>B4 alone</b> &mdash; and B4 was already entirely operational, not engineering, before "
+    "this session touched it.",
     BODY))
 
 story.append(Spacer(1, 8))
 story.append(banner(
-    "<b>What G3 changed about the shape of the risk.</b> Before it, every remaining item was a "
-    "feature and one of them was a hazard: the system answered confidently about maintenance when "
-    "a guest reported a gas leak. That is closed. What is left in front of a pilot is a "
-    "subscription in Meta, two credentials, an operator's phone number, and a paid instance "
-    "&mdash; a checklist rather than a build.",
+    "<b>What 2.4 changed about the shape of the risk.</b> Before it, a deployed, safe receptionist "
+    "still had nothing true to say about the property it was answering for &mdash; every "
+    "informational question got the same generic acknowledgement. That is closed, on real data. "
+    "What is left in front of a pilot is entirely B4's checklist: a subscription in Meta, two "
+    "credentials, an operator's phone number, and a paid instance.",
     DONE_GREEN))
 
 story.append(PageBreak())
@@ -335,8 +347,8 @@ story.append(banner(
     "tables, the repository, the task state machine, the reply path &mdash; and the line joining "
     "them never was. A5 wrote that line and A6 wrote the wire. G3 has now made answering safe, so "
     "the milestone is no longer &ldquo;holds a conversation&rdquo; but <b>holds a conversation it "
-    "is allowed to be having</b>. What is between this and a real guest is B4 and a knowledge "
-    "base.",
+    "is allowed to be having</b>. As of 2.4 it also has something true to say. What is between "
+    "this and a real guest is B4.",
     DONE_GREEN))
 
 story.append(PageBreak())
@@ -386,8 +398,8 @@ story.append(PageBreak())
 
 # ---------------------------------------------------------------- page 5
 story.extend(section(
-    "Track 2 &mdash; Make it a receptionist. &nbsp;[2.4, 2.7, 2.8 REMAIN]",
-    "What remains is knowledge, a measured prompt, and more than one property.",
+    "Track 2 &mdash; Make it a receptionist. &nbsp;[2.7, 2.8 REMAIN]",
+    "What remains is a measured prompt and more than one property.",
     [
         ("2.1", "Conversations, tasks and slot filling", "HIGH", "Hard", "spent",
          "<b>WIRED (A5)</b> &mdash; 2.0d spent here, the wiring priced in A5. Slot extraction is "
@@ -398,10 +410,14 @@ story.extend(section(
         ("2.3", "Autonomy gate", "DONE", "Easy", "1.0",
          "<b>DONE</b> &mdash; RECEPTIONIST_REPLY as the fourth RoutingAction. G3 added a fifth, "
          "EMERGENCY, which is deliberately not a variety of handoff: it was never classified"),
-        ("2.4", "Knowledge base", "HIGH", "Moderate", "2.0",
-         "<b>NEXT</b> &mdash; facts table with sensitivity flags, a real &ldquo;I don't know&rdquo; "
-         "that fetches a human, verification codes. With G3 done this is the last item before a "
-         "demo that is worth showing"),
+        ("2.4", "Knowledge base", "DONE", "Moderate", "spent",
+         "<b>DONE</b> &mdash; a facts table (migration 005) behind row-level security, matched "
+         "against a guest's own words with a stopword-stripped rapidfuzz score (D35), a "
+         "sensitive flag a fact can carry (D36), and answer_from_knowledge actually dispatched "
+         "from the receptionist for the first time &mdash; every other terminal_tool still gets "
+         "the old placeholder (roadmap 3.1). Door codes, key codes and unit numbers are excluded "
+         "from the table by design, not merely unmarked. Tested against a curated, committed "
+         "export of one real property. 486 &rarr; 506 tests; decisions D35&ndash;D37"),
         ("2.5", "Prompt v2 and rewrite the golden set", "DONE", "Moderate", "1.0",
          "<b>DONE</b> &mdash; golden set 8 &rarr; 50 across all 19 intents"),
         ("2.6", "Intent taxonomy unification", "DONE", "Easy", "0.5",
@@ -413,6 +429,16 @@ story.extend(section(
         ("2.8", "Many properties per client", "HIGH", "Moderate", "1.0",
          "properties table, per-property fact scoping, message &rarr; property resolution"),
     ]))
+
+story.append(Spacer(1, 8))
+story.append(banner(
+    "<b>2.4's sensitivity flag is not G1.</b> A fact marked sensitive is withheld from an "
+    "unverified guest &mdash; treated exactly like a genuine &ldquo;I don't know&rdquo; &mdash; "
+    "but that is one tool refusing to guess, not the reply-path-wide disclosure gate G1 still has "
+    "to build. And a door code, a key box code or a unit number does not go into the facts table "
+    "at all, sensitive or not: intents.yaml forbids answer_from_knowledge from ever giving one "
+    "out, and that is a table an operator (or D5, once it exists) populates by hand.",
+    DONE_GREEN))
 
 story.append(Spacer(1, 8))
 story.append(banner(
@@ -440,9 +466,11 @@ story.extend(section(
          "phone call nothing wired can place. An emergency is never classified. 417 &rarr; 486 "
          "tests; decisions D30&ndash;D34; docs/specs/g3-emergency-path.md"),
         ("G1", "Sensitivity and disclosure gate", "HIGH", "Moderate", "1.5",
-         "A door code is not an ordinary fact. Facts carry sensitivity flags (2.4) and nothing yet "
-         "refuses to say one to an unverified guest. Also the identity-verified flag on "
-         "conversations, written and never read"),
+         "Facts now carry a sensitivity flag and answer_from_knowledge refuses one to an "
+         "unverified guest (2.4) &mdash; but that is one tool, not the reply-path-wide gate: "
+         "money and owner matters still reach a confident model with no ceiling, and the "
+         "identity-verified flag on conversations is read in exactly one place rather than "
+         "everywhere the vocabulary implies it should be"),
         ("G2", "Autonomy ceilings in the reply path", "HIGH", "Easy", "1.0",
          "Money and owner matters must reach a human before confidence is consulted. The gate "
          "exists (2.3) and the vocabulary declares per-intent ceilings; what is missing is the "
@@ -628,15 +656,15 @@ story.append(notes_table([
 
 story.append(Paragraph("How the total reconciles", H2))
 story.append(Paragraph(
-    "A 0 + B 1.5 + D 13.75 + E 4.5 + G 4.0 + (2.4, 2.7, 2.8) 3.5 + (3.1, 3.2, 3.3) 5.5 = "
-    "<b>32.75</b>", BODY))
+    "A 0 + B 1.5 + D 13.75 + E 4.5 + G 4.0 + (2.7, 2.8) 1.5 + (3.1, 3.2, 3.3) 5.5 = "
+    "<b>30.75</b>", BODY))
 story.append(Spacer(1, 4))
 story.append(Paragraph(
-    "Rows 2.1 and 2.2 show &ldquo;spent&rdquo; rather than a number because their days are already "
-    "delivered and their wiring was priced in A5 and A6 &mdash; adding them would double-count 3.5 "
-    "days. P1&ndash;P5 is excluded: founder and operator time, not engineering. Counting scope "
-    "loosely is what produced the 5.75 figure that v2.1 replaced, so the arithmetic is stated "
-    "rather than implied.", NOTE))
+    "Rows 2.1, 2.2 and, as of this revision, 2.4 show &ldquo;spent&rdquo; rather than a number "
+    "because their days are already delivered and their wiring was priced in A5, A6 and this "
+    "session &mdash; adding them would double-count 5.5 days. P1&ndash;P5 is excluded: founder "
+    "and operator time, not engineering. Counting scope loosely is what produced the 5.75 figure "
+    "that v2.1 replaced, so the arithmetic is stated rather than implied.", NOTE))
 
 story.append(PageBreak())
 
@@ -646,10 +674,10 @@ dates = Table([
     [Paragraph("<b>Milestone</b>", CELL), Paragraph("<b>v2.8 said</b>", CELL),
      Paragraph("<b>Now</b>", CELL), Paragraph("<b>Status</b>", CELL)],
     [Paragraph("M1 &mdash; answers a real message, safely", CELLB),
-     Paragraph("~4 days", NOTE), Paragraph("<b>~2.5 days</b>", NOTE),
-     Paragraph("<b>NEXT</b> &mdash; B4 + 2.4. It is deployed, it answers, and as of G3 it answers "
-               "<i>safely</i>. What is left of this milestone is a subscription and a knowledge "
-               "base", NOTE)],
+     Paragraph("~4 days", NOTE), Paragraph("<b>~0.5 days</b>", NOTE),
+     Paragraph("<b>NEXT</b> &mdash; B4 alone. It is deployed, it answers, as of G3 it answers "
+               "<i>safely</i>, and as of 2.4 it has something true to say. What is left of this "
+               "milestone is a subscription and a checklist", NOTE)],
     [Paragraph("M2 &mdash; you can watch and correct it", CELLB),
      Paragraph("+13.75 days", NOTE), Paragraph("+13.75 days", NOTE),
      Paragraph("PENDING &mdash; Track D, six receptionist views", NOTE)],
@@ -676,8 +704,9 @@ story.append(Spacer(1, 10))
 story.append(banner(
     "<b>Read M1 carefully, because its shape changed rather than only its number.</b> In v2.8 the "
     "first milestone contained a hazard: a deployed receptionist that answered a gas leak with a "
-    "note about maintenance. It now contains a Meta subscription, four configuration values and a "
-    "knowledge base. The remaining risk on the path to a pilot is <b>operational</b>, and "
+    "note about maintenance. As of v2.9 that was closed; as of this revision it also has "
+    "something true to say. It now contains a Meta subscription and four configuration values, "
+    "nothing else. The remaining risk on the path to a pilot is <b>operational</b>, and "
     "operational risk is the kind a checklist closes.",
     DONE_GREEN))
 
@@ -742,12 +771,12 @@ story.append(notes_table([
 
 story.append(Spacer(1, 10))
 story.append(banner(
-    "<b>If you do only one thing next session: B4.</b> Not D, and not G1. The receptionist "
-    "answers, it is deployed, and as of this session it knows when to stop answering and fetch a "
-    "person &mdash; to a number nobody can message yet. B4 is half a day and a checklist: the "
-    "subscription in Meta, the real phone-number id in channel_configs, the two send credentials, "
-    "the operator's number, and a paid instance so a cold start does not read to Meta as a "
-    "timeout. Then 2.4, so it has something to say. <b>And before any of it, spend thirty minutes "
+    "<b>If you do only one thing next session: B4.</b> Not D, not G1, and not 2.4 &mdash; 2.4 is "
+    "done. The receptionist answers, it is deployed, it knows when to stop answering and fetch a "
+    "person, and it now has something true to say &mdash; to a number nobody can message yet. B4 "
+    "is half a day and a checklist: the subscription in Meta, the real phone-number id in "
+    "channel_configs, the two send credentials, the operator's number, and a paid instance so a "
+    "cold start does not read to Meta as a timeout. <b>And before any of it, spend thirty minutes "
     "widening the emergency trigger phrases</b> &mdash; it is the operator's edit, it changes no "
     "code, and it is the cheapest safety on the board.",
     URG["NOW"]))
@@ -797,15 +826,27 @@ log = Table([
                "known; the container image, whose first build exposed a missing package data file "
                "and a removed Starlette API; deployed to Render, Frankfurt, and serving", NOTE),
      Paragraph("406 &rarr; 417", NOTE), Paragraph("2.75", CELL)],
-    [Paragraph("9", CELLB),
-     Paragraph("<b>PR #21 &mdash; item G3.</b> The emergency path: a detector over the declared "
+    [Paragraph("9", CELL),
+     Paragraph("PR #21 &mdash; item G3. The emergency path: a detector over the declared "
                "triggers, matched in Arabic, Latin and Franco-Arabic and placed before the "
                "classifier; an immediate bilingual reply; an operator alert on a seam in the core "
                "with its implementation in channels/, reporting which channel it used because the "
                "vocabulary asks for a phone call nothing wired can place; a per-tenant timezone "
                "for the one trigger with a clock, validated at startup. An emergency is never "
                "classified. Decisions D30&ndash;D34", NOTE),
-     Paragraph("<b>417 &rarr; 486</b>", NOTE), Paragraph("<b>1.5</b>", CELLB)],
+     Paragraph("417 &rarr; 486", NOTE), Paragraph("1.5", CELL)],
+    [Paragraph("10", CELLB),
+     Paragraph("<b>Item 2.4.</b> A facts table (migration 005) behind row-level security; "
+               "core/knowledge.py's stopword-stripped rapidfuzz matching (D35); a sensitivity "
+               "flag a fact can carry, enforced narrowly &mdash; an unverified match to one is "
+               "treated exactly like no match (D36); answer_from_knowledge dispatched from the "
+               "receptionist for the first time, replacing a placeholder reply that had been "
+               "silently wrong for every informational intent; a one-off import script and a "
+               "committed, curated fixture from one real property, exercised end to end in "
+               "test_knowledge_integration.py. REGISTRY wired via configure_knowledge, not "
+               "threaded through Orchestrator (D37); an autouse fixture keeps that process-global "
+               "state from leaking between tests. Decisions D35&ndash;D37", NOTE),
+     Paragraph("<b>486 &rarr; 506</b>", NOTE), Paragraph("<b>2.0</b>", CELLB)],
 ], colWidths=[44, 296, 68, 48], hAlign="LEFT")
 log.setStyle(TableStyle([
     ("BACKGROUND", (0, 0), (-1, 0), BAND),
@@ -820,7 +861,7 @@ log.setStyle(TableStyle([
 story.append(log)
 story.append(Spacer(1, 6))
 story.append(Paragraph(
-    "<b>Cumulative: 19.5 engineering days delivered. ~32.75 remaining.</b> Nine sessions, and the "
+    "<b>Cumulative: 21.5 engineering days delivered. ~30.75 remaining.</b> Ten sessions, and the "
     "observed rate holds at 2&ndash;3 days each.", SMALL))
 
 

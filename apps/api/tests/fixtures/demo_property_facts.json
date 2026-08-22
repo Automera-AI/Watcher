@@ -1,0 +1,74 @@
+[
+  {
+    "topic": "bedrooms",
+    "question": "how many bedrooms are there",
+    "answer": "5",
+    "sensitive": false
+  },
+  {
+    "topic": "bathrooms",
+    "question": "how many bathrooms are there",
+    "answer": "2",
+    "sensitive": false
+  },
+  {
+    "topic": "garden",
+    "question": "is there a garden",
+    "answer": "Yes, there is a garden.",
+    "sensitive": false
+  },
+  {
+    "topic": "parking",
+    "question": "is there parking",
+    "answer": "The street parking in front of the house is for permit holders only from Monday to Friday between 9am to 5pm. Parking is free outside of this specific time period.",
+    "sensitive": false
+  },
+  {
+    "topic": "accessibility",
+    "question": "are there stairs to reach the property",
+    "answer": "There are stairs inside the house.",
+    "sensitive": false
+  },
+  {
+    "topic": "dishwasher",
+    "question": "is there a dishwasher",
+    "answer": "Yes, there is a dishwasher.",
+    "sensitive": false
+  },
+  {
+    "topic": "directions",
+    "question": "how do I get there by public transport",
+    "answer": "- Barons Court: Circle&District&Piccadilly; 0.2 mi away",
+    "sensitive": false
+  },
+  {
+    "topic": "rubbish",
+    "question": "where do I put the rubbish",
+    "answer": "All rubbish must be placed in tied-black rubbish bags. Please bring your rubbish bags to the black bin container with '85' written on it, which is located in the front garden. There is another wheelie bin in green for recycling only. Please bring the bins out to the side of the street before 6am on Thursday - or after 9pm the evening before, also ensure that the bin container lid is fully closed.\n\n*Make sure to bring your keys so you do not get locked out*",
+    "sensitive": false
+  },
+  {
+    "topic": "hospital",
+    "question": "where is the nearest hospital",
+    "answer": "The nearest hospital is Charing Cross Hospital, located at Fulham Palace Rd, London W6 8RF. It has Accident & Emergency Department which opens 24h for emergencies.",
+    "sensitive": false
+  },
+  {
+    "topic": "heating",
+    "question": "how does the heating and hot water work",
+    "answer": "There are two boilers that provides heating and hot water on demand in the property. One is located in the wardrobe in the boot room on the ground floor. Another is located in the cupboard on the top floor in the hallway.\n\nThere are radiators in the kitchen, living room, and each bedroom, as well as heated towel raid in each bathroom. You can control the temperature of each radiators individually by using the radiator value on the bottom of the radiator. Turn the valve clockwise to decrease the heat and anti-clockwise to increase it (1 represents the lowest heating level, and 5 being the highest). To turn on the heating for the towel rail, you\u2019ll find the power switch by the bathroom entrance and press it down to switch it on.",
+    "sensitive": false
+  },
+  {
+    "topic": "wifi",
+    "question": "what's the wifi network name",
+    "answer": "Hyperoptic Fibre 5AF3",
+    "sensitive": false
+  },
+  {
+    "topic": "wifi",
+    "question": "what's the wifi password",
+    "answer": "48848NymiAgjiJ",
+    "sensitive": true
+  }
+]
