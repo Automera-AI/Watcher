@@ -32,13 +32,14 @@ def database() -> Database:
 def _restore_tool_registry() -> Iterator[None]:
     """Undo whatever a test did to the process-global ``REGISTRY`` (``conversations/tools.py``).
 
-    ``main.assemble`` calls ``configure_knowledge`` on every invocation, wiring
-    ``answer_from_knowledge`` to a real ``SqlAlchemyFactRepository`` bound to *that test's*
-    database. ``REGISTRY`` is a module-level dict — the same kind of shared process state
-    ``apps/api/worker.py`` already warns about for ``get_settings()`` — so without this, a test
-    that calls ``assemble`` (``test_main.py``) leaves a repository pointing at a disposed
-    connection for the next test to trip over, whether or not that test knows the registry
-    exists.
+    ``orchestration/composition.build_consumer`` calls ``configure_knowledge`` on every invocation
+    (called from ``main.assemble`` when there is no ``REDIS_URL``, and from ``apps/api/worker.py``
+    otherwise — B5), wiring ``answer_from_knowledge`` to a real ``SqlAlchemyFactRepository`` bound
+    to *that test's* database. ``REGISTRY`` is a module-level dict — the same kind of shared
+    process state ``apps/api/worker.py`` already warns about for ``get_settings()`` — so without
+    this, a test that calls ``assemble`` (``test_main.py``) leaves a repository pointing at a
+    disposed connection for the next test to trip over, whether or not that test knows the
+    registry exists.
     """
     before = dict(REGISTRY)
     yield

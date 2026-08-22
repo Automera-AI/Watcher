@@ -148,6 +148,15 @@ class Settings(ChannelCredentials):
     # derived from the URL, since a pooler can be put in front of any host on any port.
     database_pool_mode: Literal["transaction", "session"] = "transaction"
 
+    # ── Durable queue (roadmap B5) ─────────────────────────────────────────────────────────
+    #
+    # Unset by default, and that is a real mode rather than a half-configured one: the
+    # composition root (main.py) reads its absence as "stay on the in-process
+    # ThreadPoolClassificationQueue", the same fast-200 path this service has run on since A4.
+    # Setting it switches the API to a thin producer and moves classification to a separate
+    # arq worker process (`apps/api/worker.py`) — the durability B5 exists for is that swap.
+    redis_url: SecretStr | None = None
+
     @field_validator("tenant_timezone")
     @classmethod
     def _resolvable_zone(cls, value: str) -> str:
@@ -197,6 +206,15 @@ class Settings(ChannelCredentials):
     def pool_mode(self) -> Literal["transaction", "session"]:
         """The connection-path policy. Always answerable — it has a safe default (see the field)."""
         return self.database_pool_mode
+
+    def redis_dsn(self) -> str | None:
+        """The queue's broker, unwrapped — or ``None``, which is a mode, not an error (B5).
+
+        Unlike :meth:`database_dsn`, absence does not raise: nothing downstream of this call is
+        required to have a durable queue, and the composition root reads ``None`` as "use the
+        in-process pool instead" rather than as a misconfiguration.
+        """
+        return self.redis_url.get_secret_value() if self.redis_url is not None else None
 
     def llm_credentials(self, model_id: str) -> LLMCredentials:
         """Credentials for whichever provider owns ``model_id`` (see ``classifier/factory``).

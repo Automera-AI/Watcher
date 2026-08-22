@@ -10,11 +10,16 @@ and process loses nothing (§5) — and runs it through the :class:`Orchestrator
 * :class:`InlineClassificationQueue` — runs the consumer synchronously; for single-process dev and
   for wiring ``create_app`` without a live request.
 * :class:`ThreadPoolClassificationQueue` — the same fast-200 behaviour for a queue that is built
-  once and lives as long as the process, which is what the composition root (A4) needs.
+  once and lives as long as the process, which is what the composition root (A4) needs when no
+  durable broker is configured.
+* :class:`RedisClassificationQueue` — the durable swap (roadmap B5): the same fast-200 behaviour,
+  but the hand-off survives a restart because it lands in Redis instead of process memory. Consumed
+  by an arq worker in its own process (``apps/api/worker.py``) that calls the exact same
+  ``MessageConsumer.consume`` the other two transports call directly — the seam this module exists
+  for is precisely what let B5 add a durable transport without touching ingestion at all.
 
-All three satisfy the existing ``ClassificationQueue`` seam, so ingestion is unchanged. The durable
-swap — an arq/Redis worker for multi-process scale — calls the same ``MessageConsumer.consume`` on
-a worker, so nothing else changes.
+All four satisfy the existing ``ClassificationQueue`` seam (``enqueue`` stays synchronous), so
+ingestion is unchanged.
 """
 
 from __future__ import annotations
@@ -25,7 +30,9 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from arq.connections import ArqRedis
 from fastapi import BackgroundTasks
+from redis.asyncio import ConnectionPool as RedisConnectionPool
 
 from apps.api.orchestration.worker import Orchestrator, ProcessOutcome
 from apps.api.schemas.message import MessageEnvelope
@@ -167,3 +174,57 @@ class ThreadPoolClassificationQueue:
     def shutdown(self, *, wait: bool = True) -> None:
         """Drain in-flight work. Called from the application's shutdown handler."""
         self._executor.shutdown(wait=wait)
+
+
+def build_redis_pool(dsn: str) -> ArqRedis:
+    """A connection pool for the durable queue (B5), built without connecting.
+
+    Mirrors ``db/engine.py``: constructing a pool touches no network — ``redis-py`` connects
+    lazily on the first command — so a bad ``REDIS_URL`` or an unreachable host surfaces on the
+    first push, not at startup. That is the same trade already made for ``DATABASE_URL``.
+    """
+    return ArqRedis(pool_or_conn=RedisConnectionPool.from_url(dsn))
+
+
+class RedisClassificationQueue:
+    """``ClassificationQueue`` backed by arq/Redis (B5) — the hand-off survives a restart.
+
+    ``enqueue`` stays synchronous, like every other transport in this module, so ingestion does not
+    change: the Redis push runs as a background task on the caller's already-running loop, which
+    always exists here because the webhook handler is ``async def``. It is fire-and-forget rather
+    than awaited inline for the same reason :class:`ThreadPoolClassificationQueue` does not block
+    on classification — a slow round trip in the request path is one more thing the platform can
+    time out and retry — and the risk that leaves (a process dying in the few milliseconds between
+    scheduling the task and Redis acknowledging it) is no larger than the window
+    :class:`BackgroundTasksQueue` already accepts today: the persisted row survives either way
+    (§5); only its classification would need retriggering, by hand, which is exactly the gap B5
+    exists to shrink, not the one it claims to close.
+
+    A future whose exception nothing retrieves is a silent failure (see
+    :class:`ThreadPoolClassificationQueue._consume`); the same discipline applies here, so pushes
+    are logged rather than left to vanish, and pending tasks are tracked so shutdown can drain them.
+    """
+
+    def __init__(self, pool: ArqRedis, *, logger: logging.Logger = _logger) -> None:
+        self._pool = pool
+        self._logger = logger
+        self._pending: set[asyncio.Task[None]] = set()
+
+    def enqueue(self, tenant_id: str, external_id: str) -> None:
+        task = asyncio.create_task(self._push(tenant_id, external_id))
+        self._pending.add(task)
+        task.add_done_callback(self._pending.discard)
+
+    async def _push(self, tenant_id: str, external_id: str) -> None:
+        try:
+            await self._pool.enqueue_job("consume_message", tenant_id, external_id)
+        except Exception:
+            self._logger.exception(
+                "failed to enqueue onto redis: tenant=%s external_id=%s", tenant_id, external_id
+            )
+
+    async def aclose(self) -> None:
+        """Drain in-flight pushes, then release the connection pool (application shutdown)."""
+        if self._pending:
+            await asyncio.gather(*self._pending, return_exceptions=True)
+        await self._pool.aclose()

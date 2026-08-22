@@ -42,6 +42,7 @@ from apps.api.db.models import (
 from apps.api.db.tenant_resolver import UnknownEndpoint
 from apps.api.ingestion.security import SIGNATURE_HEADER, expected_signature
 from apps.api.main import assemble, create_application
+from apps.api.orchestration.queue import RedisClassificationQueue, ThreadPoolClassificationQueue
 from apps.api.schemas.enums import ConfidenceBand, InboxStatus
 
 APP_SECRET = "app-secret"
@@ -385,6 +386,33 @@ def test_application_shutdown_stops_the_worker_pool(app: FastAPI, client: TestCl
 
     with pytest.raises(RuntimeError):  # the pool refuses new work once it is shut down
         app.state.queue.enqueue(TENANT_ID, "wamid.later")
+
+
+def test_assemble_stays_on_the_in_process_queue_without_redis_url(app: FastAPI) -> None:
+    """B5: unset ``REDIS_URL`` is the same in-process path this service has run since A4."""
+    assert isinstance(app.state.queue, ThreadPoolClassificationQueue)
+
+
+def test_assemble_switches_to_the_redis_queue_when_redis_url_is_set(
+    seeded: Database, provider: StubProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B5: the API becomes a thin producer — no sender/orchestrator built in this process."""
+    for name in Settings.model_fields:
+        monkeypatch.delenv(name.upper(), raising=False)
+    monkeypatch.setenv("META_APP_SECRET", APP_SECRET)
+    monkeypatch.setenv("META_WEBHOOK_VERIFY_TOKEN", VERIFY_TOKEN)
+    # Port 1: nothing is listening, and nothing needs to be — building the pool touches no
+    # network (build_redis_pool's docstring), so this never actually connects.
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:1/0")
+    settings = Settings(_env_file=None)
+
+    app = assemble(settings, seeded, Classifier(provider, provider))
+
+    assert isinstance(app.state.queue, RedisClassificationQueue)
+    assert app.state.sender is None
+
+    with TestClient(app):  # runs the lifespan; must close cleanly with nothing ever connected
+        pass
 
 
 def test_create_application_reports_what_the_environment_is_missing(
