@@ -19,6 +19,8 @@ from apps.api.orchestration.queue import (
     InlineClassificationQueue,
     LoadedMessage,
     MessageConsumer,
+    RedisClassificationQueue,
+    build_redis_pool,
 )
 from apps.api.orchestration.worker import Orchestrator, RoutingAction
 from apps.api.schemas.enums import MessageType, SourceKind
@@ -164,6 +166,57 @@ def test_inline_queue_consumes_immediately() -> None:
 
     queue.enqueue(TENANT, "wamid.A")
     assert len(inbox.drafts) == 1
+
+
+class _FakeArqPool:
+    """Stands in for :class:`arq.connections.ArqRedis` — no network, just a call log."""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.enqueued: list[tuple[str, tuple[Any, ...]]] = []
+        self.closed = False
+        self._fail = fail
+
+    async def enqueue_job(self, function: str, *args: Any, **kwargs: Any) -> None:
+        if self._fail:
+            raise RuntimeError("redis is down")
+        self.enqueued.append((function, args))
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def test_redis_queue_pushes_the_job_onto_the_pool() -> None:
+    pool = _FakeArqPool()
+    queue = RedisClassificationQueue(pool)  # type: ignore[arg-type]
+
+    async def _run() -> None:
+        queue.enqueue(TENANT, "wamid.A")
+        await queue.aclose()  # drains the fire-and-forget push before asserting
+
+    asyncio.run(_run())
+
+    assert pool.enqueued == [("consume_message", (TENANT, "wamid.A"))]
+    assert pool.closed is True
+
+
+def test_redis_queue_logs_rather_than_raises_on_a_failed_push(caplog: Any) -> None:
+    pool = _FakeArqPool(fail=True)
+    queue = RedisClassificationQueue(pool)  # type: ignore[arg-type]
+
+    async def _run() -> None:
+        queue.enqueue(TENANT, "wamid.A")  # must not raise — the caller has already returned 200
+        await queue.aclose()
+
+    with caplog.at_level(logging.ERROR):
+        asyncio.run(_run())
+
+    assert "failed to enqueue" in caplog.text
+
+
+def test_build_redis_pool_does_not_connect() -> None:
+    """Constructing the pool touches no network — the first push is the real test (§ engine.py)."""
+    pool = build_redis_pool("redis://localhost:1/0")
+    assert pool is not None
 
 
 def test_ingestion_to_orchestration_end_to_end() -> None:

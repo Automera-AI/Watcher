@@ -33,6 +33,10 @@ dependencies = [
     # gitignored, so an image built from this file alone has no artifact and falls back to the
     # YAML. Without this the fallback is a ModuleNotFoundError on the first turn.
     "pyyaml>=6,<7",
+    # The durable queue (roadmap B5): `RedisClassificationQueue` (the producer, in the API process)
+    # and `apps/api/worker.py` (the consumer, its own process) both run on this. Pulls in `redis`
+    # (the asyncio client) as its own dependency — no separate pin needed here.
+    "arq>=0.26,<1",
 ]
 
 [build-system]

@@ -14,7 +14,7 @@ here is what lets it be passed to the constructor, which is the only place Starl
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -37,7 +37,7 @@ def create_app(
     resolve_tenant: TenantResolver,
     property_system: PropertySystemPort | None = None,
     resolve_api_key: ApiKeyTenantResolver | None = None,
-    on_shutdown: Callable[[], None] | None = None,
+    on_shutdown: Callable[[], Awaitable[None]] | None = None,
 ) -> FastAPI:
     if (property_system is None) != (resolve_api_key is None):
         raise ValueError("property_system and resolve_api_key must be configured together")
@@ -52,7 +52,7 @@ def create_app(
         """
         yield
         if on_shutdown is not None:
-            on_shutdown()
+            await on_shutdown()
 
     app = FastAPI(
         lifespan=lifespan,
