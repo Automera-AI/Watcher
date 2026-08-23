@@ -320,12 +320,43 @@ class CorrectionRow(TimestampedTenantBase):
     promoted_to_golden: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class Property(TimestampedTenantBase):
+    """One rental unit a tenant manages (roadmap 2.8). A client is rarely a single flat: it is an
+    agency with many, and a fact ("the wifi password is…", "parking is on the east side") is true
+    of one of them, not all. This table is what a ``facts`` row can be scoped to.
+
+    ``external_id`` is the property's id in the operator's own property-management system, when
+    there is one — the join key roadmap 3.1's booking lookup will resolve a guest's stay against.
+    Null until a PMS is connected; the table is useful before then, because a fact can be scoped to
+    a property this system named locally without any PMS knowing it exists.
+
+    ``timezone`` is per-property rather than per-tenant because an agency can span cities (the
+    emergency path's ``only_between`` window is read from the tenant policy today, G3 — a property
+    clock is where a multi-city tenant would eventually resolve it from).
+    """
+
+    __tablename__ = "properties"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "external_id", name="uq_properties_tenant_extid"),
+    )
+
+    name: Mapped[str] = mapped_column(String(255))
+    external_id: Mapped[str | None] = mapped_column(String(128), default=None)
+    timezone: Mapped[str | None] = mapped_column(String(64), default=None)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class FactRow(TimestampedTenantBase):
     """One row of a tenant's knowledge base (roadmap 2.4). Named ``FactRow`` to avoid colliding
     with the in-memory ``Fact`` dataclass, the same way ``TaskRow`` sits beside ``Task``.
 
     ``sensitive`` is unenforced outside ``answer_from_knowledge`` (``core/knowledge.py``) — the
     reply-path-wide gate is roadmap G1, not yet built.
+
+    ``property_id`` scopes a fact to one unit (roadmap 2.8). ``NULL`` is deliberate and common: it
+    means the fact is true of every property the tenant runs ("office hours are 9–5"), so the
+    knowledge lookup returns tenant-wide facts *and* the resolved property's, never a property's
+    facts to a message about a different one. See ``db/knowledge_repo.py``.
     """
 
     __tablename__ = "facts"
@@ -335,6 +366,9 @@ class FactRow(TimestampedTenantBase):
     answer: Mapped[str] = mapped_column(Text)
     sensitive: Mapped[bool] = mapped_column(Boolean, default=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    property_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("properties.id"), default=None, index=True
+    )
 
 
 class UsageEvent(Base):

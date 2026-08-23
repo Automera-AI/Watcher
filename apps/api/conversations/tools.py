@@ -14,6 +14,7 @@ from typing import Any
 from packages.intents.schema import Vocabulary, default_vocabulary
 
 from apps.api.core.knowledge import Fact, KnowledgeLookup, best_match
+from apps.api.core.property import PropertyResolver
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +72,7 @@ class _NoFacts:
     know" rather than a crash — the same trade ``channels/factory.py`` makes for a process with
     no send credentials: a degraded, working state, not a refusal to run."""
 
-    def search(self, tenant_id: str) -> list[Fact]:
+    def search(self, tenant_id: str, property_id: str | None = None) -> list[Fact]:
         return []
 
 
@@ -86,20 +87,35 @@ class AnswerFromKnowledge(Tool):
     A ``sensitive`` match is treated exactly like no match unless the caller vouches for the
     guest's identity via ``identity_verified``. See ``core/knowledge.py`` for why this goes no
     further than "don't say it" — it is not G1.
+
+    ``properties`` scopes the lookup to one unit (roadmap 2.8). When it is set, the tool resolves
+    which property the message is about (``core/property.py``) and asks the knowledge base for that
+    property's facts plus the tenant-wide ones; without it — the default until the composition root
+    supplies one — every fact is treated as tenant-wide, exactly the single-property behaviour 2.4
+    shipped with.
     """
 
     name = "answer_from_knowledge"
     description = "Look up an answer to a guest's question in the tenant's knowledge base."
 
-    def __init__(self, knowledge: KnowledgeLookup) -> None:
+    def __init__(
+        self, knowledge: KnowledgeLookup, properties: PropertyResolver | None = None
+    ) -> None:
         self._knowledge = knowledge
+        self._properties = properties
 
     async def run(self, **kwargs: Any) -> ToolResult:
         tenant_id: str = kwargs["tenant_id"]
         question: str = kwargs.get("question") or ""
         identity_verified: bool = bool(kwargs.get("identity_verified", False))
+        property_hint: str | None = kwargs.get("property_hint")
 
-        facts = self._knowledge.search(tenant_id)
+        property_id = (
+            self._properties.resolve(tenant_id, hint=property_hint)
+            if self._properties is not None
+            else None
+        )
+        facts = self._knowledge.search(tenant_id, property_id)
         match = best_match(question, facts)
         if match is None:
             return ToolResult(ok=False, human_summary="No matching fact was found.")
@@ -117,14 +133,20 @@ register(HandoffToHuman())
 register(AnswerFromKnowledge(_NoFacts()))
 
 
-def configure_knowledge(knowledge: KnowledgeLookup) -> None:
+def configure_knowledge(
+    knowledge: KnowledgeLookup, properties: PropertyResolver | None = None
+) -> None:
     """Swap in a real knowledge lookup once the composition root has one (``main.py``).
 
     Mirrors how ``register`` already works: the registry is a small, named, module-level service
     locator (A5), not a fresh idea introduced here. Before this is called, ``answer_from_knowledge``
     is wired to ``_NoFacts`` and behaves exactly like a tenant with an empty knowledge base.
+
+    ``properties`` (roadmap 2.8) is the resolver that scopes the lookup to one unit. Optional so a
+    process without it keeps 2.4's tenant-wide behaviour rather than failing to wire the tool at
+    all — the same degrade-don't-crash trade ``_NoFacts`` makes for a tenant with no facts.
     """
-    register(AnswerFromKnowledge(knowledge))
+    register(AnswerFromKnowledge(knowledge, properties))
 
 
 def validate_registry(vocabulary: Vocabulary | None = None) -> list[str]:

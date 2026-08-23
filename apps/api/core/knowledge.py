@@ -105,6 +105,11 @@ class Fact:
     ``sensitive`` is what ``best_match`` and ``AnswerFromKnowledge`` (``conversations/tools.py``)
     key their refusal on. ``topic`` groups facts for a human editing them (roadmap D5); it plays
     no part in matching.
+
+    ``property_id`` scopes the fact to one unit (roadmap 2.8), or is ``None`` for a fact true of
+    every property the tenant runs. It is carried here so a caller can tell the two apart, but it
+    is the *repository* that decides which facts to return for a resolved property — ``best_match``
+    scores whatever list it is handed and never reads this field.
     """
 
     id: str
@@ -112,12 +117,18 @@ class Fact:
     question: str
     answer: str
     sensitive: bool
+    property_id: str | None = None
 
 
 class KnowledgeLookup(Protocol):
-    """Where a tenant's facts live. One implementation today: ``db.knowledge_repo``."""
+    """Where a tenant's facts live. One implementation today: ``db.knowledge_repo``.
 
-    def search(self, tenant_id: str) -> list[Fact]: ...
+    ``property_id`` scopes the lookup to one unit (roadmap 2.8): the implementation returns
+    tenant-wide facts (``property_id IS NULL``) *and* the named property's, never another
+    property's. ``None`` — the caller could not resolve a property — means tenant-wide facts only.
+    """
+
+    def search(self, tenant_id: str, property_id: str | None = None) -> list[Fact]: ...
 
 
 def best_match(guest_text: str, facts: list[Fact]) -> Fact | None:

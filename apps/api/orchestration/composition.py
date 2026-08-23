@@ -35,6 +35,7 @@ from apps.api.db.orchestration_repo import (
     SqlAlchemyInboxWriter,
     SqlAlchemyMessageLoader,
 )
+from apps.api.db.property_repo import SqlAlchemyPropertyRepository
 from apps.api.orchestration.queue import MessageConsumer
 from apps.api.orchestration.worker import Orchestrator
 
@@ -60,11 +61,15 @@ def build_consumer(settings: Settings, database: Database, classifier: Classifie
         settings.control_chat_phone_e164,
         declared_channel=default_vocabulary().emergency.alert,
     )
-    # The knowledge base (roadmap 2.4). A process-global registry entry rather than a collaborator
-    # threaded through the Orchestrator/Receptionist call chain — see `conversations/tools.py`;
-    # `configure_knowledge` is the named seam that swaps it in, the same way `register` already
-    # populates the registry at import time.
-    configure_knowledge(SqlAlchemyFactRepository(tenant_scope))
+    # The knowledge base (roadmap 2.4), now scoped per property (roadmap 2.8). A process-global
+    # registry entry rather than a collaborator threaded through the Orchestrator/Receptionist call
+    # chain — see `conversations/tools.py`; `configure_knowledge` is the named seam that swaps it
+    # in, the same way `register` already populates the registry at import time. The property
+    # resolver rides the same tenant-scoped session, so RLS (004) covers the property lookup too.
+    configure_knowledge(
+        SqlAlchemyFactRepository(tenant_scope),
+        SqlAlchemyPropertyRepository(tenant_scope),
+    )
     orchestrator = Orchestrator(
         classifier,
         SqlAlchemyAuditLog(tenant_scope),
