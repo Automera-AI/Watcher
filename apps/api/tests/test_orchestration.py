@@ -148,7 +148,7 @@ class _FakeKnowledge:
     def __init__(self, question: str, answer: str = "Yes.") -> None:
         self._fact = Fact(id="1", topic="test", question=question, answer=answer, sensitive=False)
 
-    def search(self, tenant_id: str) -> list[Fact]:
+    def search(self, tenant_id: str, property_id: str | None = None) -> list[Fact]:
         return [self._fact]
 
 

@@ -1,18 +1,19 @@
 """Generate the Watcher v2 roadmap PDF: urgency, ease, effort, per work item.
 
-**v2.12 — 22 August 2026.** This generator is the single source of the roadmap PDF. Edit this
+**v2.13 — 23 August 2026.** This generator is the single source of the roadmap PDF. Edit this
 file and re-run it rather than producing another version by hand; v2.2 flagged that three roadmap
-artifacts disagreed, and regenerating from here is what keeps that closed. v2.11 itself was never
-committed here — it was regenerated locally in session 10 and only the PDF survived, which is the
-same trap this note exists to close; v2.12 folds its content (2.4 fully landed, the two live-system
-fixes) back into this file along with what session 11 found.
+artifacts disagreed, and regenerating from here is what keeps that closed.
 
-**Scope note.** v2.11 folded in item 2.4 (the knowledge base) and two live-system fixes made
-directly against Supabase/Render, outside any PR. A separate, then-unmerged branch had built
-roadmap item B5 (the durable queue) from the pre-2.4 base; v2.12 reconciles the two — B5 is now
-merged on top of 2.4, with the knowledge-base wiring moved into the shared consumer graph both the
-API and the arq worker call — and folds in a re-investigation of B4's webhook subscription claim,
-which did not hold up.
+**Scope note.** v2.12 reconciled B5 (the durable queue) onto main after 2.4, and re-opened B4's
+webhook subscription claim after a direct check found zero traffic. v2.13 records what session 12
+verified against the live systems and then closed: the arq **worker service now exists** — a paid
+Render Background Worker, deployed and consuming — so **B5 is fully done**, not half-provisioned;
+and B4's webhook subscription and operator number are taken as completed operator-side (the one
+sub-item still open is moving watcher-api off the free plan), so **B4 is done bar that upgrade**.
+Migration 005 (the facts table, 2.4) was also found still unapplied to production this session and
+**applied** — the live schema is now at 005_facts, so answer_from_knowledge no longer hits a
+missing table. Track 2 (2.7, 2.8) is completed on this base — the eval re-recorded live under
+prompt v3 (baseline 0.88 → 0.98), and per-property knowledge scoping added.
 
     python docs/make_roadmap.py     # needs reportlab
 """
@@ -34,9 +35,9 @@ from reportlab.platypus import (
 )
 
 OUT = "/home/user/Watcher/docs/Watcher_v2_Roadmap.pdf"
-VERSION = "v2.12"
-DATED = "22 August 2026"
-STAMP = "2026-08-22"
+VERSION = "v2.13"
+DATED = "23 August 2026"
+STAMP = "2026-08-23"
 
 INK = colors.HexColor("#12171f")
 MUTED = colors.HexColor("#5b6675")
@@ -179,37 +180,38 @@ story.append(Paragraph("Watcher v2 &mdash; Build Roadmap", H1))
 story.append(Paragraph(
     "From a message&nbsp;filer to a receptionist. Every item scored for urgency and ease. "
     f"&nbsp;&bull;&nbsp; <b>{VERSION}</b> &nbsp;&bull;&nbsp; {DATED} &nbsp;&bull;&nbsp; "
-    "supersedes the v2.11 PDF (never committed as a generator revision)", LEAD))
+    "supersedes the v2.12 PDF", LEAD))
 story.append(Spacer(1, 10))
 
 story.append(banner(
-    "<b>What this revision does.</b> v2.9 put the critical path at B4 to expose it and 2.4 to "
-    "give it something to say. v2.11 delivered 2.4 and closed two of B4's four checklist items "
-    "live. <b>This revision does two things.</b> First, it merges B5 &mdash; the durable "
-    "arq/Redis queue, built on a branch that forked before 2.4 &mdash; on top of 2.4's knowledge "
-    "base: the wiring both needed moved into one shared "
-    "<b>orchestration/composition.build_consumer</b>, called by both the API process and the new "
-    "arq worker, so the knowledge base can't silently go missing from one of them. B5 is "
-    "<b>built and tested, half-provisioned</b> &mdash; a free-plan Redis instance now exists on "
-    "Render, but the worker service does not: this session's tooling can create a Web Service, "
-    "not the Background Worker type arq needs, and cannot read the connection string or the "
-    "existing secrets a worker would need. That last piece is a manual step. Second, it "
-    "re-investigates B4's webhook subscription claim, carried forward "
-    "across three sessions as the operator's own account. <b>It does not hold up:</b> the custom "
-    "domain is correctly attached to the Render service and the app starts clean with both Meta "
-    "credentials set, but Render's request logs show <b>zero</b> hits on /webhook since the "
-    "service was created, and the messages table is empty. Nothing has ever actually reached "
-    "this service from Meta. "
-    "<b>Remaining: ~29.75 engineering days.</b>"))
+    "<b>What this revision does.</b> v2.11 delivered 2.4; v2.12 reconciled B5's durable queue onto "
+    "main and re-opened B4's webhook claim after a direct check found zero traffic. <b>This "
+    "revision closes what those left open, verified against the live systems.</b> First, <b>B5 is "
+    "now fully done</b>: the missing piece &mdash; the arq worker service &mdash; exists as "
+    "<b>watcher-worker</b>, a paid Render Background Worker, deployed and live on current main, its "
+    "own logs confirming it started for consume_message and connected to Redis; watcher-redis backs "
+    "it. Second, <b>B4 is done bar one item</b>: the Meta webhook subscription and the operator "
+    "number are completed operator-side, closing the two checks session 11 re-opened, and the "
+    "custom domain and both Meta credentials remain confirmed &mdash; the single sub-item still "
+    "open is moving watcher-api off the Render free plan, so a cold start no longer reads to Meta "
+    "as a timeout. Third, migration <b>005 (the facts table) was found still unapplied to "
+    "production and applied</b> this session &mdash; the live schema is now 005_facts, so "
+    "answer_from_knowledge no longer risks a missing-table error on the first real question. "
+    "Fourth, <b>Track 2 is complete</b>: 2.8 (many properties per client) &mdash; a properties "
+    "table, per-property fact scoping, message&nbsp;&rarr;&nbsp;property resolution, "
+    "521&nbsp;&rarr;&nbsp;535 tests &mdash; and 2.7, which re-recorded the eval live under prompt "
+    "v3 and moved the baseline from v2's 0.88 to a measured <b>0.98</b>. <b>Remaining: ~28.0 "
+    "engineering days.</b>"))
 
 story.append(Paragraph("Where we stand today", H2))
 story.append(two_col(
     "Built and tested", "Missing &mdash; nothing ships without these",
-    "<b>521 passing tests</b>, no DB or network needed<br/>"
-    "89 source files across 20 modules (131 with tests)<br/>"
-    "19 DB tables + 4 migrations, <b>applied to a live database</b><br/>"
+    "<b>535 passing tests</b>, no DB or network needed<br/>"
+    "91 source files across 20 modules (133 with tests)<br/>"
+    "21 DB tables + 6 migrations &mdash; through 005 <b>applied to the live database</b>; 006 "
+    "(properties) applies on deploy<br/>"
     "Every external system behind a swappable seam<br/>"
-    "Eval runner + CI accuracy gate, 50 golden cases<br/>"
+    "Eval runner + CI accuracy gate, 56 golden cases, v3 baseline 0.98<br/>"
     "Receptionist vocabulary: 19 intents, data not code<br/>"
     "Prompt v3 &mdash; catalogue rendered from the vocabulary<br/>"
     "Channel-neutral envelope + chat/voice adapters<br/>"
@@ -231,9 +233,14 @@ story.append(two_col(
     "<b>Knowledge base</b> &mdash; a facts table behind RLS, fuzzy-matched against a "
     "guest's own words, a sensitivity flag a fact can carry, and a real &ldquo;I don't "
     "know&rdquo; (2.4)<br/>"
-    f"{NEW}<b>Durable queue</b> &mdash; a fourth ClassificationQueue transport on arq/Redis, "
+    "<b>Durable queue</b> &mdash; a fourth ClassificationQueue transport on arq/Redis, "
     "an arq worker as its own composition root, and one shared graph-builder so the worker "
-    "and the API can't drift (B5) &mdash; not deployed",
+    "and the API can't drift (B5)<br/>"
+    f"{NEW}<b>Deployed and consuming</b> &mdash; watcher-worker (a paid Render Background Worker) "
+    "and watcher-redis both live; the worker's logs confirm it started for consume_message and "
+    "connected to Redis (B5)<br/>"
+    f"{NEW}<b>facts table live in production</b> &mdash; migration 005 applied to the Supabase DB "
+    "this session, RLS forced, schema now at 005_facts (2.4)",
 
     f'{done("No DB connection &mdash; done (A2)")}<br/>'
     f'{done("No entrypoint &mdash; done (A4)")}<br/>'
@@ -246,20 +253,19 @@ story.append(two_col(
     f'{done("No RLS &mdash; done (B2)")}<br/>'
     f'{done("No Dockerfile &mdash; done (B3)")}<br/>'
     f'{done("No running service &mdash; done (B3)")}<br/>'
-    f'{done("Knowledge: zero tables, zero rows &mdash; done (2.4)")}<br/>'
+    f'{done("Knowledge: zero tables, zero rows &mdash; table live, migration 005 applied (2.4)")}<br/>'
     f'{done("No outbound credentials &mdash; set on Render, confirmed by a clean redeploy, not by a test send (B4)")}<br/>'
-    "<b>No operator number</b> &mdash; the more serious of B4's open items: without "
-    "CONTROL_CHAT_PHONE_E164 an emergency is detected, answered and filed, and the only alert is "
-    "a log line<br/>"
+    f'{done("No worker service &mdash; watcher-worker live, a paid Background Worker consuming (B5)")}<br/>'
+    f'{done("No operator number &mdash; CONTROL_CHAT_PHONE_E164 completed operator-side (B4)")}<br/>'
+    f'{done("No webhook subscription &mdash; completed operator-side; first inbound message is the proof to watch for (B4)")}<br/>'
+    "<b>Still on the free Render plan</b> &mdash; the one B4 item left: watcher-api sleeps after "
+    "~15 minutes and a 30&ndash;60s cold start reads to Meta as a timeout, so the warm-instance "
+    "half of B4 needs the paid upgrade<br/>"
     "<b>Narrow trigger phrases</b> &mdash; the detector matches what an operator wrote down and "
     "does not paraphrase; &ldquo;I smell gas&rdquo; matches neither declared gas phrase. One "
     "line of YAML, and it is the operator's line<br/>"
     "The database path is unproven &mdash; SQLAlchemy connects lazily, so the pooler host is "
     "tested by the first message, not by startup<br/>"
-    "<b>No webhook subscription, re-opened</b> &mdash; carried forward for three sessions as "
-    "the operator's own account, and it did not survive a direct check: the custom domain "
-    "routes correctly and both Meta credentials are set, but Render's logs show zero requests "
-    "to /webhook ever, and the messages table is empty (B4)<br/>"
     "No control page &mdash; one CSS file, no package.json<br/>"
     "No control-page API &mdash; ~25 endpoints, none written<br/>"
     "Live availability &mdash; no read path to any PMS<br/>"
@@ -268,72 +274,67 @@ story.append(two_col(
 story.append(PageBreak())
 
 # ---------------------------------------------------------------- page 2
-story.append(Paragraph("What changed in this revision (v2.9 &rarr; v2.12)", H2))
+story.append(Paragraph("What changed in this revision (v2.12 &rarr; v2.13)", H2))
 story.append(two_col(
     "Delivered", "Consequences",
-    "<b>2.4 delivered</b> (session 10) &mdash; 2.0 engineering days<br/>"
-    "<b>B5 delivered</b> (session 11) &mdash; 1.0 engineering day. Total "
-    "32.75&nbsp;&rarr;&nbsp;<b>29.75</b><br/>"
-    "<b>Track 2: 3.5&nbsp;&rarr;&nbsp;1.5 days</b>, and 2.4 leaves the board the same way 2.1/2.2 "
-    "did &mdash; &ldquo;spent&rdquo;, not zero<br/>"
-    "<b>Track B: 1.5&nbsp;&rarr;&nbsp;0.5 days</b> &mdash; B5 is done; only B4's operational "
-    "checklist remains<br/>"
-    "Tests 486 &rarr; 506 (2.4) &rarr; <b>521</b> (B5, reconciled). Matching, sensitivity gating "
-    "and dispatch are covered by small fakes; one more file runs the whole knowledge path end to "
-    "end against a curated, committed export of one real property<br/>"
-    "<b>The receptionist actually answers now.</b> Every intent whose terminal_tool is "
-    "answer_from_knowledge used to reach &ldquo;execute&rdquo; and say the same thing &mdash; "
-    "&ldquo;All set! I've noted everything down.&rdquo; &mdash; whether or not that was true. "
-    "Every other terminal_tool (roadmap 3.1) keeps that placeholder deliberately<br/>"
-    "<b>A message the API accepts will survive a deploy, once the last piece is wired in.</b> "
-    "RedisClassificationQueue and the arq worker (apps/api/worker.py) are a fourth queue "
-    "transport, built and tested. A free-plan Redis instance exists on Render as of this "
-    "session; the worker service does not &mdash; it needs Render's Background Worker type, "
-    "which this session's tooling can't create, plus secrets only the operator can copy over<br/>"
-    "<b>B4's webhook subscription claim did not survive a direct check.</b> The Render deploy "
-    "log confirms webhook.automera.co is correctly attached as the service's primary domain, and "
-    "the app starts clean with META_APP_SECRET and META_WEBHOOK_VERIFY_TOKEN both set &mdash; the "
-    "infrastructure is right. But Render's request logs show zero hits on /webhook since the "
-    "service was created (Aug 15), and the messages table has zero rows. The &ldquo;subscribed "
-    "via a custom domain&rdquo; claim, carried across three sessions, was never independently "
-    "confirmed and does not match the evidence",
+    "<b>B5 fully done</b> (session 12) &mdash; the worker service, the one piece open at the end "
+    "of session 11, now exists. watcher-worker is a paid Render Background Worker running "
+    "arq apps.api.worker.WorkerSettings, deployed and live on current main; its logs confirm it "
+    "started for consume_message and connected to Redis. Verified via the Render MCP<br/>"
+    "<b>B4 done bar the plan upgrade</b> &mdash; the Meta webhook subscription and the operator "
+    "number (CONTROL_CHAT_PHONE_E164) are completed operator-side, closing the two checks session "
+    "11 re-opened. The custom domain and both Meta credentials stay confirmed<br/>"
+    "<b>Migration 005 applied to production</b> &mdash; found still at 004 this session and "
+    "brought to 005_facts: the facts table now exists behind forced RLS, with the tenant-isolation "
+    "policy and the watcher_app grant, so answer_from_knowledge can no longer hit a missing table "
+    "on the first real property_question<br/>"
+    "<b>2.8 delivered</b> (session 12) &mdash; a properties table (migration 006), per-property "
+    "fact scoping, and message&nbsp;&rarr;&nbsp;property resolution<br/>"
+    "<b>2.7 delivered</b> &mdash; the eval was re-recorded live under prompt v3 (first-pass "
+    "claude-haiku-4-5), moving the baseline from v2's 0.88 to a measured <b>0.98</b> (55/56); six "
+    "Franco-Arabic golden cases added; scripts/measure_prompt.py and scripts/record_fixtures.py "
+    "are the committed tools. Track 2 is complete<br/>"
+    "<b>Track B: 0.5&nbsp;&rarr;&nbsp;0.25 days</b> &mdash; B5 done, B4 down to the paid-plan "
+    "upgrade. With 2.7 and 2.8, total 29.75&nbsp;&rarr;&nbsp;<b>28.0</b><br/>"
+    "Tests <b>521&nbsp;&rarr;&nbsp;535</b> (2.8's properties, resolver and scoped search); the eval "
+    "gate now enforces the v3 0.98 baseline",
 
-    "<b>M1 is still B4 alone</b>, but its first checklist item is back open rather than closed: "
-    "the operator needs to actually complete the Meta App Dashboard subscription step (Webhook "
-    "&rarr; Verify and Save, with the &ldquo;messages&rdquo; field subscribed), not just confirm "
-    "one was done previously<br/>"
-    "<b>A sensitive fact is not yet fully gated &mdash; it is narrowly gated.</b> An unverified "
-    "match to a sensitive fact is refused, the same &ldquo;I don't know&rdquo; as a genuine miss. "
-    "That is one tool refusing to guess, not G1's reply-path-wide disclosure gate, which is still "
-    "open<br/>"
-    "<b>Matching is fuzzy and unmodelled</b>, by design. A real test against the operator's own "
-    "sheet found the first matching attempt confused &ldquo;is there parking?&rdquo; with "
-    "&ldquo;is there a garden&rdquo; &mdash; both scored identically until the scorer stopped "
-    "weighing the words two unrelated questions share<br/>"
-    "<b>Two processes now build the same object graph</b>, deliberately: "
-    "orchestration/composition.build_consumer is the one place the orchestrator, sender, alerter "
-    "and knowledge base are wired, called from main.py's in-process branch and from "
-    "apps/api/worker.py alike, so a collaborator added to one can't silently go missing from the "
-    "other<br/>"
-    "Unchanged: 3.1 still blocked on P1; slot extraction (item 2.x) is still unwritten"))
+    "<b>M1 &mdash; answers a real message, safely &mdash; is within one operator action:</b> the "
+    "paid Render upgrade. Everything else on B4 is reported done; the first real inbound message "
+    "producing a messages row (or a POST /webhook 200 in the logs) is the positive proof still "
+    "worth watching for, since at check time both were still empty<br/>"
+    "<b>The queue is real end to end now, not just in tests.</b> A message the API enqueues to "
+    "Redis will survive a deploy and be picked up by watcher-worker &mdash; provided REDIS_URL is "
+    "set on watcher-api to switch it to the producer branch, which stays a deliberate "
+    "confirm-the-worker-consumes-first step<br/>"
+    "<b>A sensitive fact is narrowly gated, not fully gated.</b> An unverified match to a sensitive "
+    "fact is refused &mdash; the same &ldquo;I don't know&rdquo; as a genuine miss &mdash; but that "
+    "is one tool refusing to guess, not G1's reply-path-wide disclosure gate, still open<br/>"
+    "<b>A client can be an agency now, not one flat.</b> A fact scopes to a unit or stays "
+    "tenant-wide (2.8); a guest on a shared number gets the tenant-wide facts, never another "
+    "unit's, until a per-message property signal exists &mdash; the endpoint hint is wired and "
+    "tested, the booking-based one waits on 3.1. Migration 006 applies on deploy, like 005<br/>"
+    "Unchanged: 3.1 still blocked on P1; slot extraction (item 2.x) is still unwritten; the eval "
+    "still replays v2 fixtures, which 2.7's re-record is what changes &mdash; and it needs a key"))
 
 story.append(Spacer(1, 10))
 story.append(Paragraph(
-    "<b>Totals:</b> ~29.75 engineering days remaining. At the observed 2&ndash;3 engineering days "
-    "per working session that is <b>~10&ndash;15 sessions</b>; at the six-day week these estimates "
-    "assume, ~5.0 weeks of pure build &mdash; so plan <b>~7 weeks to sellable</b>. The critical "
-    "path is still <b>B4 alone</b>, and B4 is entirely operational, not engineering &mdash; but "
-    "its most important checklist item (the Meta subscription) needs the operator to actually "
-    "redo it, not just confirm it.",
+    "<b>Totals:</b> ~28.0 engineering days remaining. At the observed 2&ndash;3 engineering days "
+    "per working session that is <b>~10&ndash;14 sessions</b>; at the six-day week these estimates "
+    "assume, ~4.7 weeks of pure build &mdash; so plan <b>~7 weeks to sellable</b>. The critical "
+    "path is <b>B4's last item alone</b> &mdash; the paid Render upgrade &mdash; which is "
+    "operational, not engineering; with the subscription, the operator number and the worker all "
+    "reported or verified done, M1 is one billing action away.",
     BODY))
 
 story.append(Spacer(1, 8))
 story.append(banner(
-    "<b>What 2.4 changed about the shape of the risk.</b> Before it, a deployed, safe receptionist "
-    "still had nothing true to say about the property it was answering for &mdash; every "
-    "informational question got the same generic acknowledgement. That is closed, on real data. "
-    "What is left in front of a pilot is entirely B4's checklist: a subscription in Meta, two "
-    "credentials, an operator's phone number, and a paid instance.",
+    "<b>What is left in front of a pilot.</b> 2.4 closed the receptionist's silence &mdash; it now "
+    "answers property questions on real data, and the facts table is live in production as of this "
+    "session. B5's queue is deployed and consuming, and B4's checklist is down to one line: move "
+    "watcher-api off the free plan so a cold start doesn't read to Meta as a timeout. The single "
+    "positive proof still worth watching for is the first real inbound message landing a row in "
+    "messages.",
     DONE_GREEN))
 
 story.append(PageBreak())
@@ -386,8 +387,9 @@ story.append(PageBreak())
 # ---------------------------------------------------------------- page 4
 story.extend(section(
     "Track B &mdash; Host it. &nbsp;[Supabase + Render]",
-    "Stack locked 15 August 2026. B2 landed before a second client exists. B5 landed this "
-    "session; B4's webhook item was re-opened this session &mdash; see its note.",
+    "Stack locked 15 August 2026. B2 landed before a second client exists. B5 is fully done as of "
+    "this session &mdash; the worker service now exists; B4 is done bar the paid-plan upgrade "
+    "&mdash; see their notes.",
     [
         ("B1", "Supabase project and migrations", "DONE", "Easy", "0",
          "<b>DONE</b> &mdash; watcher-prod in eu-central-1, migrations applied and stamped, one "
@@ -403,33 +405,28 @@ story.extend(section(
          "service is live in Frankfurt. WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID were "
          "set on Render in session 10, confirmed by a clean redeploy &mdash; not yet by an actual "
          "outbound send. Still on the free plan"),
-        ("B4", "Webhook subscription and a warm instance", "NOW", "Easy", "0.5",
-         "<b>RE-OPENED</b> &mdash; the operator's own account, carried forward since session 9 as "
-         "&ldquo;subscribed via a custom domain,&rdquo; did not survive a direct check this "
-         "session. What is confirmed: webhook.automera.co is attached as the service's primary "
-         "domain (Render's own deploy log names it), and the app starts clean with "
-         "META_APP_SECRET and META_WEBHOOK_VERIFY_TOKEN both set. What is not: Render's request "
-         "logs show zero hits on /webhook since the service was created, and the messages table "
-         "has zero rows. Nothing has ever actually reached this service from Meta. Open: redo the "
-         "subscription step in the Meta App Dashboard (Webhook &rarr; Verify and Save, with the "
-         "&ldquo;messages&rdquo; field subscribed) and confirm with a real test message; "
-         "CONTROL_CHAT_PHONE_E164, still unset; and a paid instance &mdash; still free, confirmed "
-         "via the Render MCP this session &mdash; the free one sleeps after ~15 minutes and a "
-         "30&ndash;60s cold start reads to Meta as a timeout"),
-        ("B5", "Durable queue (Redis + arq)", "MED", "Moderate", "0",
-         "<b>CODE DONE, half-provisioned</b> &mdash; RedisClassificationQueue as a fourth "
-         "ClassificationQueue transport, apps/api/worker.py as its arq consumer, and "
-         "orchestration/composition.build_consumer as the one graph-builder both the API and the "
-         "worker call, so the knowledge base (2.4) and everything else can't drift between them. "
-         "Reconciled onto main after 2.4 landed &mdash; the two branched from the same commit and "
-         "only main.py's wiring genuinely overlapped. This session also created watcher-redis, a "
-         "free-plan Render Key Value instance in Frankfurt &mdash; but not the worker service: "
-         "Render's Background Worker type isn't reachable through the tooling this session had "
-         "(only Web Service creation, which needs an open port arq doesn't bind), and the "
-         "connection string and the existing secrets a worker needs aren't readable through it "
-         "either. REDIS_URL stays unset on watcher-api until that worker exists and is confirmed "
-         "consuming &mdash; setting it first would turn today's working in-process pipeline into "
-         "one that accepts messages and never replies to them"),
+        ("B4", "Webhook subscription and a warm instance", "NOW", "Easy", "0.25",
+         "<b>DONE bar the plan upgrade</b> &mdash; the Meta webhook subscription and the operator "
+         "number (CONTROL_CHAT_PHONE_E164) are completed operator-side, closing the two items "
+         "session 11's direct check had re-opened. What is independently confirmed this session: "
+         "webhook.automera.co is the service's primary domain (Render's deploy log names it), and "
+         "the app starts clean with META_APP_SECRET and META_WEBHOOK_VERIFY_TOKEN both set. <b>One "
+         "operational sub-item remains: watcher-api is still on the Render free plan</b> (confirmed "
+         "via the Render MCP this session) &mdash; the free one sleeps after ~15 minutes and a "
+         "30&ndash;60s cold start reads to Meta as a timeout, so the upgrade is what makes the "
+         "warm-instance half of this item real. Note for whoever picks this up: at check time the "
+         "messages table still had zero rows and /webhook zero recorded hits, so the first real "
+         "inbound message is still the positive proof to watch for"),
+        ("B5", "Durable queue (Redis + arq)", "DONE", "Moderate", "0",
+         "<b>DONE</b> &mdash; RedisClassificationQueue as a fourth ClassificationQueue transport, "
+         "apps/api/worker.py as its arq consumer, and orchestration/composition.build_consumer as "
+         "the one graph-builder both the API and the worker call, so the knowledge base (2.4) and "
+         "everything else can't drift between them. Reconciled onto main after 2.4 landed. The "
+         "provisioning half, open at the end of session 11, is now closed: watcher-redis (a Render "
+         "Key Value instance in Frankfurt) and <b>watcher-worker</b> &mdash; a paid Background "
+         "Worker running arq apps.api.worker.WorkerSettings &mdash; both exist and are live, the "
+         "worker's own logs confirming it started for one function (consume_message) and connected "
+         "to Redis. Verified via the Render MCP this session"),
     ]))
 
 story.append(Spacer(1, 10))
@@ -445,8 +442,9 @@ story.append(PageBreak())
 
 # ---------------------------------------------------------------- page 5
 story.extend(section(
-    "Track 2 &mdash; Make it a receptionist. &nbsp;[2.7, 2.8 REMAIN]",
-    "What remains is a measured prompt and more than one property.",
+    "Track 2 &mdash; Make it a receptionist. &nbsp;[COMPLETE]",
+    "2.7 and 2.8 both landed this session &mdash; the prompt is measured (0.98, v3) and a client "
+    "can be an agency. Track 2 is done.",
     [
         ("2.1", "Conversations, tasks and slot filling", "HIGH", "Hard", "spent",
          "<b>WIRED (A5)</b> &mdash; 2.0d spent here, the wiring priced in A5. Slot extraction is "
@@ -469,12 +467,27 @@ story.extend(section(
          "<b>DONE</b> &mdash; golden set 8 &rarr; 50 across all 19 intents"),
         ("2.6", "Intent taxonomy unification", "DONE", "Easy", "0.5",
          "<b>DONE</b> &mdash; 19 vocabulary-aligned intents"),
-        ("2.7", "Re-record the eval under prompt v3", "MED", "Easy", "0.5",
-         "<b>UNBLOCKED</b> &mdash; A3 landed; needs only a key. Add Franco-Arabic cases, and "
-         "settle the two open numbers on page 9. G3 does not move this number: an emergency "
-         "bypasses the classifier, so it is not a case the eval scores"),
-        ("2.8", "Many properties per client", "HIGH", "Moderate", "1.0",
-         "properties table, per-property fact scoping, message &rarr; property resolution"),
+        ("2.7", "Re-record the eval under prompt v3", "DONE", "Easy", "0.5",
+         "<b>DONE</b> &mdash; the fixtures were re-recorded live against claude-haiku-4-5 under "
+         "prompt v3 (scripts/record_fixtures.py, first pass only, escalation pinned off) and the "
+         "baseline moved from v2's <b>0.88 to a measured 0.98</b> (55/56). Six Franco-Arabic cases "
+         "were added to the golden set in the same pass (50 &rarr; 56); the model handled all six. "
+         "The one miss is a borderline general_info-vs-property_question case ('where is the "
+         "nearest supermarket') the model called property_question at 0.78 &mdash; below the "
+         "escalation threshold, so production re-runs it on the larger model rather than acting on "
+         "the cheap guess. scripts/measure_prompt.py also settled the two page-9 numbers: the "
+         "system prompt is 21,777 characters, clear of Haiku 4.5's 4,096-token cache floor. G3 does "
+         "not move the number: an emergency bypasses the classifier"),
+        ("2.8", "Many properties per client", "DONE", "Moderate", "1.0",
+         "<b>DONE (code)</b> &mdash; a properties table (migration 006) behind the same forced RLS "
+         "every tenant table carries, a nullable facts.property_id that scopes a fact to one unit "
+         "(NULL = tenant-wide, the common case), and message &rarr; property resolution "
+         "(core/property.py): an explicit endpoint hint wins, else a single-property tenant "
+         "resolves to its one unit, else tenant-wide facts only &mdash; a guest on a shared number "
+         "is never answered from the wrong unit's sheet. The knowledge lookup returns the resolved "
+         "property's facts plus the tenant-wide ones. 521 &rarr; 535 tests. Migration 006 applies "
+         "to production on deploy, the same step 005 needed (D5's editing UI carries the "
+         "door/key/unit-code exclusion forward when it lands)"),
     ]))
 
 story.append(Spacer(1, 8))
@@ -489,11 +502,13 @@ story.append(banner(
 
 story.append(Spacer(1, 8))
 story.append(banner(
-    "<b>The eval is still not measuring the prompt.</b> The gate runs and passes, but it replays "
-    "fixtures keyed by message text and recorded under prompt v2, so it reports 88% whatever the "
-    "prompt says. Until 2.7 runs, treat 0.88 as v2's number. baseline.json says so in the file, "
-    "and correctly records claude-haiku-4-5-20251001 as the model that produced those fixtures.",
-    URG["MED"]))
+    "<b>The eval now measures the prompt.</b> For four revisions the gate replayed v2 fixtures and "
+    "reported 88% whatever the prompt said. 2.7 re-recorded the fixtures live under prompt v3 "
+    "(claude-haiku-4-5, first pass only), and the number moved to a <b>measured 0.98</b> (55/56) "
+    "&mdash; the baseline in baseline.json is now v3's, not v2's. The gate still replays the "
+    "recorded outputs for determinism (no key in CI); what changed is that the outputs are v3's. "
+    "Six Franco-Arabic cases were added to the golden set in the same pass.",
+    DONE_GREEN))
 
 story.append(PageBreak())
 
@@ -686,31 +701,33 @@ story.append(notes_table([
      "to do before a real guest can reach the number"),
 ], first_col=118))
 
-story.append(Paragraph("Two numbers nobody has measured, both cheap to settle during 2.7", H2))
+story.append(Paragraph("Two numbers 2.7 settled, and the tool that keeps them settled", H2))
 story.append(notes_table([
     ("1. The prompt's real token count",
-     "~5k is a characters&divide;4 estimate. Haiku 4.5 will not cache a prefix below <b>4,096 "
-     "tokens</b>, and the cheap tier is where caching pays for itself. The estimate clears the "
-     "floor by ~30%, and the true count is probably higher (Arabic and Franco-Arabic tokenize "
-     "worse than the approximation), so caching almost certainly activates &mdash; but if the "
-     "vocabulary shrinks it stops silently: no error, just a larger bill. Sonnet 5's floor is "
-     "1,024, so escalation is not exposed either way"),
+     "The system prompt is <b>21,777 characters</b> (measured, not estimated), ~5.4k tokens by the "
+     "characters&divide;4 rule &mdash; clear of Haiku 4.5's <b>4,096-token</b> cache floor, so the "
+     "cacheable prefix does cache. scripts/measure_prompt.py prints the exact count.tokens figure "
+     "and warns if the prefix ever falls below the floor (a shrinking vocabulary would stop caching "
+     "silently: no error, just a larger bill). Sonnet 5's floor is 1,024, so escalation is not "
+     "exposed either way"),
     ("2. Cost per message",
-     "Still unmeasured, but <b>measurable</b>: TokenUsage reports cached versus fresh input tokens "
-     "per call, normalised across both providers. Measure before quoting a price. G3 makes one "
-     "class of message free: an emergency never reaches a model"),
+     "scripts/measure_prompt.py computes it from the measured token count and Haiku 4.5 pricing "
+     "($1/$5 per MTok, cache read ~$0.10): a cold message pays full input on the whole prefix, a "
+     "warm one pays cache-read, and the tool prints both. G3 makes one class of message free: an "
+     "emergency never reaches a model"),
 ], first_col=118))
 
 story.append(Paragraph("How the total reconciles", H2))
 story.append(Paragraph(
-    "A 0 + B 0.5 + D 13.75 + E 4.5 + G 4.0 + (2.7, 2.8) 1.5 + (3.1, 3.2, 3.3) 5.5 = "
-    "<b>29.75</b>", BODY))
+    "A 0 + B 0.25 + D 13.75 + E 4.5 + G 4.0 + Track 2 (complete) 0 + (3.1, 3.2, 3.3) 5.5 = "
+    "<b>28.0</b> &mdash; 2.7 and 2.8 delivered this session close Track 2", BODY))
 story.append(Spacer(1, 4))
 story.append(Paragraph(
-    "Rows 2.1, 2.2, 2.4 and B5 show &ldquo;spent&rdquo; or 0 rather than a number because their "
+    "Rows 2.1, 2.2, 2.4, 2.7, 2.8 and B5 show &ldquo;spent&rdquo; or 0 rather than a number because their "
     "days are already delivered and their wiring was priced in A5, A6 and the sessions that built "
-    "them &mdash; adding them would double-count. B4's remaining 0.5 is operational (a Meta "
-    "dashboard step, an env var, a plan upgrade), not engineering. P1&ndash;P5 is excluded: "
+    "them &mdash; adding them would double-count. B4's remaining 0.25 is operational (a plan "
+    "upgrade), not engineering; the subscription, the operator number and the worker are done. "
+    "P1&ndash;P5 is excluded: "
     "founder and operator time, not engineering. Counting scope loosely is what produced the 5.75 "
     "figure that v2.1 replaced, so the arithmetic is stated rather than implied.", NOTE))
 
@@ -722,12 +739,12 @@ dates = Table([
     [Paragraph("<b>Milestone</b>", CELL), Paragraph("<b>v2.8 said</b>", CELL),
      Paragraph("<b>Now</b>", CELL), Paragraph("<b>Status</b>", CELL)],
     [Paragraph("M1 &mdash; answers a real message, safely", CELLB),
-     Paragraph("~4 days", NOTE), Paragraph("<b>~0.5 days</b>", NOTE),
-     Paragraph("<b>NEXT</b> &mdash; B4 alone. It is deployed, it answers, as of G3 it answers "
-               "<i>safely</i>, and as of 2.4 it has something true to say. What is left of this "
-               "milestone is a checklist &mdash; and the subscription item on it needs to "
-               "actually be redone, not just re-confirmed: this session found no evidence Meta "
-               "has ever reached the service", NOTE)],
+     Paragraph("~4 days", NOTE), Paragraph("<b>~0.25 days</b>", NOTE),
+     Paragraph("<b>NEXT</b> &mdash; B4's last item alone. It is deployed, it answers, as of G3 it "
+               "answers <i>safely</i>, and as of 2.4 it has something true to say. The webhook "
+               "subscription, the operator number and the worker are all reported or verified done "
+               "this session; what remains is the paid Render upgrade. The positive proof still "
+               "worth watching for is the first real inbound message landing a row in messages", NOTE)],
     [Paragraph("M2 &mdash; you can watch and correct it", CELLB),
      Paragraph("+13.75 days", NOTE), Paragraph("+13.75 days", NOTE),
      Paragraph("PENDING &mdash; Track D, six receptionist views", NOTE)],
@@ -754,10 +771,11 @@ story.append(Spacer(1, 10))
 story.append(banner(
     "<b>Read M1 carefully, because its shape changed rather than only its number.</b> In v2.8 the "
     "first milestone contained a hazard: a deployed receptionist that answered a gas leak with a "
-    "note about maintenance. As of v2.9 that was closed; as of this revision it also has "
-    "something true to say. It now contains a Meta subscription and four configuration values, "
-    "nothing else. The remaining risk on the path to a pilot is <b>operational</b>, and "
-    "operational risk is the kind a checklist closes.",
+    "note about maintenance. As of v2.9 that was closed; as of 2.4 it also has something true to "
+    "say. As of this revision the checklist is down to its last line &mdash; a paid Render plan "
+    "&mdash; with the subscription, the operator number and the worker reported or verified done. "
+    "The remaining risk on the path to a pilot is <b>operational</b>, and operational risk is the "
+    "kind a checklist closes.",
     DONE_GREEN))
 
 story.append(PageBreak())
@@ -778,10 +796,11 @@ story.append(notes_table([
      "gas&rdquo; matches neither declared gas phrase. A test asserts this so it cannot be "
      "forgotten, and the fix is one line of YAML that touches no code"),
     ("Nobody is told, because nobody is configured",
-     "<b>NEW.</b> Without CONTROL_CHAT_PHONE_E164 the alert is a log line. The process warns at "
-     "startup and refuses nothing, which is the right trade for a service that still ingests and "
-     "files &mdash; and the wrong state to point a guest's number at. It is now item 3 on B4's "
-     "checklist"),
+     "<b>Reported done.</b> Without CONTROL_CHAT_PHONE_E164 the alert is a log line; the process "
+     "warns at startup and refuses nothing, which is the right trade for a service that still "
+     "ingests and files &mdash; and the wrong state to point a guest's number at. The operator "
+     "reports it set this session; the deployed worker still logged the startup warning at last "
+     "check, so a redeploy confirming the warning is gone is the positive proof"),
     ("The alert is not the phone call the vocabulary asks for",
      "<b>NEW, bounded and reported.</b> A message can be missed in a way a ringing phone cannot. "
      "The gap is visible in AlertOutcome rather than smoothed over, and closing it needs a voice "
@@ -813,35 +832,34 @@ story.append(notes_table([
      "had no source. v2.9 re-derives v2.8 and folds session 9 into it. The rule stands: edit "
      "docs/make_roadmap.py and re-run it; never hand-edit the PDF"),
     ("Two messages arriving at once",
-     "<b>Narrowed, not closed.</b> Two turns in one thread classified concurrently can still race "
-     "and open two conversations while the API runs on the in-process pool it has run on since "
-     "A4. B5's durable queue is built and tested but not deployed &mdash; ordering only actually "
-     "changes once REDIS_URL is set and an arq worker is running. Recorded rather than papered "
-     "over with a lock that would not survive a second process"),
+     "<b>Infrastructure now in place.</b> B5's durable queue and its arq worker (watcher-worker) "
+     "are deployed and consuming as of this session. Ordering only actually changes once REDIS_URL "
+     "is set on watcher-api to switch it to the producer branch &mdash; a deliberate step, taken "
+     "after the worker is confirmed consuming, so a message can't be accepted and then never "
+     "replied to. Until then the API still runs on the in-process pool it has since A4"),
     ("Webhook subscription was reported done and was not",
-     "<b>NEW.</b> Carried forward across three sessions as the operator's own account. This "
-     "session checked it directly against Render's own logs rather than repeating the claim: zero "
-     "requests to /webhook, ever, and zero rows in the messages table. The infrastructure "
-     "underneath it &mdash; the custom domain, both Meta credentials &mdash; is genuinely correct, "
-     "which is what made the claim plausible. The lesson is not the fix; it's that this line item "
-     "needs a positive check (a real handshake or a real message showing up), not a status carried "
-     "forward from an earlier session's belief"),
+     "<b>Reported closed operator-side; positive proof still pending.</b> Session 11 checked it "
+     "directly &mdash; zero /webhook requests ever, zero messages rows &mdash; against a genuinely "
+     "correct infrastructure (custom domain, both Meta credentials). This session the operator "
+     "reports the subscription and the operator number completed. The standing lesson holds: this "
+     "line closes on a positive check &mdash; a real handshake or a real message landing a row in "
+     "messages &mdash; not on a status carried forward. At check time both were still empty, so the "
+     "first inbound message is the thing to watch for"),
 ], first_col=132))
 
 story.append(Spacer(1, 10))
 story.append(banner(
-    "<b>If you do only one thing next session: B4, and actually redo the Meta subscription.</b> "
-    "Not D, not G1, and not 2.4 or B5 &mdash; both are done. The receptionist answers, it is "
-    "deployed, it knows when to stop answering and fetch a person, and it now has something true "
-    "to say &mdash; to a number nobody can message yet, because Render's own logs show nothing "
-    "ever has. Go into the Meta App Dashboard, WhatsApp &rarr; Configuration &rarr; Webhook, and "
-    "click Verify and Save against https://webhook.automera.co/webhook with the &ldquo;messages&rdquo; "
-    "field subscribed &mdash; do not just check that a callback URL is filled in. Then send one "
-    "real WhatsApp message and confirm it shows up (a row in the messages table, or a POST "
-    "/webhook 200 in Render's logs). What is left after that: CONTROL_CHAT_PHONE_E164, and a paid "
-    "instance so a cold start does not read to Meta as a timeout. <b>And before any of it, spend "
-    "thirty minutes widening the emergency trigger phrases</b> &mdash; it is the operator's edit, "
-    "it changes no code, and it is the cheapest safety on the board.",
+    "<b>If you do only one thing next session: confirm B4 with a real message, then upgrade the "
+    "Render plan.</b> Not D, not G1, and not 2.4 or B5 &mdash; all done, and B5's worker is now "
+    "live. The receptionist answers, it is deployed, it knows when to stop and fetch a person, it "
+    "has something true to say, and the facts table is live in production. The webhook "
+    "subscription and the operator number are reported done operator-side; the one engineering-"
+    "adjacent item left is moving watcher-api off the free plan so a cold start does not read to "
+    "Meta as a timeout. <b>The positive proof to insist on</b> is still the first real WhatsApp "
+    "message landing a row in the messages table (or a POST /webhook 200 in Render's logs) &mdash; "
+    "at this session's check both were empty, so treat B4 as closed only once one appears. <b>And "
+    "cheaply, spend thirty minutes widening the emergency trigger phrases</b> &mdash; it is the "
+    "operator's edit, it changes no code, and it is the cheapest safety on the board.",
     URG["NOW"]))
 
 story.append(PageBreak())
@@ -926,6 +944,24 @@ log = Table([
                "session's tooling can only create as a (wrong) Web Service, plus secrets only the "
                "operator can copy over, so REDIS_URL stays unset on watcher-api until it exists", NOTE),
      Paragraph("<b>506 &rarr; 521</b>", NOTE), Paragraph("<b>1.0</b>", CELLB)],
+    [Paragraph("12", CELLB),
+     Paragraph("<b>B4 and B5 closed on the roadmap; migration 005 applied to production.</b> "
+               "Verified the live systems rather than the handoff: watcher-worker &mdash; the arq "
+               "Background Worker that was session 11's one open piece &mdash; now exists as a paid "
+               "Render service, deployed and consuming (logs confirm it started for consume_message "
+               "and connected to Redis), so B5 is fully done. B4's webhook subscription and operator "
+               "number are taken as completed operator-side, leaving only the paid watcher-api "
+               "upgrade &mdash; B4 down to 0.25d. Found production schema still at 004 with migration "
+               "005 (2.4's facts table) never applied, and applied it: the live schema is now "
+               "005_facts, RLS forced, tenant-isolation policy and watcher_app grant in place. "
+               "Then delivered <b>item 2.8</b> &mdash; a properties table (migration 006), a "
+               "nullable facts.property_id scoping a fact to one unit, and message&nbsp;&rarr;"
+               "&nbsp;property resolution (core/property.py) &mdash; and <b>item 2.7</b>: "
+               "re-recorded the eval live under prompt v3 (scripts/record_fixtures.py, first-pass "
+               "claude-haiku-4-5), moving the baseline from v2's 0.88 to a measured 0.98 (55/56), "
+               "and added six Franco-Arabic golden cases. scripts/measure_prompt.py settled the "
+               "prompt size (21,777 chars). Track 2 complete. Decisions D41&ndash;D43", NOTE),
+     Paragraph("<b>521 &rarr; 535</b>", NOTE), Paragraph("<b>1.5</b>", CELLB)],
 ], colWidths=[44, 296, 68, 48], hAlign="LEFT")
 log.setStyle(TableStyle([
     ("BACKGROUND", (0, 0), (-1, 0), BAND),
@@ -940,8 +976,9 @@ log.setStyle(TableStyle([
 story.append(log)
 story.append(Spacer(1, 6))
 story.append(Paragraph(
-    "<b>Cumulative: 22.5 engineering days delivered. ~29.75 remaining.</b> Eleven sessions, and "
-    "the observed rate holds at 1&ndash;3 days each.", SMALL))
+    "<b>Cumulative: 24.0 engineering days delivered. ~28.0 remaining.</b> Twelve sessions &mdash; "
+    "session 12 closed B4/B5's infrastructure, applied migration 005, and delivered 2.7 and 2.8, "
+    "completing Track 2 &mdash; and the observed rate holds at 1&ndash;3 days each.", SMALL))
 
 
 # ---------------------------------------------------------------- chrome
