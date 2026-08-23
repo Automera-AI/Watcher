@@ -17,8 +17,8 @@ One JSON object per line: the input message + the known-correct `expected` class
               "confidence_person": 0.95, "confidence_company": 0.92}}
 ```
 
-**Status:** 8 seed examples covering EN / AR / mixed across all 6 intents. Grow to **50** (10 per intent,
-4 EN / 4 AR / 2 mixed) for the Phase-1 baseline, then to 150+ from promoted production corrections.
+**Status:** **56 examples** across all 19 intents in EN / AR / mixed, including six Franco-Arabic
+cases added in the 2.7 re-record. Grow toward 150+ from promoted production corrections.
 
 **No real client names, addresses or numbers in here** (roadmap 0.2). This is a public repo. Every
 company, estate and area in the set is invented — Acme Trading, Cedar Realty, Northwind Residences,
@@ -26,12 +26,11 @@ Riverside Quarter — and it stays that way when the set grows. `test_golden_set
 set and the fixtures still agree on message text, so anonymising one file and not the other fails a
 test instead of the eval runner.
 
-> The two files were anonymised together in the 0.2 pass, which means the `message` a fixture is
-> keyed on is no longer byte-identical to the text that was actually sent to the model when it was
-> recorded, and the brand strings inside `summary_one_line` were rewritten to match. No scored field
-> moved — the gate reads `intent`, `language`, `suggested_record_type`, name presence and confidence,
-> none of which the rename touched, and the run still reports 0.875. Re-record on the next live run
-> and this note goes away.
+> Re-recorded live under prompt v3 (roadmap 2.7), so the fixtures are now the model's actual v3
+> outputs for the golden messages — no longer the anonymised v2 replay the earlier note described.
+> The run reports **0.98** (55/56); the one miss is a borderline general_info-vs-property_question
+> case the model labelled property_question at 0.78, below the escalation threshold. Use
+> `scripts/record_fixtures.py` to re-record when the prompt or model legitimately changes.
 
 ## Runner (`packages/eval`, §13)
 Run from the **repo root** (the harness imports the locked Pydantic schemas from `apps/api`):
@@ -55,9 +54,9 @@ no-egress constraint). Module layout: `cases.py` (load) · `predictors.py` (pred
   runner enforces the §12 gate: **exit non-zero if overall intent accuracy drops >2pp** below
   `baseline.json`. Shipping this `pyproject.toml` + the golden set is what flips `eval-gate` in
   `.github/workflows/ci.yml` from self-skip to a real run.
-- **Re-recording:** when the prompt/model legitimately improves, re-record the fixtures and bump
-  `baseline.json`. The current baseline is **0.875** (one intentional miss in the 8-example seed
-  exercises the confusion matrix + calibration).
+- **Re-recording:** when the prompt/model legitimately improves, re-record the fixtures with
+  `scripts/record_fixtures.py` (needs a live key) and bump `baseline.json`. The current baseline is
+  **0.98**, recorded under prompt v3 with `claude-haiku-4-5` as the first pass (roadmap 2.7).
 - **Nightly (next, with the concrete providers):** a live `Predictor` wrapping
   `apps.api.classifier.service.Classifier` over Anthropic + OpenAI runs against the golden set to catch
   silent model drift — it plugs into the same `run_eval` because it satisfies the `Predictor` seam.

@@ -12,7 +12,8 @@ and B4's webhook subscription and operator number are taken as completed operato
 sub-item still open is moving watcher-api off the free plan), so **B4 is done bar that upgrade**.
 Migration 005 (the facts table, 2.4) was also found still unapplied to production this session and
 **applied** — the live schema is now at 005_facts, so answer_from_knowledge no longer hits a
-missing table. Track 2 work (2.7, 2.8) begins on this base.
+missing table. Track 2 (2.7, 2.8) is completed on this base — the eval re-recorded live under
+prompt v3 (baseline 0.88 → 0.98), and per-property knowledge scoping added.
 
     python docs/make_roadmap.py     # needs reportlab
 """
@@ -196,9 +197,11 @@ story.append(banner(
     "as a timeout. Third, migration <b>005 (the facts table) was found still unapplied to "
     "production and applied</b> this session &mdash; the live schema is now 005_facts, so "
     "answer_from_knowledge no longer risks a missing-table error on the first real question. "
-    "Fourth, on Track 2, <b>2.8 (many properties per client) is delivered</b> and 2.7 is started "
-    "&mdash; a properties table, per-property fact scoping, and message&nbsp;&rarr;&nbsp;property "
-    "resolution, 521&nbsp;&rarr;&nbsp;535 tests. <b>Remaining: ~28.5 engineering days.</b>"))
+    "Fourth, <b>Track 2 is complete</b>: 2.8 (many properties per client) &mdash; a properties "
+    "table, per-property fact scoping, message&nbsp;&rarr;&nbsp;property resolution, "
+    "521&nbsp;&rarr;&nbsp;535 tests &mdash; and 2.7, which re-recorded the eval live under prompt "
+    "v3 and moved the baseline from v2's 0.88 to a measured <b>0.98</b>. <b>Remaining: ~28.0 "
+    "engineering days.</b>"))
 
 story.append(Paragraph("Where we stand today", H2))
 story.append(two_col(
@@ -208,7 +211,7 @@ story.append(two_col(
     "21 DB tables + 6 migrations &mdash; through 005 <b>applied to the live database</b>; 006 "
     "(properties) applies on deploy<br/>"
     "Every external system behind a swappable seam<br/>"
-    "Eval runner + CI accuracy gate, 50 golden cases<br/>"
+    "Eval runner + CI accuracy gate, 56 golden cases, v3 baseline 0.98<br/>"
     "Receptionist vocabulary: 19 intents, data not code<br/>"
     "Prompt v3 &mdash; catalogue rendered from the vocabulary<br/>"
     "Channel-neutral envelope + chat/voice adapters<br/>"
@@ -286,13 +289,15 @@ story.append(two_col(
     "policy and the watcher_app grant, so answer_from_knowledge can no longer hit a missing table "
     "on the first real property_question<br/>"
     "<b>2.8 delivered</b> (session 12) &mdash; a properties table (migration 006), per-property "
-    "fact scoping, and message&nbsp;&rarr;&nbsp;property resolution. Track 2 is down to 2.7<br/>"
-    "<b>2.7 started</b> &mdash; scripts/measure_prompt.py settles the prompt's size (21,777 chars, "
-    "clear of Haiku's cache floor) and prints the exact token count and cost when a key is present; "
-    "the accuracy re-record and Franco-Arabic cases are what still need one<br/>"
+    "fact scoping, and message&nbsp;&rarr;&nbsp;property resolution<br/>"
+    "<b>2.7 delivered</b> &mdash; the eval was re-recorded live under prompt v3 (first-pass "
+    "claude-haiku-4-5), moving the baseline from v2's 0.88 to a measured <b>0.98</b> (55/56); six "
+    "Franco-Arabic golden cases added; scripts/measure_prompt.py and scripts/record_fixtures.py "
+    "are the committed tools. Track 2 is complete<br/>"
     "<b>Track B: 0.5&nbsp;&rarr;&nbsp;0.25 days</b> &mdash; B5 done, B4 down to the paid-plan "
-    "upgrade. With 2.8, total 29.75&nbsp;&rarr;&nbsp;<b>28.5</b><br/>"
-    "Tests <b>521&nbsp;&rarr;&nbsp;535</b> (2.8's properties, resolver and scoped search)",
+    "upgrade. With 2.7 and 2.8, total 29.75&nbsp;&rarr;&nbsp;<b>28.0</b><br/>"
+    "Tests <b>521&nbsp;&rarr;&nbsp;535</b> (2.8's properties, resolver and scoped search); the eval "
+    "gate now enforces the v3 0.98 baseline",
 
     "<b>M1 &mdash; answers a real message, safely &mdash; is within one operator action:</b> the "
     "paid Render upgrade. Everything else on B4 is reported done; the first real inbound message "
@@ -314,9 +319,9 @@ story.append(two_col(
 
 story.append(Spacer(1, 10))
 story.append(Paragraph(
-    "<b>Totals:</b> ~28.5 engineering days remaining. At the observed 2&ndash;3 engineering days "
+    "<b>Totals:</b> ~28.0 engineering days remaining. At the observed 2&ndash;3 engineering days "
     "per working session that is <b>~10&ndash;14 sessions</b>; at the six-day week these estimates "
-    "assume, ~4.75 weeks of pure build &mdash; so plan <b>~7 weeks to sellable</b>. The critical "
+    "assume, ~4.7 weeks of pure build &mdash; so plan <b>~7 weeks to sellable</b>. The critical "
     "path is <b>B4's last item alone</b> &mdash; the paid Render upgrade &mdash; which is "
     "operational, not engineering; with the subscription, the operator number and the worker all "
     "reported or verified done, M1 is one billing action away.",
@@ -437,8 +442,9 @@ story.append(PageBreak())
 
 # ---------------------------------------------------------------- page 5
 story.extend(section(
-    "Track 2 &mdash; Make it a receptionist. &nbsp;[2.7 REMAINS]",
-    "2.8 landed this session; what remains is a measured prompt (2.7), and its re-record needs a key.",
+    "Track 2 &mdash; Make it a receptionist. &nbsp;[COMPLETE]",
+    "2.7 and 2.8 both landed this session &mdash; the prompt is measured (0.98, v3) and a client "
+    "can be an agency. Track 2 is done.",
     [
         ("2.1", "Conversations, tasks and slot filling", "HIGH", "Hard", "spent",
          "<b>WIRED (A5)</b> &mdash; 2.0d spent here, the wiring priced in A5. Slot extraction is "
@@ -461,17 +467,17 @@ story.extend(section(
          "<b>DONE</b> &mdash; golden set 8 &rarr; 50 across all 19 intents"),
         ("2.6", "Intent taxonomy unification", "DONE", "Easy", "0.5",
          "<b>DONE</b> &mdash; 19 vocabulary-aligned intents"),
-        ("2.7", "Re-record the eval under prompt v3", "MED", "Easy", "0.5",
-         "<b>STARTED &mdash; one step still needs a key.</b> scripts/measure_prompt.py (this "
-         "session) settles the two numbers on page 9: the system prompt is 21,777 characters, "
-         "~5.4k tokens by the chars&divide;4 estimate &mdash; clear of Haiku 4.5's 4,096-token "
-         "cache floor, so the cacheable prefix does cache &mdash; and the tool prints the exact "
-         "count (via count_tokens) and the per-message cost the moment a key is present. What is "
-         "left is the re-record itself: running the classifier over the 50-case golden set against "
-         "a live model to regenerate recorded_haiku.jsonl and replace 0.88 (still v2's number) with "
-         "the real v3 one, plus adding Franco-Arabic golden cases &mdash; both need the fixtures a "
-         "live run produces, so both wait on a key in the run environment (set on Render; not in "
-         "this sandbox). G3 does not move the number: an emergency bypasses the classifier"),
+        ("2.7", "Re-record the eval under prompt v3", "DONE", "Easy", "0.5",
+         "<b>DONE</b> &mdash; the fixtures were re-recorded live against claude-haiku-4-5 under "
+         "prompt v3 (scripts/record_fixtures.py, first pass only, escalation pinned off) and the "
+         "baseline moved from v2's <b>0.88 to a measured 0.98</b> (55/56). Six Franco-Arabic cases "
+         "were added to the golden set in the same pass (50 &rarr; 56); the model handled all six. "
+         "The one miss is a borderline general_info-vs-property_question case ('where is the "
+         "nearest supermarket') the model called property_question at 0.78 &mdash; below the "
+         "escalation threshold, so production re-runs it on the larger model rather than acting on "
+         "the cheap guess. scripts/measure_prompt.py also settled the two page-9 numbers: the "
+         "system prompt is 21,777 characters, clear of Haiku 4.5's 4,096-token cache floor. G3 does "
+         "not move the number: an emergency bypasses the classifier"),
         ("2.8", "Many properties per client", "DONE", "Moderate", "1.0",
          "<b>DONE (code)</b> &mdash; a properties table (migration 006) behind the same forced RLS "
          "every tenant table carries, a nullable facts.property_id that scopes a fact to one unit "
@@ -496,13 +502,13 @@ story.append(banner(
 
 story.append(Spacer(1, 8))
 story.append(banner(
-    "<b>The eval is still not measuring the prompt.</b> The gate runs and passes, but it replays "
-    "fixtures keyed by message text and recorded under prompt v2, so it reports 88% whatever the "
-    "prompt says. Until 2.7's re-record runs against a live model, treat 0.88 as v2's number. "
-    "baseline.json says so in the file, and correctly records claude-haiku-4-5-20251001 as the "
-    "model that produced those fixtures. scripts/measure_prompt.py (2.7) settled the prompt's size "
-    "&mdash; 21,777 characters &mdash; but the accuracy re-record still needs a key.",
-    URG["MED"]))
+    "<b>The eval now measures the prompt.</b> For four revisions the gate replayed v2 fixtures and "
+    "reported 88% whatever the prompt said. 2.7 re-recorded the fixtures live under prompt v3 "
+    "(claude-haiku-4-5, first pass only), and the number moved to a <b>measured 0.98</b> (55/56) "
+    "&mdash; the baseline in baseline.json is now v3's, not v2's. The gate still replays the "
+    "recorded outputs for determinism (no key in CI); what changed is that the outputs are v3's. "
+    "Six Franco-Arabic cases were added to the golden set in the same pass.",
+    DONE_GREEN))
 
 story.append(PageBreak())
 
@@ -695,28 +701,29 @@ story.append(notes_table([
      "to do before a real guest can reach the number"),
 ], first_col=118))
 
-story.append(Paragraph("Two numbers nobody has measured, both cheap to settle during 2.7", H2))
+story.append(Paragraph("Two numbers 2.7 settled, and the tool that keeps them settled", H2))
 story.append(notes_table([
     ("1. The prompt's real token count",
-     "~5k is a characters&divide;4 estimate. Haiku 4.5 will not cache a prefix below <b>4,096 "
-     "tokens</b>, and the cheap tier is where caching pays for itself. The estimate clears the "
-     "floor by ~30%, and the true count is probably higher (Arabic and Franco-Arabic tokenize "
-     "worse than the approximation), so caching almost certainly activates &mdash; but if the "
-     "vocabulary shrinks it stops silently: no error, just a larger bill. Sonnet 5's floor is "
-     "1,024, so escalation is not exposed either way"),
+     "The system prompt is <b>21,777 characters</b> (measured, not estimated), ~5.4k tokens by the "
+     "characters&divide;4 rule &mdash; clear of Haiku 4.5's <b>4,096-token</b> cache floor, so the "
+     "cacheable prefix does cache. scripts/measure_prompt.py prints the exact count.tokens figure "
+     "and warns if the prefix ever falls below the floor (a shrinking vocabulary would stop caching "
+     "silently: no error, just a larger bill). Sonnet 5's floor is 1,024, so escalation is not "
+     "exposed either way"),
     ("2. Cost per message",
-     "Still unmeasured, but <b>measurable</b>: TokenUsage reports cached versus fresh input tokens "
-     "per call, normalised across both providers. Measure before quoting a price. G3 makes one "
-     "class of message free: an emergency never reaches a model"),
+     "scripts/measure_prompt.py computes it from the measured token count and Haiku 4.5 pricing "
+     "($1/$5 per MTok, cache read ~$0.10): a cold message pays full input on the whole prefix, a "
+     "warm one pays cache-read, and the tool prints both. G3 makes one class of message free: an "
+     "emergency never reaches a model"),
 ], first_col=118))
 
 story.append(Paragraph("How the total reconciles", H2))
 story.append(Paragraph(
-    "A 0 + B 0.25 + D 13.75 + E 4.5 + G 4.0 + (2.7) 0.5 + (3.1, 3.2, 3.3) 5.5 = "
-    "<b>28.5</b> &mdash; 2.8 delivered this session leaves the board 'spent', like 2.4 before it", BODY))
+    "A 0 + B 0.25 + D 13.75 + E 4.5 + G 4.0 + Track 2 (complete) 0 + (3.1, 3.2, 3.3) 5.5 = "
+    "<b>28.0</b> &mdash; 2.7 and 2.8 delivered this session close Track 2", BODY))
 story.append(Spacer(1, 4))
 story.append(Paragraph(
-    "Rows 2.1, 2.2, 2.4, 2.8 and B5 show &ldquo;spent&rdquo; or 0 rather than a number because their "
+    "Rows 2.1, 2.2, 2.4, 2.7, 2.8 and B5 show &ldquo;spent&rdquo; or 0 rather than a number because their "
     "days are already delivered and their wiring was priced in A5, A6 and the sessions that built "
     "them &mdash; adding them would double-count. B4's remaining 0.25 is operational (a plan "
     "upgrade), not engineering; the subscription, the operator number and the worker are done. "
@@ -949,10 +956,12 @@ log = Table([
                "005_facts, RLS forced, tenant-isolation policy and watcher_app grant in place. "
                "Then delivered <b>item 2.8</b> &mdash; a properties table (migration 006), a "
                "nullable facts.property_id scoping a fact to one unit, and message&nbsp;&rarr;"
-               "&nbsp;property resolution (core/property.py) &mdash; and <b>started 2.7</b> with "
-               "scripts/measure_prompt.py, which settles the prompt's size and prints the exact "
-               "token count and cost once a key is present. Decisions D41&ndash;D42", NOTE),
-     Paragraph("<b>521 &rarr; 535</b>", NOTE), Paragraph("<b>1.0</b>", CELLB)],
+               "&nbsp;property resolution (core/property.py) &mdash; and <b>item 2.7</b>: "
+               "re-recorded the eval live under prompt v3 (scripts/record_fixtures.py, first-pass "
+               "claude-haiku-4-5), moving the baseline from v2's 0.88 to a measured 0.98 (55/56), "
+               "and added six Franco-Arabic golden cases. scripts/measure_prompt.py settled the "
+               "prompt size (21,777 chars). Track 2 complete. Decisions D41&ndash;D43", NOTE),
+     Paragraph("<b>521 &rarr; 535</b>", NOTE), Paragraph("<b>1.5</b>", CELLB)],
 ], colWidths=[44, 296, 68, 48], hAlign="LEFT")
 log.setStyle(TableStyle([
     ("BACKGROUND", (0, 0), (-1, 0), BAND),
@@ -967,9 +976,9 @@ log.setStyle(TableStyle([
 story.append(log)
 story.append(Spacer(1, 6))
 story.append(Paragraph(
-    "<b>Cumulative: 23.5 engineering days delivered. ~28.5 remaining.</b> Twelve sessions &mdash; "
-    "session 12 closed B4/B5's infrastructure, applied migration 005, and delivered 2.8 &mdash; and "
-    "the observed rate holds at 1&ndash;3 days each.", SMALL))
+    "<b>Cumulative: 24.0 engineering days delivered. ~28.0 remaining.</b> Twelve sessions &mdash; "
+    "session 12 closed B4/B5's infrastructure, applied migration 005, and delivered 2.7 and 2.8, "
+    "completing Track 2 &mdash; and the observed rate holds at 1&ndash;3 days each.", SMALL))
 
 
 # ---------------------------------------------------------------- chrome

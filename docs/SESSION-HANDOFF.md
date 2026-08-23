@@ -108,20 +108,30 @@ path (a number wired to one unit) is built and tested but not yet plumbed throug
 because no channel carries a property-scoped endpoint yet. The booking-based signal is 3.1. This
 mirrors 2.4's honesty: do the real bounded thing, document the rest. 521 → 535 tests.
 
-### Part four — item 2.7, started (one step still needs a key)
+### Part four — item 2.7, DONE (re-recorded live under prompt v3)
 
-`scripts/measure_prompt.py` (operator-run, like `make_roadmap.py`) settles the two numbers roadmap
-2.7 leaves open. It reports the system prompt is **21,777 characters** (≈5.4k tokens by the crude
-chars÷4 estimate — clear of Haiku 4.5's 4,096-token cache floor, so the cacheable prefix does
-cache), and prints the **exact** `count_tokens` figure and the per-message cost the moment an
-Anthropic key is present.
+The user provided an Anthropic key for the sandbox, so the re-record ran for real:
 
-**What is still key-gated:** the eval re-record itself — running the classifier over the 50-case
-golden set against a live model to regenerate `packages/eval/fixtures/recorded_haiku.jsonl` and
-replace the 0.88 baseline (still v2's number) with the real v3 one — and adding Franco-Arabic golden
-cases, which need the fixtures that live run produces. The Anthropic keys are set on the Render
-services but **not in a sandbox/dev environment where the re-record runs**, and the Render MCP can't
-read secret values back. See §4.
+- **Re-recorded the fixtures live.** `scripts/record_fixtures.py` (new, operator-run) runs the
+  classifier's **first pass only** (escalation pinned off, so the number measures the cheap
+  `claude-haiku-4-5` tier every message pays for) over the golden set and rewrites
+  `packages/eval/fixtures/recorded_haiku.jsonl` with the model's actual v3 outputs.
+- **The baseline moved from v2's 0.88 to a measured 0.98** (55/56). `packages/eval/baseline.json`
+  is updated (v3, `claude-haiku-4-5`, fingerprint `77c7550dc0a3`). The one miss is a borderline
+  general_info-vs-property_question case ("where is the nearest supermarket") the model labelled
+  property_question at 0.78 — below the escalation threshold, so production re-runs it on the larger
+  model. Left as-is: it is an honest confusable, not a golden-label bug to paper over.
+- **Six Franco-Arabic golden cases added** (50 → 56), across property_question, access_code_request,
+  checkout_question, maintenance_issue, availability_check, directions. The model handled all six.
+- **The two page-9 numbers are settled** by `scripts/measure_prompt.py`: the system prompt is
+  **21,777 characters** (~5.4k tokens, clear of Haiku's 4,096-token cache floor), and it prints the
+  exact `count_tokens` figure and per-message cost when a key is present.
+- Three eval tests encoded the old assumptions (50 cases; an exact-0.88 baseline; a model far below
+  1.0) and were updated to the new reality while keeping their guarantees. `test_golden_set.py`'s
+  golden↔fixture agreement check still passes. **535 tests still pass** (the 3 that broke now pass).
+
+The key was used only in this environment and never committed (stashed outside the repo tree).
+Track 2 is now complete.
 
 ### Decisions made this session
 
@@ -129,6 +139,7 @@ read secret values back. See §4.
 |---|---|---|
 | How a fact is scoped to a property | **nullable `facts.property_id`; NULL = tenant-wide; lookup unions NULL + resolved id** (D41) | `db/models.py`, `db/knowledge_repo.py` |
 | How a message resolves to a property | **explicit hint wins; else single-property tenant; else None** (D42) | `core/property.py`, `db/property_repo.py` |
+| What the eval baseline measures | **first-pass model only, escalation off, re-recorded live under v3; borderline misses kept** (D43) | `scripts/record_fixtures.py`, `packages/eval/baseline.json` |
 
 ---
 
@@ -156,9 +167,10 @@ read secret values back. See §4.
 - **`REGISTRY` (`conversations/tools.py`) is still process-global mutable state**, and now
   `AnswerFromKnowledge` carries a second collaborator (the property resolver). `configure_knowledge`
   is still the one seam; the `conftest.py` autouse fixture still snapshots/restores it per test.
-- **2.7's 0.88 is still v2's number.** The eval gate replays v2 fixtures keyed by message text, so it
-  reports 0.88 whatever the prompt says. The measurement tool settled the prompt's *size*, not its
-  *accuracy* — that still needs the re-record with a key.
+- **2.7's baseline is now v3's 0.98**, not v2's 0.88 — re-recorded this session. The gate still
+  replays recorded fixtures for CI determinism (no key in CI); what changed is that the recorded
+  outputs are prompt v3's. Re-record with `scripts/record_fixtures.py` (needs a key) when the
+  prompt or model legitimately changes, and bump `baseline.json`.
 - Everything from session 11 not superseded: `MATCH_THRESHOLD = 60.0` untuned beyond one property,
   narrow `intents.yaml` triggers, `DATABASE_URL` must name `watcher_app` not `postgres`, the
   transaction-pooler port 6543, the webhook path is `/webhook`, RLS/adapter rules, D24, `KNOWN_LEAKS`
@@ -168,25 +180,23 @@ read secret values back. See §4.
 
 ## 4. What to do first
 
-**1. Get an Anthropic key into a run environment and finish 2.7.** The re-record is the only Track 2
-work left. With a key set (`ANTHROPIC_API_KEY`), first run `python scripts/measure_prompt.py` to
-capture the exact token count and cost, then re-record the classifier over the golden set against a
-live model, regenerate `packages/eval/fixtures/recorded_haiku.jsonl`, add Franco-Arabic golden
-cases, and bump `packages/eval/baseline.json` to the real v3 accuracy. The keys are on Render but
-not readable back; the re-record runs wherever you have a key locally.
+**1. When 2.8 deploys, apply migration 006** to production `DATABASE_URL` (`alembic upgrade head`, or
+replicate it via the Supabase MCP as 005 was). See §3. This and the two operator items below are all
+that stand between here and M1 — Track 2 and the engineering side of B4/B5 are done.
 
-**2. When 2.8 deploys, apply migration 006** to production `DATABASE_URL` (`alembic upgrade head`, or
-replicate it via the Supabase MCP as 005 was). See §3.
-
-**3. Confirm B4 with a real message.** Send one real WhatsApp message and confirm it produces a
+**2. Confirm B4 with a real message.** Send one real WhatsApp message and confirm it produces a
 `messages` row (or a `POST /webhook` 200 in Render's logs). Until then B4's webhook item is reported
 done, not proven.
 
-**4. Upgrade `watcher-api` off the free plan** — the one remaining B4 item, operational not
+**3. Upgrade `watcher-api` off the free plan** — the one remaining B4 item, operational not
 engineering. A cold start on the free plan reads to Meta as a timeout.
 
-**5. Redeploy and confirm the emergency-alert warning is gone** once `CONTROL_CHAT_PHONE_E164` is
+**4. Redeploy and confirm the emergency-alert warning is gone** once `CONTROL_CHAT_PHONE_E164` is
 actually set on the running service.
+
+**Note on 2.7:** done this session — the eval was re-recorded live under prompt v3, baseline
+0.88 → 0.98. Re-record again (`scripts/record_fixtures.py`, needs a key) only when the prompt or
+model legitimately changes.
 
 ---
 
@@ -205,10 +215,12 @@ actually set on the running service.
 | **Properties migration (new, 2.8)** | `alembic/versions/006_properties.py` — not yet applied to production |
 | The tool registry | `apps/api/conversations/tools.py` — `AnswerFromKnowledge`, `configure_knowledge` |
 | **Prompt-measurement tool (new, 2.7)** | `scripts/measure_prompt.py` |
+| **Fixture re-record tool (new, 2.7)** | `scripts/record_fixtures.py` |
+| **Eval (2.7)** | `packages/eval/baseline.json` (v3, 0.98), `golden/golden_set.jsonl` (56 cases), `fixtures/recorded_haiku.jsonl` (v3), `tests/test_eval.py` (updated) |
 | **2.8 tests (new)** | `apps/api/tests/test_property.py`; updated: `test_receptionist.py`, `test_orchestration.py` |
 | Facts migration | `alembic/versions/005_facts.py` — applied to production this session |
 | Typed config | `apps/api/core/config.py` + `core/settings_base.py` |
-| Locked decisions | `docs/DECISIONS.md` (D41–D42 are this session's) |
+| Locked decisions | `docs/DECISIONS.md` (D41–D43 are this session's) |
 | The roadmap | `docs/make_roadmap.py` → `docs/Watcher_v2_Roadmap.pdf` (**v2.13**) |
 | Render services | `watcher-api` (`srv-da0a81jl550s73d0b1i0`, free), `watcher-worker` (`srv-da4vob3ncjis73fafi10`, starter), `watcher-redis` (`red-da4v8ngu01pc73dfkr30`) |
 
@@ -220,12 +232,12 @@ actually set on the running service.
 |---|---|---|
 | A — Make it run | 0d | complete since session 7 |
 | B — Host it | 0.25d | B1–B3, B5 ✅ — B4 down to the paid-plan upgrade |
-| **2 — Receptionist** | **0.5d** | **2.4, 2.8 ✅** — left: 2.7 (started; re-record needs a key) |
+| **2 — Receptionist** | **0d** | **COMPLETE — 2.4, 2.7, 2.8 ✅** (2.5, 2.6 earlier) |
 | D — Control page | 13.75d | unchanged |
 | G — Guardrails | 4.0d | G3 ✅ — G1, G2, G4 remain |
 | E — Sellable | 4.5d | Blocked on P1 |
 | 3 — Integration | 5.5d | 3.1 blocked on P1 |
-| **Total** | **~28.5d** | at the observed rate, ~7 weeks to sellable |
+| **Total** | **~28.0d** | at the observed rate, ~7 weeks to sellable |
 
 **Milestone M1 — answers a real message, safely:** one operator action away — the paid Render
 upgrade — with the subscription, operator number and worker reported or verified done. The positive
@@ -237,10 +249,10 @@ proof still to watch for is the first real inbound message landing a `messages` 
 
 1. Read §2 and §4 above.
 2. Rebuild the venv from §1 and confirm **535 passed, 2 skipped**.
-3. If a key is available: run `scripts/measure_prompt.py`, then do the 2.7 re-record (the only
-   Track 2 work left).
-4. If 2.8 has deployed: confirm migration 006 was applied to production (`alembic_version` =
+3. If 2.8 has deployed: confirm migration 006 was applied to production (`alembic_version` =
    `006_properties`) — if not, apply it before the first real `property_question` reaches a
    multi-property tenant.
-5. Check whether `watcher-api` has moved off the free plan, and whether a real message has finally
+4. Check whether `watcher-api` has moved off the free plan, and whether a real message has finally
    produced a `messages` row.
+5. Track 2 is complete; the next engineering track with room to move is G (G1/G2/G4) or D — both
+   off the critical path, which is now B4's plan upgrade alone.

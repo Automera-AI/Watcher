@@ -1,8 +1,10 @@
 {
-  "model": "claude-haiku-4-5-20251001",
-  "overall_intent_accuracy": 0.88,
+  "model": "claude-haiku-4-5",
+  "overall_intent_accuracy": 0.98,
   "generated_from": "fixtures/recorded_haiku.jsonl",
-  "recorded_under_prompt_version": "v2",
-  "note": "Phase-1 recorded-fixture baseline (D13-a). The CI eval-gate fails a PR whose overall intent accuracy drops >2pp below this. Re-record fixtures and bump this number when the prompt/model legitimately improves; nightly live runs (Anthropic/OpenAI) catch silent model drift.",
-  "stale_note": "These fixtures were recorded under prompt v2. Prompt v3 (intent catalogue rendered from intents.yaml, tie-break rules, language rules, sender block, confidence rubric) has not been measured: the gate replays recorded outputs, so it still reports 0.88 whatever the prompt says. 0.88 is the v2 number until someone re-records against v3 with a live key, and the six misses it counts are all confusable pairs that v3 writes explicit tie-breaks for. Treat a v3 re-record as the real measurement of this change."
+  "recorded_under_prompt_version": "v3",
+  "system_prompt_fingerprint": "77c7550dc0a3",
+  "golden_set_size": 56,
+  "note": "Phase-1 recorded-fixture baseline (D13-a). The CI eval-gate fails a PR whose overall intent accuracy drops >2pp below this. Re-record fixtures (scripts/record_fixtures.py) and bump this number when the prompt/model legitimately improves; nightly live runs (Anthropic/OpenAI) catch silent model drift.",
+  "recording_note": "Re-recorded under prompt v3 (roadmap 2.7) by running the first-pass model over the 56-case golden set with escalation pinned off, so this measures the cheap tier the way every inbound message pays for it. Measured 0.9821 (55/56); the one miss is a borderline general_info-vs-property_question case ('where is the nearest supermarket') the model labelled property_question at 0.78 — below the escalation threshold, so it re-runs on the larger model in production rather than acting on the cheap guess. Franco-Arabic cases were added to the golden set in the same pass; the model handled all six. The prompt fingerprint above is what actually distinguishes two runs when the version string agrees (PROMPT_VERSION only moves when a human moves it)."
 }

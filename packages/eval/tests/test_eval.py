@@ -47,7 +47,7 @@ def _case(intent: IntentType, *, language: Language = Language.EN) -> EvalCase:
 
 def test_load_golden_validates_against_schema() -> None:
     cases = load_golden(GOLDEN)
-    assert len(cases) == 50
+    assert len(cases) == 56  # 50 + 6 Franco-Arabic cases added in 2.7's re-record
     assert all(isinstance(c.expected, ClassificationResult) for c in cases)
 
 
@@ -136,7 +136,13 @@ def test_baseline_matches_recorded_run() -> None:
         model="baseline-check",
     )
     baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
-    assert report.overall_intent_accuracy == pytest.approx(baseline["overall_intent_accuracy"])
+    # baseline.json states the human-facing 2dp accuracy (55/56 is not a clean decimal, unlike the
+    # 50-case set's 0.88). Rounding the recorded run to that precision still fails loudly on a
+    # fabricated or stale baseline — the guard this test exists to be — while letting the file carry
+    # the number a person reads. The gate's 2pp tolerance, not this test, is the real margin.
+    assert round(report.overall_intent_accuracy, 2) == pytest.approx(
+        baseline["overall_intent_accuracy"]
+    )
 
 
 def test_cli_gate_passes_on_baseline(tmp_path: Path) -> None:
@@ -162,5 +168,20 @@ def test_cli_gate_fails_on_accuracy_drop(tmp_path: Path) -> None:
     inflated.write_text(
         json.dumps({"model": "m", "overall_intent_accuracy": 1.0}), encoding="utf-8"
     )
-    code = main(["--golden", str(GOLDEN), "--fixtures", str(FIXTURES), "--baseline", str(inflated)])
+    # A perfect baseline against a real run that misses at least one case is a drop; `--max-drop 0`
+    # asserts the gate rejects any drop at all. Pinned to 0 rather than the default 2pp because the
+    # v3 model now scores ~98%, so the gap from a 1.0 baseline is under 2pp — the old default would
+    # let this pass and stop testing the fail path.
+    code = main(
+        [
+            "--golden",
+            str(GOLDEN),
+            "--fixtures",
+            str(FIXTURES),
+            "--baseline",
+            str(inflated),
+            "--max-drop",
+            "0.0",
+        ]
+    )
     assert code == 1
