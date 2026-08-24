@@ -12,6 +12,17 @@ from typing import Protocol
 from apps.api.schemas.message import MessageEnvelope
 
 
+class UnknownEndpoint(LookupError):
+    """No enabled configuration matches the endpoint a message arrived at.
+
+    Part of the ``TenantResolver`` contract rather than the resolver implementation's own business,
+    because the webhook route has to be able to *tell this apart* from a transient failure and it
+    cannot import the persistence layer to do it. The distinction is the whole point: a database
+    that is momentarily unreachable is worth a retry, and an endpoint nobody has configured is not
+    — no number of redeliveries writes the missing row.
+    """
+
+
 class MessageRepository(Protocol):
     """Durable storage for raw inbound messages, scoped to a tenant."""
 

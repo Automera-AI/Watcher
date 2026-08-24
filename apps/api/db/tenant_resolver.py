@@ -27,10 +27,9 @@ from sqlalchemy import select
 
 from apps.api.db.engine import SessionScope
 from apps.api.db.models import ChannelConfig
+from apps.api.ingestion.ports import UnknownEndpoint
 
-
-class UnknownEndpoint(LookupError):
-    """No enabled configuration matches the endpoint a message arrived at."""
+__all__ = ["ChannelConfigTenantResolver", "UnknownEndpoint"]
 
 
 class ChannelConfigTenantResolver:
@@ -40,13 +39,20 @@ class ChannelConfigTenantResolver:
         self._scope = scope
 
     def __call__(self, external_id: str | None) -> str:
-        """Resolve, or raise :class:`UnknownEndpoint`.
+        """Resolve, or raise :class:`~apps.api.ingestion.ports.UnknownEndpoint`.
 
-        Raising is deliberate. The alternatives are worse in both directions: guessing a tenant
-        risks writing one customer's message into another's account, and returning quietly loses
-        a real message from a real guest to a configuration mistake nobody would ever see. An
-        unresolved endpoint surfaces as a 500, the sending platform retries, and the retry
-        succeeds once the row exists — which is the behaviour a missing row deserves.
+        Raising rather than guessing is deliberate: inventing a tenant for an endpoint nobody
+        configured risks writing one customer's message into another's account, which is the exact
+        failure this lookup exists to prevent. What raising must *not* do is return quietly — a
+        real message from a real guest lost to a configuration mistake nobody ever sees is the
+        other bad outcome, so the caller is required to make the miss loud.
+
+        This used to argue that the miss should surface as a 500 so the sending platform retries
+        until the row exists. That was wrong about the platform. Meta redelivers over minutes, not
+        the hours or days it takes an operator to notice and write a row, and sustained non-200s
+        get the webhook subscription *disabled* — turning one endpoint's missing config into an
+        outage for every tenant sharing the callback. The route therefore acknowledges the delivery
+        and logs the endpoint plus the payload it dropped; see ``ingestion/router.py``.
         """
         if external_id is None:
             raise UnknownEndpoint(

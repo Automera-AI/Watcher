@@ -14,6 +14,7 @@ the tenant resolver and the router are the production objects, wired by the prod
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import uuid
 from typing import Any
@@ -39,7 +40,6 @@ from apps.api.db.models import (
     Tenant,
     Turn,
 )
-from apps.api.db.tenant_resolver import UnknownEndpoint
 from apps.api.ingestion.security import SIGNATURE_HEADER, expected_signature
 from apps.api.main import assemble, create_application
 from apps.api.orchestration.queue import RedisClassificationQueue, ThreadPoolClassificationQueue
@@ -332,16 +332,23 @@ def test_the_webhook_does_not_wait_for_the_model(settings: Settings, seeded: Dat
 
 
 def test_an_unconfigured_endpoint_is_not_attributed_to_anyone(
-    client: TestClient, seeded: Database
+    client: TestClient, seeded: Database, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """An unresolvable endpoint fails loudly rather than landing in some other tenant's inbox."""
+    """An unresolvable endpoint is dropped loudly rather than landing in some other tenant's inbox.
+
+    Loudly, but with a 200: Meta reads anything else as "redeliver" and eventually disables the
+    subscription, and no redelivery can write the ``channel_configs`` row that is actually missing.
+    The guarantee under test is the isolation one — nothing is written for an endpoint we cannot
+    attribute — plus the warning that lets an operator fix it.
+    """
     body = _payload().replace(ENDPOINT_ID.encode(), b"UNKNOWN")
 
-    with pytest.raises(UnknownEndpoint):
-        _post(client, body)
+    with caplog.at_level(logging.WARNING, logger="apps.api.ingestion.router"):
+        assert _post(client, body) == 200
 
     with seeded.session() as session:
         assert session.query(Message).count() == 0
+    assert "UNKNOWN" in caplog.text
 
 
 def test_low_confidence_is_filed_for_review(settings: Settings, seeded: Database) -> None:
