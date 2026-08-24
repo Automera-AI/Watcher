@@ -56,6 +56,17 @@ class ChannelCredentials(PlaceholderAwareSettings):
             graph_api_version=self.meta_graph_api_version,
         )
 
+    def configured_endpoints(self) -> tuple[str, ...]:
+        """The endpoint identifiers this process expects inbound traffic on, channel-neutrally.
+
+        Today that is the one number it also sends from — receiving and sending are configured
+        separately (``channel_configs`` versus this credential) and nothing forces them to agree,
+        so the composition root checks at startup that a tenant actually claims it. Returned as a
+        tuple, and named without saying "phone", because the second channel is a phone line and the
+        core asking this question must not have to learn a new accessor to keep asking it.
+        """
+        return () if self.whatsapp_phone_number_id is None else (self.whatsapp_phone_number_id,)
+
     def can_send(self) -> bool:
         """Whether replies can go out at all.
 
