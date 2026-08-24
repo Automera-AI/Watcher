@@ -52,7 +52,7 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import Connection, Engine, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
@@ -141,6 +141,34 @@ def create_db_engine(url: str, pool_mode: PoolMode = POOL_MODE_TRANSACTION) -> E
     """An engine for ``url`` under the pooling policy above."""
     dsn, options = engine_arguments(url, pool_mode)
     return create_engine(dsn, **options)
+
+
+#: Advisory-lock key held while migrations run. Any bigint would do; this is ``watcher`` in ASCII
+#: hex so the row in ``pg_locks`` says who is holding it rather than being an anonymous number.
+MIGRATION_LOCK_KEY = 0x77617463686572
+
+
+def lock_for_migrations(connection: Connection) -> None:
+    """Serialize concurrent ``alembic upgrade head`` runs against one database.
+
+    Both Render services migrate on boot and a push to ``main`` redeploys them together, so two
+    processes reach the same ``CREATE TABLE`` within a second of each other. Unserialized, one of
+    them wins and the other dies on a relation that already exists — and dies on every restart
+    after that, because the migration it is trying to apply is still not recorded as applied.
+    Waiting turns that into a no-op: the loser takes the lock after the winner commits, finds the
+    revision already stamped, and starts.
+
+    The transaction-scoped form is not incidental. ``pg_advisory_lock`` is held by the *session*,
+    and behind a transaction pooler the session is handed to somebody else the moment the
+    transaction commits — releasing it correctly would mean pinning a connection the pooler
+    believes it owns. ``pg_advisory_xact_lock`` is released by the commit itself, on whichever
+    backend happens to be holding it, which is the only form that is safe through Supavisor.
+
+    A no-op off Postgres: SQLite has no advisory locks and no concurrent deploy to protect.
+    """
+    if connection.dialect.name != "postgresql":
+        return
+    connection.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": MIGRATION_LOCK_KEY})
 
 
 def set_current_tenant(session: Session, tenant_id: str) -> None:

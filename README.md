@@ -51,7 +51,7 @@ and records the replies it composed, and warns once at startup that it cannot de
 ## Running the API
 
 ```bash
-alembic upgrade head                                    # once, against DATABASE_URL
+alembic upgrade head                                    # against DATABASE_URL
 uvicorn apps.api.main:create_application --factory --host 0.0.0.0 --port 8000
 ```
 
@@ -61,9 +61,33 @@ factory is called, so importing the module has no side effects. A missing variab
 naming every one of them.
 
 Inbound messages are attributed to a tenant through the `channel_configs` table — one enabled row
-per configured endpoint, carrying the channel's own identifier for it. Without that row the webhook
-answers 500 and the platform retries; nothing is written to a tenant we had to guess at. See
-`docs/specs/a2-database-and-a4-composition-root.md`.
+per configured endpoint, carrying the channel's own identifier for it. Without that row nothing is
+written to a tenant we had to guess at: the delivery is acknowledged and the endpoint, the payload
+and the statement that claims it are logged at WARNING. Acknowledged rather than failed because a
+redelivery cannot write a missing row, and Meta disables a subscription that keeps failing — one
+unconfigured number must not take the callback down for every tenant sharing it. The composition
+root also checks at startup that the endpoint this process *sends* from is one a tenant claims, and
+warns if it is not. See `docs/specs/a2-database-and-a4-composition-root.md`.
+
+## Deployment: migrations run on deploy
+
+The schema is not a manual step. Both Render services carry it in their **build** command:
+
+```
+pip install . && alembic upgrade head
+```
+
+**Build rather than start**, deliberately. A migration that fails at build fails the build, and
+Render keeps the previous version serving; the same failure in the start command is a crash loop
+with nothing answering. Two services build independently and a push to `main` redeploys them
+together, so the migration takes a transaction-scoped advisory lock (`db/engine.lock_for_migrations`)
+and the second one waits rather than dying on a table the first just created.
+
+This exists because it was missing. Migration `005_facts` reached production only when a session
+happened to check, and `006_properties` shipped its code without its schema — the worker crashed on
+`relation "properties" does not exist` for every message that reached the knowledge base, which is
+a guest getting silence. Nothing announced it. `alembic upgrade head` on an up-to-date database is
+a no-op that exits 0, so running it on every deploy costs nothing and closes that gap.
 
 ## CI/CD
 
