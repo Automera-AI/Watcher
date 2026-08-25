@@ -7,8 +7,10 @@ which is what makes it possible to pin the pgbouncer rules in CI, where none of 
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import Connection, create_engine, select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
@@ -16,12 +18,14 @@ from apps.api.channels import ConfigError
 from apps.api.core.config import Settings
 from apps.api.db.base import Base
 from apps.api.db.engine import (
+    MIGRATION_LOCK_KEY,
     POOL_MODE_SESSION,
     POOL_MODE_TRANSACTION,
     Database,
     build_database,
     create_db_engine,
     engine_arguments,
+    lock_for_migrations,
     normalize_database_url,
 )
 from apps.api.db.models import Tenant
@@ -193,3 +197,41 @@ def test_pool_mode_defaults_to_the_pooler_safe_one(clean_env: pytest.MonkeyPatch
 def test_pool_mode_is_configurable(clean_env: pytest.MonkeyPatch) -> None:
     clean_env.setenv("DATABASE_POOL_MODE", "session")
     assert Settings(_env_file=None).pool_mode() == POOL_MODE_SESSION
+
+
+# ── The migration advisory lock (deploy runs `alembic upgrade head` on every boot) ────────
+
+
+def test_migration_lock_is_a_noop_off_postgres() -> None:
+    """SQLite has no advisory locks, and the tests must not need one."""
+    engine = create_engine("sqlite://")
+    with engine.connect() as connection:
+        lock_for_migrations(connection)  # must not raise
+
+
+def test_migration_lock_takes_a_transaction_scoped_lock_on_postgres() -> None:
+    """The *transaction*-scoped form, specifically.
+
+    ``pg_advisory_lock`` is held by the session, and behind a transaction pooler the session goes
+    back to the pool the instant the transaction commits — so a session-scoped lock would either
+    leak or be released on somebody else's connection. Only the ``_xact_`` form is safe here, and
+    only a test that reads the statement can hold that distinction in place.
+    """
+    executed: list[tuple[str, dict[str, object]]] = []
+
+    class FakeDialect:
+        name = "postgresql"
+
+    class FakeConnection:
+        dialect = FakeDialect()
+
+        def execute(self, statement: object, parameters: dict[str, object]) -> None:
+            executed.append((str(statement), parameters))
+
+    lock_for_migrations(cast(Connection, FakeConnection()))
+
+    assert len(executed) == 1
+    statement, parameters = executed[0]
+    assert "pg_advisory_xact_lock" in statement
+    assert "pg_advisory_lock" not in statement.replace("pg_advisory_xact_lock", "")
+    assert parameters == {"key": MIGRATION_LOCK_KEY}

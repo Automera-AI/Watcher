@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from apps.api.schemas.message import MessageEnvelope
 
 
@@ -32,3 +34,13 @@ class RecordingQueue:
     def enqueue(self, tenant_id: str, external_id: str) -> None:
         self.enqueued.append((tenant_id, external_id))
         self.events.append(f"enqueue:{external_id}")
+
+
+class RecordingUnclaimedDeliveryStore:
+    """UnclaimedDeliveryStore double that retains complete payloads."""
+
+    def __init__(self) -> None:
+        self.saved: list[tuple[str | None, dict[str, Any], str]] = []
+
+    def save(self, endpoint_id: str | None, payload: dict[str, Any], reason: str) -> None:
+        self.saved.append((endpoint_id, payload, reason))

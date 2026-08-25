@@ -20,7 +20,7 @@ from alembic import context
 from apps.api.core.config import Settings
 from apps.api.db import models  # noqa: F401
 from apps.api.db.base import Base
-from apps.api.db.engine import create_db_engine, normalize_database_url
+from apps.api.db.engine import create_db_engine, lock_for_migrations, normalize_database_url
 from sqlalchemy import engine_from_config, pool
 
 config = context.config
@@ -71,6 +71,10 @@ def run_migrations_online() -> None:
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():
+            # Taken inside the migration's own transaction, before any DDL runs: both Render
+            # services upgrade on boot and a push to `main` redeploys them together, so without
+            # it the loser of the race dies on a relation the winner just created.
+            lock_for_migrations(connection)
             context.run_migrations()
 
 

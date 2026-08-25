@@ -51,7 +51,7 @@ and records the replies it composed, and warns once at startup that it cannot de
 ## Running the API
 
 ```bash
-alembic upgrade head                                    # once, against DATABASE_URL
+alembic upgrade head                                    # against DATABASE_URL
 uvicorn apps.api.main:create_application --factory --host 0.0.0.0 --port 8000
 ```
 
@@ -61,9 +61,36 @@ factory is called, so importing the module has no side effects. A missing variab
 naming every one of them.
 
 Inbound messages are attributed to a tenant through the `channel_configs` table — one enabled row
-per configured endpoint, carrying the channel's own identifier for it. Without that row the webhook
-answers 500 and the platform retries; nothing is written to a tenant we had to guess at. See
-`docs/specs/a2-database-and-a4-composition-root.md`.
+per configured endpoint, carrying the channel's own identifier for it. Without that row nothing is
+written to a tenant we had to guess at: the delivery is acknowledged and the endpoint and statement
+that claims it are logged at WARNING; the complete change is written to the
+`unclaimed_deliveries` quarantine table before acknowledgement. Acknowledged rather than failed
+because a redelivery cannot write a missing row, and Meta disables a subscription that keeps failing — one
+unconfigured number must not take the callback down for every tenant sharing it. The composition
+root also checks at startup that the endpoint this process *sends* from is one a tenant claims, and
+warns if it is not. See `docs/specs/a2-database-and-a4-composition-root.md`.
+
+## Deployment: migrations run in a coordinated release phase
+
+The schema is not a manual step, but migrations must not run while building an artifact: the old
+release is still serving then. Run them once in a serialized pre-deploy/release phase coordinated
+with the rollout:
+
+```
+alembic upgrade head
+```
+
+Use backward-compatible expand/contract migrations: expand before new processes roll out, deploy
+code compatible with both schemas, then contract only after every old process has drained. A
+failed migration must stop the rollout; it must not leave the preserved old release using a schema
+it cannot understand. The migration also takes a transaction-scoped advisory lock
+(`db/engine.lock_for_migrations`) as defense in depth if release jobs overlap.
+
+This exists because it was missing. Migration `005_facts` reached production only when a session
+happened to check, and `006_properties` shipped its code without its schema — the worker crashed on
+`relation "properties" does not exist` for every message that reached the knowledge base, which is
+a guest getting silence. Nothing announced it. `alembic upgrade head` on an up-to-date database is
+a no-op that exits 0, so running it on every deploy costs nothing and closes that gap.
 
 ## CI/CD
 

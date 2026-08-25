@@ -55,7 +55,9 @@ from apps.api.core.config import Settings, get_settings
 from apps.api.db.engine import Database, build_database
 from apps.api.db.repository import SessionScopedMessageRepository
 from apps.api.db.tenant_resolver import ChannelConfigTenantResolver
+from apps.api.db.unclaimed_delivery_repo import SessionScopedUnclaimedDeliveryStore
 from apps.api.ingestion.ports import ClassificationQueue
+from apps.api.ingestion.preflight import warn_on_unclaimed_endpoints
 from apps.api.orchestration.composition import build_consumer
 from apps.api.orchestration.queue import (
     RedisClassificationQueue,
@@ -98,6 +100,12 @@ def assemble(settings: Settings, database: Database, classifier: Classifier) -> 
     # `build_consumer`, or just `SessionScopedMessageRepository` here) gets `tenant_session`
     # instead, which stamps `app.current_tenant` so RLS enforces on it.
     scope = database.session
+    resolve_tenant = ChannelConfigTenantResolver(scope)
+
+    # Receiving and sending read two different sources for the same endpoint (see
+    # `ingestion/preflight`). Checked here because this is the only place that holds both, and a
+    # warning rather than a check that can fail the boot, like the two below it.
+    warn_on_unclaimed_endpoints(resolve_tenant, settings.configured_endpoints())
 
     redis_dsn = settings.redis_dsn()
     if redis_dsn is not None:
@@ -127,7 +135,8 @@ def assemble(settings: Settings, database: Database, classifier: Classifier) -> 
         settings.meta(),
         SessionScopedMessageRepository(database.tenant_session),
         queue,
-        ChannelConfigTenantResolver(scope),
+        resolve_tenant,
+        SessionScopedUnclaimedDeliveryStore(scope),
         on_shutdown=_shutdown,
     )
 

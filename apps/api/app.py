@@ -20,7 +20,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from apps.api.channels import MetaSettings
-from apps.api.ingestion.ports import ClassificationQueue, MessageRepository
+from apps.api.ingestion.ports import ClassificationQueue, MessageRepository, UnclaimedDeliveryStore
 from apps.api.ingestion.router import TenantResolver, build_router
 from apps.api.ingestion.service import IngestionService
 from apps.api.property_system import (
@@ -35,6 +35,7 @@ def create_app(
     repository: MessageRepository,
     queue: ClassificationQueue,
     resolve_tenant: TenantResolver,
+    unclaimed_deliveries: UnclaimedDeliveryStore,
     property_system: PropertySystemPort | None = None,
     resolve_api_key: ApiKeyTenantResolver | None = None,
     on_shutdown: Callable[[], Awaitable[None]] | None = None,
@@ -68,7 +69,7 @@ def create_app(
         redoc_url="/redoc",
     )
     service = IngestionService(repository, queue)
-    app.include_router(build_router(settings, service, resolve_tenant))
+    app.include_router(build_router(settings, service, resolve_tenant, unclaimed_deliveries))
     if property_system is not None and resolve_api_key is not None:
         app.include_router(build_property_system_router(property_system, resolve_api_key))
 

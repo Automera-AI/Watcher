@@ -208,6 +208,22 @@ class EvalRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class UnclaimedDelivery(Base):
+    """Complete webhook change received for an endpoint with no tenant configuration.
+
+    This is operational quarantine data, not a business row: no tenant is known yet. It is kept
+    outside tenant-scoped tables until an operator claims and replays it.
+    """
+
+    __tablename__ = "unclaimed_deliveries"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    endpoint_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    reason: Mapped[str] = mapped_column(Text)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class Contact(TimestampedTenantBase):
     """A known person the system has interacted with."""
 
