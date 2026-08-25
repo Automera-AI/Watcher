@@ -58,7 +58,7 @@ jobs:
               --cov \
               --cov-report=term-missing:skip-covered \
               --cov-report=xml \
-              --cov-report=markdown-append:${GITHUB_STEP_SUMMARY}
+              --cov-report=markdown-append:"${GITHUB_STEP_SUMMARY}"
           else
             echo "::notice::No tests yet, skipping pytest and coverage."
           fi
