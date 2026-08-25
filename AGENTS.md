@@ -34,8 +34,6 @@ control page → media pipeline → identity resolution → rules → dedup swee
 Each deliverable starts from a 1–3 page spec naming the module boundary, the input/output schema, the error
 cases, and the test fixtures. Vague specs cost three iterations; precise specs land in one (v1.2 §14).
 
-# Repository Instructions
-
 ## Code Review Rules
 
 ### Tenant isolation
