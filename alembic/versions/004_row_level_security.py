@@ -100,6 +100,8 @@ def upgrade() -> None:
     if not _is_postgres():
         return
 
+    # Static DDL: values are fixed module constants/closed tuples, never runtime or user input.
+    # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
     op.execute(f"""
         DO $$
         BEGIN
@@ -113,6 +115,8 @@ def upgrade() -> None:
     # A schema of our own for the helper: `public` is where PostgREST looks, and a function that
     # reports the current tenant is not something to publish on an HTTP API.
     op.execute("CREATE SCHEMA IF NOT EXISTS app;")
+    # Static DDL: values are fixed module constants/closed tuples, never runtime or user input.
+    # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
     op.execute(f"""
         CREATE OR REPLACE FUNCTION app.current_tenant() RETURNS uuid
         LANGUAGE sql STABLE AS $$
@@ -123,29 +127,47 @@ def upgrade() -> None:
     # empty string into NULL too — a session that sets the value to '' is saying "no tenant", not
     # asking for a cast error halfway through a query.
 
+    # Static DDL: values are fixed module constants/closed tuples, never runtime or user input.
+    # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
     op.execute(f"GRANT USAGE ON SCHEMA public, app TO {APP_ROLE};")
+    # Static DDL: values are fixed module constants/closed tuples, never runtime or user input.
+    # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
     op.execute(f"GRANT EXECUTE ON FUNCTION app.current_tenant() TO {APP_ROLE};")
+    # Static DDL: values are fixed module constants/closed tuples, never runtime or user input.
+    # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
     op.execute(
         f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {APP_ROLE};"
     )
     # `usage_events` has a BIGSERIAL key, and inserting into it needs the sequence.
+    # Static DDL: values are fixed module constants/closed tuples, never runtime or user input.
+    # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
     op.execute(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {APP_ROLE};")
     op.execute(
         "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
         f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {APP_ROLE};"
     )
+    # Static DDL: values are fixed module constants/closed tuples, never runtime or user input.
+    # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
     op.execute(
         f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO {APP_ROLE};"
     )
 
     for table in ALL_TABLES:
+        # Static DDL: values are fixed module constants/closed tuples, never runtime or user input.
+        # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;")
+        # Static DDL: values are fixed module constants/closed tuples, never runtime or user input.
+        # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
         op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY;")
         # Supabase grants the PostgREST roles access to everything in `public` by default. Nothing
         # in this product is meant to be reached with a publishable key.
+        # Static DDL: values are fixed module constants/closed tuples, never runtime or user input.
+        # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
         op.execute(f"REVOKE ALL ON {table} FROM anon, authenticated;")
 
     for table in TENANT_TABLES:
+        # Static DDL: values are fixed module constants/closed tuples, never runtime or user input.
+        # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
         op.execute(f"""
             CREATE POLICY tenant_isolation ON {table}
                 FOR ALL TO {APP_ROLE}
@@ -153,6 +175,8 @@ def upgrade() -> None:
                 WITH CHECK (tenant_id = app.current_tenant());
         """)
 
+    # Static DDL: values are fixed module constants/closed tuples, never runtime or user input.
+    # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
     op.execute(f"""
         CREATE POLICY tenant_isolation ON {SELF_SCOPED_TABLE}
             FOR ALL TO {APP_ROLE}
@@ -161,6 +185,8 @@ def upgrade() -> None:
     """)
 
     # The bootstrap lookup: see the module docstring, and `db/tenant_resolver.py` for the caller.
+    # Static DDL: values are fixed module constants/closed tuples, never runtime or user input.
+    # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
     op.execute(f"""
         CREATE POLICY endpoint_lookup ON channel_configs
             FOR SELECT TO {APP_ROLE}
@@ -174,9 +200,15 @@ def downgrade() -> None:
 
     op.execute("DROP POLICY IF EXISTS endpoint_lookup ON channel_configs;")
     for table in (*TENANT_TABLES, SELF_SCOPED_TABLE):
+        # Static DDL: values are fixed module constants/closed tuples, never runtime or user input.
+        # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
         op.execute(f"DROP POLICY IF EXISTS tenant_isolation ON {table};")
     for table in ALL_TABLES:
+        # Static DDL: values are fixed module constants/closed tuples, never runtime or user input.
+        # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
         op.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY;")
+        # Static DDL: values are fixed module constants/closed tuples, never runtime or user input.
+        # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
         op.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY;")
 
     op.execute("DROP FUNCTION IF EXISTS app.current_tenant();")

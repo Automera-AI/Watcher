@@ -56,6 +56,8 @@ def upgrade() -> None:
     op.execute("ALTER TABLE facts ENABLE ROW LEVEL SECURITY;")
     op.execute("ALTER TABLE facts FORCE ROW LEVEL SECURITY;")
     op.execute("REVOKE ALL ON facts FROM anon, authenticated;")
+    # Static DDL: APP_ROLE is a fixed module constant, never runtime or user input.
+    # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
     op.execute(f"""
         CREATE POLICY tenant_isolation ON facts
             FOR ALL TO {APP_ROLE}
