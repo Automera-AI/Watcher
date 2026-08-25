@@ -87,3 +87,17 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["apps/api", "packages/eval", "packages/intents"]
+
+[tool.coverage.run]
+branch = true
+source = ["apps/api", "packages/eval", "packages/intents"]
+omit = [
+    "alembic/versions/*",
+    "docs/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+precision = 1
+fail_under = 70
