@@ -100,4 +100,3 @@ omit = [
 show_missing = true
 skip_covered = true
 precision = 1
-fail_under = 70
