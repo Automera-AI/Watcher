@@ -45,7 +45,7 @@ jobs:
 
       - name: Mypy (strict)
         run: |
-          if find apps packages -name '*.py' 2>/dev/null | grep -q .; then
+          if find apps packages -name '*.py' 2>/dev/null | grep -q "." ; then
             mypy
           else
             echo "::notice::No Python sources yet — skipping mypy. Job activates when apps/api lands."
@@ -53,12 +53,12 @@ jobs:
 
       - name: Pytest and coverage
         run: |
-          if find apps packages \( -name 'test_*.py' -o -name '*_test.py' \) 2>/dev/null | grep -q .; then
+          if find apps packages \( -name 'test_*.py' -o -name '*_test.py' \) 2>/dev/null | grep -q "." ; then
             pytest \
               --cov \
               --cov-report=term-missing:skip-covered \
               --cov-report=xml \
-              --cov-report=markdown-append:${GITHUB_STEP_SUMMARY}
+              --cov-report=markdown-append:"${GITHUB_STEP_SUMMARY}"
           else
             echo "::notice::No tests yet, skipping pytest and coverage."
           fi
