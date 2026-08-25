@@ -22,14 +22,13 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
-from typing import Any
 
 from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import PlainTextResponse
 
 from apps.api.channels.whatsapp import MetaSettings
 from apps.api.ingestion.parser import iter_change_values, parse_value
-from apps.api.ingestion.ports import UnknownEndpoint
+from apps.api.ingestion.ports import UnclaimedDeliveryStore, UnknownEndpoint
 from apps.api.ingestion.security import SIGNATURE_HEADER, verify_signature
 from apps.api.ingestion.service import IngestionService
 from apps.api.schemas.message import MessageEnvelope
@@ -44,6 +43,7 @@ def build_router(
     settings: MetaSettings,
     service: IngestionService,
     resolve_tenant: TenantResolver,
+    unclaimed_deliveries: UnclaimedDeliveryStore,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -76,7 +76,11 @@ def build_router(
             try:
                 tenant_id = resolve_tenant(phone_number_id)
             except UnknownEndpoint as exc:
-                _log_unconfigured_endpoint(phone_number_id, messages, value, exc)
+                # This write is intentionally before the 200. If it fails, the exception becomes
+                # a 500 and Meta retries; acknowledging is safe only after the complete change has
+                # a durable recovery copy.
+                unclaimed_deliveries.save(phone_number_id, value, str(exc))
+                _log_unconfigured_endpoint(phone_number_id, messages, exc)
                 continue
             result = service.ingest(tenant_id, messages)
             if result.accepted or result.duplicates:
@@ -95,17 +99,16 @@ def build_router(
 def _log_unconfigured_endpoint(
     phone_number_id: str | None,
     messages: list[MessageEnvelope],
-    value: dict[str, Any],
     exc: UnknownEndpoint,
 ) -> None:
     """Record a delivery we acknowledged but could not attribute, in enough detail to act on.
 
-    The log line *is* the recovery path, so it carries three things deliberately. The endpoint
-    identifier, because it is otherwise unknowable — a number that has never been configured has,
+    The quarantine row is the recovery path; the log carries the information needed to act. The
+    endpoint identifier, because it is otherwise unknowable — an unconfigured number has,
     by definition, left no trace anywhere else, and reading it out of a stack trace is how this
     was diagnosed the hard way. The statement that fixes it, because the gap between "I can see the
-    id" and "the row exists" is the whole outage. And the change payload, because a dropped message
-    from a real guest is only replayable if its contents survived being dropped.
+    id" and "the row exists" is the whole outage. The complete change is stored in
+    ``unclaimed_deliveries`` before this warning is emitted; logs are diagnostic, not storage.
     """
     _logger.warning(
         "webhook: dropped %d message(s) for unconfigured endpoint %r (%s). "
@@ -113,15 +116,9 @@ def _log_unconfigured_endpoint(
         "missing row. To claim this endpoint: INSERT INTO channel_configs "
         "(id, tenant_id, kind, external_id, config, enabled, created_at, updated_at) VALUES "
         "(gen_random_uuid(), '<tenant-uuid>', 'whatsapp', %r, '{}', true, now(), now()); "
-        "payload=%s",
+        "The complete change was saved to unclaimed_deliveries before acknowledgement.",
         len(messages),
         phone_number_id,
         exc,
         phone_number_id,
-        json.dumps(value, separators=(",", ":"))[:_PAYLOAD_LOG_LIMIT],
     )
-
-
-# Enough of a change value to replay a dropped message by hand; short enough that a burst of
-# deliveries to an unconfigured endpoint cannot bury the rest of the log.
-_PAYLOAD_LOG_LIMIT = 4000

@@ -17,7 +17,7 @@ from apps.api.property_system import (
     PropertySystemUnavailable,
     Reservation,
 )
-from apps.api.tests.fakes import InMemoryRepository, RecordingQueue
+from apps.api.tests.fakes import InMemoryRepository, RecordingQueue, RecordingUnclaimedDeliveryStore
 
 
 class FakePropertySystem:
@@ -66,6 +66,7 @@ def make_client(fake: FakePropertySystem) -> TestClient:
         InMemoryRepository(),
         RecordingQueue(),
         resolve_tenant,
+        RecordingUnclaimedDeliveryStore(),
         property_system=fake,
         resolve_api_key=lambda key: {
             "alpha-key": PropertyApiPrincipal(tenant_id="tenant-alpha"),
@@ -180,5 +181,6 @@ def test_property_api_dependencies_must_be_configured_together() -> None:
             InMemoryRepository(),
             RecordingQueue(),
             resolve_tenant,
+            RecordingUnclaimedDeliveryStore(),
             property_system=FakePropertySystem(),
         )

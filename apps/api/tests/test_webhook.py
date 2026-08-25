@@ -13,7 +13,11 @@ from apps.api.app import create_app
 from apps.api.channels.whatsapp import MetaSettings
 from apps.api.ingestion.ports import UnknownEndpoint
 from apps.api.ingestion.security import SIGNATURE_HEADER, expected_signature
-from apps.api.tests.fakes import InMemoryRepository, RecordingQueue
+from apps.api.tests.fakes import (
+    InMemoryRepository,
+    RecordingQueue,
+    RecordingUnclaimedDeliveryStore,
+)
 
 SETTINGS = MetaSettings(app_secret="app-secret", webhook_verify_token="verify-token")
 
@@ -21,7 +25,13 @@ SETTINGS = MetaSettings(app_secret="app-secret", webhook_verify_token="verify-to
 def _client() -> tuple[TestClient, InMemoryRepository, RecordingQueue]:
     repo = InMemoryRepository()
     queue = RecordingQueue()
-    app = create_app(SETTINGS, repo, queue, resolve_tenant=lambda pid: pid or "default")
+    app = create_app(
+        SETTINGS,
+        repo,
+        queue,
+        resolve_tenant=lambda pid: pid or "default",
+        unclaimed_deliveries=RecordingUnclaimedDeliveryStore(),
+    )
     return TestClient(app), repo, queue
 
 
@@ -128,7 +138,9 @@ def test_unconfigured_endpoint_is_acknowledged_not_retried(
     def reject(_endpoint: str | None) -> str:
         raise UnknownEndpoint("no enabled channel_configs row")
 
-    client = TestClient(create_app(SETTINGS, repo, queue, resolve_tenant=reject))
+    client = TestClient(
+        create_app(SETTINGS, repo, queue, reject, RecordingUnclaimedDeliveryStore())
+    )
     body = json.dumps(_text_payload()).encode()
     headers = {SIGNATURE_HEADER: expected_signature(SETTINGS.app_secret, body)}
 
@@ -154,7 +166,8 @@ def test_unconfigured_endpoint_logs_the_id_and_the_dropped_payload(
     def reject(_endpoint: str | None) -> str:
         raise UnknownEndpoint("no enabled channel_configs row")
 
-    client = TestClient(create_app(SETTINGS, repo, queue, resolve_tenant=reject))
+    store = RecordingUnclaimedDeliveryStore()
+    client = TestClient(create_app(SETTINGS, repo, queue, reject, store))
     body = json.dumps(_text_payload()).encode()
     headers = {SIGNATURE_HEADER: expected_signature(SETTINGS.app_secret, body)}
 
@@ -165,8 +178,9 @@ def test_unconfigured_endpoint_logs_the_id_and_the_dropped_payload(
     logged = caplog.records[0].getMessage()
     assert "PNID" in logged  # the id the operator has to configure
     assert "channel_configs" in logged  # and how to configure it
-    assert "Need a quote" in logged  # the guest's message survives the drop
+    assert "unclaimed_deliveries" in logged
     assert "dropped 1 message" in logged
+    assert store.saved[0][1] == _text_payload()["entry"][0]["changes"][0]["value"]
 
 
 def test_one_unconfigured_endpoint_does_not_block_a_configured_one() -> None:
@@ -183,7 +197,9 @@ def test_one_unconfigured_endpoint_does_not_block_a_configured_one() -> None:
             raise UnknownEndpoint(f"no enabled channel_configs row for {endpoint!r}")
         return "tenant-known"
 
-    client = TestClient(create_app(SETTINGS, repo, queue, resolve_tenant=resolve_only_known))
+    client = TestClient(
+        create_app(SETTINGS, repo, queue, resolve_only_known, RecordingUnclaimedDeliveryStore())
+    )
     payload = _text_payload()
     known = json.loads(json.dumps(payload["entry"][0]["changes"][0]))
     known["value"]["metadata"]["phone_number_id"] = "KNOWN"
@@ -208,7 +224,13 @@ def test_persist_failure_still_surfaces_as_a_retryable_500() -> None:
             raise RuntimeError("database is unreachable")
 
     client = TestClient(
-        create_app(SETTINGS, FailingRepository(), queue, resolve_tenant=lambda pid: pid or "d"),
+        create_app(
+            SETTINGS,
+            FailingRepository(),
+            queue,
+            lambda pid: pid or "d",
+            RecordingUnclaimedDeliveryStore(),
+        ),
         raise_server_exceptions=False,
     )
     body = json.dumps(_text_payload()).encode()
@@ -218,3 +240,29 @@ def test_persist_failure_still_surfaces_as_a_retryable_500() -> None:
 
     assert resp.status_code == 500
     assert queue.enqueued == []
+
+
+def test_unclaimed_delivery_is_complete_and_store_failure_requests_retry() -> None:
+    """No payload length may turn acknowledgement into data loss."""
+    payload = _text_payload()
+    long_body = "x" * 10_000
+    payload["entry"][0]["changes"][0]["value"]["messages"][0]["text"]["body"] = long_body
+
+    def reject(_endpoint: str | None) -> str:
+        raise UnknownEndpoint("not configured")
+
+    class FailingStore(RecordingUnclaimedDeliveryStore):
+        def save(self, endpoint_id: str | None, payload: dict[str, Any], reason: str) -> None:
+            raise RuntimeError("quarantine database unavailable")
+
+    client = TestClient(
+        create_app(SETTINGS, InMemoryRepository(), RecordingQueue(), reject, FailingStore()),
+        raise_server_exceptions=False,
+    )
+    body = json.dumps(payload).encode()
+    response = client.post(
+        "/webhook",
+        content=body,
+        headers={SIGNATURE_HEADER: expected_signature(SETTINGS.app_secret, body)},
+    )
+    assert response.status_code == 500

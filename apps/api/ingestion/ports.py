@@ -7,7 +7,7 @@ keeps the persistence choice out of the ingestion logic.
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, Protocol
 
 from apps.api.schemas.message import MessageEnvelope
 
@@ -21,6 +21,14 @@ class UnknownEndpoint(LookupError):
     that is momentarily unreachable is worth a retry, and an endpoint nobody has configured is not
     — no number of redeliveries writes the missing row.
     """
+
+
+class UnclaimedDeliveryStore(Protocol):
+    """Durable storage for webhook changes that cannot yet be assigned to a tenant."""
+
+    def save(self, endpoint_id: str | None, payload: dict[str, Any], reason: str) -> None:
+        """Persist the complete change before Meta is acknowledged."""
+        ...
 
 
 class MessageRepository(Protocol):

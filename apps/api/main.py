@@ -55,6 +55,7 @@ from apps.api.core.config import Settings, get_settings
 from apps.api.db.engine import Database, build_database
 from apps.api.db.repository import SessionScopedMessageRepository
 from apps.api.db.tenant_resolver import ChannelConfigTenantResolver
+from apps.api.db.unclaimed_delivery_repo import SessionScopedUnclaimedDeliveryStore
 from apps.api.ingestion.ports import ClassificationQueue
 from apps.api.ingestion.preflight import warn_on_unclaimed_endpoints
 from apps.api.orchestration.composition import build_consumer
@@ -135,6 +136,7 @@ def assemble(settings: Settings, database: Database, classifier: Classifier) -> 
         SessionScopedMessageRepository(database.tenant_session),
         queue,
         resolve_tenant,
+        SessionScopedUnclaimedDeliveryStore(scope),
         on_shutdown=_shutdown,
     )
 
