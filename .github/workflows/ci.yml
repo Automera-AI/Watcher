@@ -51,7 +51,7 @@ jobs:
             echo "::notice::No Python sources yet — skipping mypy. Job activates when apps/api lands."
           fi
 
-            - name: Pytest and coverage
+      - name: Pytest and coverage
         run: |
           if find apps packages \( -name 'test_*.py' -o -name '*_test.py' \) 2>/dev/null | grep -q .; then
             pytest \
