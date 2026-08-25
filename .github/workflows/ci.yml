@@ -51,12 +51,16 @@ jobs:
             echo "::notice::No Python sources yet — skipping mypy. Job activates when apps/api lands."
           fi
 
-      - name: Pytest
+            - name: Pytest and coverage
         run: |
           if find apps packages \( -name 'test_*.py' -o -name '*_test.py' \) 2>/dev/null | grep -q .; then
-            pytest
+            pytest \
+              --cov \
+              --cov-report=term-missing:skip-covered \
+              --cov-report=xml \
+              --cov-report=markdown-append:${GITHUB_STEP_SUMMARY}
           else
-            echo "::notice::No tests yet — skipping pytest. Job activates when tests land."
+            echo "::notice::No tests yet, skipping pytest and coverage."
           fi
 
   web:
