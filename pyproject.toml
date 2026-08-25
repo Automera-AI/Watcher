@@ -39,6 +39,13 @@ dependencies = [
     "arq>=0.26,<1",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1,<10",
+    "pytest-cov>=7.1,<8",
+    "mypy>=1.11,<2",
+]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
