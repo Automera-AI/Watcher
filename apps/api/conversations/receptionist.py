@@ -34,11 +34,24 @@ from apps.api.schemas.envelope import InboundTurn, OutboundAction
 HANDOFF_TEXT = "Let me connect you with someone who can help."
 
 
-#: Intents whose vocabulary-declared tool this file actually runs. The other terminal tools
-#: (``check_availability``, ``lookup_reservation``, ``quote_price``, ``hold_slot``,
-#: ``confirm_booking``, ``create_ticket``) are unimplemented — roadmap 3.1 — and fall through to
-#: the placeholder reply below rather than being dispatched to nothing.
-_IMPLEMENTED_TOOL = "answer_from_knowledge"
+#: Terminal tools this file actually runs. The rest (``check_availability``, ``quote_price``,
+#: ``hold_slot``, ``confirm_booking``, ``lookup_appointment``, ``lookup_reservation``,
+#: ``create_ticket``) are not built yet, and an intent that names one hands off rather than
+#: claiming success — see ``_UNBUILT_TEXT``.
+_KNOWLEDGE_TOOL = "answer_from_knowledge"
+
+#: Tools that produce their reply directly from ``human_summary`` and cannot fail. ``greet`` and
+#: ``close_conversation`` are the two ends of a conversation, and neither has anything to look up.
+_DIRECT_TOOLS = frozenset({"greet", "close_conversation"})
+
+#: What an unbuilt terminal tool says. **This wording is the point of the whole branch.**
+#:
+#: Every unimplemented tool used to fall through to "All set! I've noted everything down." — a
+#: sentence that tells someone who just asked to book an appointment that they have one. Nothing
+#: was written anywhere. On a booking journey that is not a rough edge, it is the receptionist
+#: lying about the one fact the customer came for, and they arrive at a clinic that has never
+#: heard of them. An unbuilt capability is a hand-off, and it says so.
+_UNBUILT_TEXT = "Let me check that with the team and come straight back to you."
 
 
 async def _hand_off(task: Task, tool_name: str) -> tuple[OutboundAction, Task]:
@@ -125,21 +138,45 @@ async def handle(
     intent_def = next((i for i in vocab.intents if i.name == intent), None)
     tool_name = intent_def.terminal_tool if intent_def is not None else None
 
-    if tool_name == _IMPLEMENTED_TOOL:
+    if tool_name == _KNOWLEDGE_TOOL:
         return await _answer_from_knowledge(task, turn, identity_verified, vocab)
 
+    if tool_name in _DIRECT_TOOLS:
+        return await _run_direct(task, tool_name, extracted_slots)
+
+    if tool_name == "take_message":
+        take_message = REGISTRY.get("take_message")
+        if take_message is not None:
+            await take_message.run()
+        task.status = TaskStatus.COMPLETED
+        return OutboundAction(kind="say", text="Thanks — I've noted that down."), task
+
+    # An unbuilt terminal tool. Record the message so nothing is lost, then fetch a person.
+    # Deliberately *not* a success reply: see ``_UNBUILT_TEXT``.
     take_message = REGISTRY.get("take_message")
     if take_message is not None:
         await take_message.run()
-    task.status = TaskStatus.COMPLETED
+    task.status = TaskStatus.HANDED_OFF
+    return OutboundAction(kind="handoff", text=_UNBUILT_TEXT), task
 
-    return (
-        OutboundAction(
-            kind="say",
-            text="All set! I've noted everything down.",
-        ),
-        task,
-    )
+
+async def _run_direct(
+    task: Task, tool_name: str, extracted_slots: dict[str, str]
+) -> tuple[OutboundAction, Task]:
+    """Run a tool whose reply is its ``human_summary`` and which has nothing to look up.
+
+    ``customer_name`` is passed through rather than read from the task's slots because a greeting
+    declares it optional and the name comes from the channel profile, not from anything the
+    customer typed.
+    """
+    tool = REGISTRY.get(tool_name)
+    if tool is None:  # A vocabulary naming a tool nobody registered. Not worth a live crash.
+        task.status = TaskStatus.HANDED_OFF
+        return OutboundAction(kind="handoff", text=HANDOFF_TEXT), task
+
+    result = await tool.run(customer_name=extracted_slots.get("customer_name"))
+    task.status = TaskStatus.COMPLETED
+    return OutboundAction(kind="say", text=result.human_summary or ""), task
 
 
 async def _answer_from_knowledge(
@@ -151,7 +188,7 @@ async def _answer_from_knowledge(
     extraction (item 2.x) does not exist, so ``extracted_slots`` is always ``{}`` and the raw
     message is the only signal the tool has to match against.
     """
-    tool = REGISTRY.get(_IMPLEMENTED_TOOL)
+    tool = REGISTRY.get(_KNOWLEDGE_TOOL)
     result = (
         await tool.run(
             tenant_id=str(turn.tenant_id),

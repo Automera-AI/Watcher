@@ -32,31 +32,56 @@ class MessageDirection(StrEnum):
 
 
 class IntentType(StrEnum):
-    """Unified intent taxonomy — aligned with the receptionist vocabulary (intents.yaml).
+    """Unified intent taxonomy — the union of every vertical's vocabulary.
 
-    The classifier and the receptionist now share one taxonomy so decide_autonomy()
-    recognises classified intents and the receptionist fires on real messages.
+    The classifier and the receptionist share one taxonomy so decide_autonomy() recognises
+    classified intents and the receptionist fires on real messages.
+
+    **Why this is a union rather than one vertical's list.** This enum types the classifier's
+    structured output, so a model physically cannot return an intent that is not a member. The
+    vocabularies are data and a tenant picks one; this is code and ships once. Keeping the union
+    here means adding a vertical needs no change to the classifier contract, at the cost of the
+    enum naming intents a given tenant will never see. The vocabulary is what decides which are
+    *live* for a tenant — an intent it does not declare is unknown to ``decide_autonomy``, which
+    hands off rather than improvising, so a cross-vertical leak fails safe.
+
+    Grouped by where they came from. Several are shared: a greeting is a greeting in any vertical.
     """
 
+    # ── Shared across verticals ──────────────────────────────────────────────
+    GREETING = "greeting"
+    THANKS_CLOSING = "thanks_closing"
+    GENERAL_INFO = "general_info"
+    DIRECTIONS = "directions"
+    BILLING_QUESTION = "billing_question"
+    COMPLAINT = "complaint"
+    SPAM = "spam"
+    UNCLEAR = "unclear"
     AVAILABILITY_CHECK = "availability_check"
     PRICE_ENQUIRY = "price_enquiry"
     BOOKING_ENQUIRY = "booking_enquiry"
+
+    # ── Clinics ──────────────────────────────────────────────────────────────
+    SERVICE_QUESTION = "service_question"
+    PACKAGE_TERMS_QUESTION = "package_terms_question"
+    MODIFY_APPOINTMENT = "modify_appointment"
+    CANCEL_APPOINTMENT = "cancel_appointment"
+    #: Suitability, medical history, "is this safe for me". Never answered by the receptionist.
+    CLINICAL_QUESTION = "clinical_question"
+    #: A reaction after treatment that needs a clinician soon. Never assessed, always escalated.
+    CLINICAL_URGENT = "clinical_urgent"
+
+    # ── Holiday homes ────────────────────────────────────────────────────────
     PROPERTY_QUESTION = "property_question"
     MODIFY_RESERVATION = "modify_reservation"
     CANCEL_RESERVATION = "cancel_reservation"
     CHECK_IN_SUPPORT = "check_in_support"
     ACCESS_CODE_REQUEST = "access_code_request"
-    DIRECTIONS = "directions"
     MAINTENANCE_ISSUE = "maintenance_issue"
     EXTEND_STAY = "extend_stay"
     CHECKOUT_QUESTION = "checkout_question"
-    BILLING_QUESTION = "billing_question"
     PAYMENT_QUESTION = "payment_question"
     OWNER_ENQUIRY = "owner_enquiry"
-    COMPLAINT = "complaint"
-    GENERAL_INFO = "general_info"
-    SPAM = "spam"
-    UNCLEAR = "unclear"
 
 
 class RecordType(StrEnum):

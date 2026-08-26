@@ -67,6 +67,63 @@ class HandoffToHuman(Tool):
         return ToolResult(ok=True, human_summary="Transferred to a team member.")
 
 
+class Greet(Tool):
+    """Open the conversation: say hello, say what can be done here, invite the request.
+
+    **Why a greeting needs a tool at all.** It did not have one, and the consequence was not a
+    missing feature but a wrong answer to the single most common message a receptionist receives.
+    "Hi" had two routes and both ended in the same sentence: classified ``unclear``, whose
+    ``max_autonomy`` is ``hand_off``, so ``decide_autonomy`` fetched a person before confidence
+    was even consulted; or classified ``general_info``, whose ``answer_from_knowledge`` searched
+    the facts table for "hi", found nothing, and fell through ``on_no_knowledge`` to the same
+    hand-off. A greeting is not a failure to understand, and this is the tool that says so.
+
+    The wording is tenant configuration, not code. ``opening`` carries the client's own line —
+    the receptionist's name, the business name, what it can help with — because a shared default
+    that names a client is the hardcoding this repo's own test forbids. Without one configured
+    the reply is deliberately plain and still correct: it greets, and it invites the request.
+    """
+
+    name = "greet"
+    description = "Open the conversation and invite the customer's request."
+
+    def __init__(self, opening: str | None = None) -> None:
+        self._opening = opening
+
+    async def run(self, **kwargs: Any) -> ToolResult:
+        name: str | None = kwargs.get("customer_name")
+        opening = self._opening or "How can I help you today?"
+        greeting = f"Hello {name}!" if name else "Hello!"
+        return ToolResult(
+            ok=True,
+            data={"greeted_by_name": bool(name)},
+            human_summary=f"{greeting} {opening}",
+        )
+
+
+class CloseConversation(Tool):
+    """Close politely when the customer says thanks or goodbye.
+
+    Paired with ``Greet`` for the same reason: "شكراً" classified as ``unclear`` handed off, which
+    turns a *completed* conversation into one that looks unresolved and puts a person in front of
+    someone who was only saying goodbye. Nothing is asked here, so nothing is asked back — in
+    particular no add-on, which is the temptation and which reads as a sales pitch after the
+    customer has already finished.
+    """
+
+    name = "close_conversation"
+    description = "Close the conversation politely when the customer is done."
+
+    def __init__(self, closing: str | None = None) -> None:
+        self._closing = closing
+
+    async def run(self, **kwargs: Any) -> ToolResult:
+        return ToolResult(
+            ok=True,
+            human_summary=self._closing or "You're very welcome. Have a lovely day!",
+        )
+
+
 class _NoFacts:
     """The default knowledge lookup: no tenant has any facts. Every match is a real "I don't
     know" rather than a crash — the same trade ``channels/factory.py`` makes for a process with
@@ -131,6 +188,19 @@ class AnswerFromKnowledge(Tool):
 register(TakeMessage())
 register(HandoffToHuman())
 register(AnswerFromKnowledge(_NoFacts()))
+register(Greet())
+register(CloseConversation())
+
+
+def configure_conversation_copy(opening: str | None, closing: str | None) -> None:
+    """Swap in the tenant's own opening and closing lines (``main.py``).
+
+    Mirrors ``configure_knowledge``: before this is called the tools are wired to neutral wording
+    that greets and closes correctly but names nobody, which is the same degrade-don't-crash trade
+    ``_NoFacts`` makes for a tenant with no facts.
+    """
+    register(Greet(opening))
+    register(CloseConversation(closing))
 
 
 def configure_knowledge(

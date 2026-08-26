@@ -7,8 +7,9 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
+from packages.intents.schema import shipped_vocabularies
 
-from apps.api.conversations.receptionist import handle
+from apps.api.conversations.receptionist import _UNBUILT_TEXT, HANDOFF_TEXT, handle
 from apps.api.conversations.task import Task, TaskStatus
 from apps.api.conversations.tools import REGISTRY, AnswerFromKnowledge
 from apps.api.core.knowledge import Fact
@@ -78,15 +79,109 @@ def test_slot_change_resets_confirmation() -> None:
     assert action.kind == "confirm"
 
 
-def test_all_slots_ready_returns_execute() -> None:
+def test_all_slots_ready_reaches_execution() -> None:
+    """A task with nothing left to ask stops asking and runs its terminal tool.
+
+    ``availability_check`` names ``check_availability``, which is not built yet, so the honest
+    outcome is a hand-off carrying ``_UNBUILT_TEXT``. It asserted ``say`` and ``COMPLETED`` while
+    the receptionist answered every unbuilt tool with "All set! I've noted everything down." —
+    telling someone who asked to book that they had a booking, when nothing had been written
+    anywhere. What the test is really pinning is that the task got *past* the ask/confirm steps,
+    and that is what it now checks.
+    """
     task = Task(
         intent="availability_check",
         slots={"check_in": "Jan 15", "check_out": "Jan 20"},
         confirmed={"check_in", "check_out"},
     )
     action, task = asyncio.run(handle(_turn(), "availability_check", 0.95, {}, task))
+    assert action.kind not in ("ask", "confirm")
+    assert action.text == _UNBUILT_TEXT
+    assert task.status == TaskStatus.HANDED_OFF
+
+
+def test_an_unbuilt_tool_never_claims_the_job_is_done() -> None:
+    """The regression that matters most on a booking journey.
+
+    Every terminal tool without an implementation used to answer "All set! I've noted everything
+    down." A patient who has just asked for an appointment reads that as confirmation, and then
+    arrives at a clinic that has never heard of them. An unbuilt capability is a hand-off, and no
+    unbuilt path may produce success wording.
+    """
+    for intent in ("availability_check", "price_enquiry", "booking_enquiry"):
+        task = Task(intent=intent)
+        task.slots = dict.fromkeys(task.required, "given")
+        task.confirmed = set(task.required)
+
+        action, updated = asyncio.run(handle(_turn(), intent, 0.95, {}, task))
+
+        assert updated.status is TaskStatus.HANDED_OFF, intent
+        assert "All set" not in (action.text or ""), intent
+        assert action.kind == "handoff", intent
+
+
+_CLINICS = shipped_vocabularies()["clinics"]
+
+
+def test_a_greeting_is_answered_rather_than_escalated() -> None:
+    """The single worst behaviour in the receptionist before the clinic vertical existed.
+
+    "Hi" had two routes and both ended in "Let me connect you with someone who can help": the
+    classifier had no ``greeting`` member so it returned ``unclear``, whose ceiling is
+    ``hand_off``; or it returned ``general_info``, whose ``answer_from_knowledge`` searched the
+    facts table for "hi", found nothing, and fell through ``on_no_knowledge`` to the same place.
+    A greeting is not a failure to understand.
+    """
+    action, task = asyncio.run(
+        handle(_turn("السلام عليكم"), "greeting", 0.95, {}, None, vocabulary=_CLINICS)
+    )
     assert action.kind == "say"
-    assert task.status == TaskStatus.COMPLETED
+    assert action.text != HANDOFF_TEXT
+    assert task.status is TaskStatus.COMPLETED
+
+
+def test_a_greeting_uses_the_name_the_channel_supplied() -> None:
+    """The profile name is a slot the customer never typed, so it arrives via extracted_slots."""
+    action, _task = asyncio.run(
+        handle(_turn("hi"), "greeting", 0.95, {"customer_name": "Rana"}, None, vocabulary=_CLINICS)
+    )
+    assert "Rana" in (action.text or "")
+
+
+def test_a_greeting_without_a_name_still_greets() -> None:
+    """A withheld profile name is normal on WhatsApp and is not a reason to fetch a person."""
+    action, task = asyncio.run(handle(_turn("hi"), "greeting", 0.95, {}, None, vocabulary=_CLINICS))
+    assert action.kind == "say"
+    assert task.status is TaskStatus.COMPLETED
+
+
+def test_thanks_closes_the_conversation_instead_of_escalating() -> None:
+    """A completed booking that ends in a hand-off looks like a failed one.
+
+    The demo journey ends with the customer saying thanks; escalating that puts a person in front
+    of someone who was only saying goodbye.
+    """
+    action, task = asyncio.run(
+        handle(_turn("شكرا"), "thanks_closing", 0.95, {}, None, vocabulary=_CLINICS)
+    )
+    assert action.kind == "say"
+    assert action.text != HANDOFF_TEXT
+    assert task.status is TaskStatus.COMPLETED
+
+
+@pytest.mark.parametrize("intent", ["clinical_question", "clinical_urgent"])
+def test_clinical_intents_always_fetch_a_person(intent: str) -> None:
+    """The boundary the clinic vertical exists to hold, at full confidence.
+
+    Suitability and post-treatment reactions are medical judgement. ``SAFETY["clinics"]`` pins
+    both to ``hand_off`` so no edit to the vocabulary can turn either into something answered
+    alone; this checks the receptionist honours it rather than merely that the YAML declares it.
+    """
+    action, task = asyncio.run(
+        handle(_turn("أنا حامل ينفع أعمل ليزر؟"), intent, 0.99, {}, None, vocabulary=_CLINICS)
+    )
+    assert action.kind == "handoff"
+    assert task.status is TaskStatus.HANDED_OFF
 
 
 def test_emergency_always_hands_off() -> None:
@@ -238,8 +333,12 @@ def test_the_budget_does_not_cut_a_task_off_that_is_ready_to_act() -> None:
         handle(_turn(), "availability_check", 0.95, {}, task, turns_taken=9)
     )
 
-    assert action.kind == "say"
-    assert updated.status == TaskStatus.COMPLETED
+    # Past the budget guard: it executed rather than being cut off. ``check_availability`` is
+    # unbuilt, so execution ends in the unbuilt hand-off and not in the max-turns one — the two
+    # are told apart by their wording, which is the only thing distinguishing them from outside.
+    assert action.text == _UNBUILT_TEXT
+    assert action.text != HANDOFF_TEXT
+    assert updated.status == TaskStatus.HANDED_OFF
 
 
 def test_a_turn_within_budget_still_asks() -> None:

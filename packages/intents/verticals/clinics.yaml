@@ -1,0 +1,601 @@
+# Watcher — receptionist intent vocabulary
+# Vertical: clinics (dermatology and aesthetics).  Market: Egypt.  Speaks to: patients only.
+#
+# Sister file to intents.yaml, which is the holiday-home vertical.  Same schema, same validator,
+# same guarantees.  Per-client wording, branch list, prices and hours live in clients/*.yaml and
+# in tenant-scoped data; nothing in this file names a client.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# The one thing to understand before editing this file
+#
+# A clinic receptionist has a boundary a holiday-home receptionist does not: it may not practise
+# medicine.  It books, it quotes, it reads back what the catalogue says.  It does not decide
+# whether a treatment suits a person, does not interpret a symptom, and does not reassure.  That
+# line is the reason `clinical_question` and `clinical_urgent` exist as their own intents and are
+# registered in SAFETY["clinics"] in schema.py: no edit to this file can turn either of them into
+# something the receptionist answers by itself.
+#
+# Three clinical severities, deliberately routed three different ways:
+#
+#   emergency        → the `emergency` block below. Immediate danger. Bypasses classification
+#                      entirely (orchestration/worker.py checks triggers before intent), replies
+#                      at once and alerts a person.
+#   clinical_urgent  → an intent. Meaningful post-treatment swelling, inflammation, severe pain.
+#                      Not immediate danger, but a person must see it soon.
+#   clinical_question→ an intent. "Is this safe for me", suitability, medical history. No urgency,
+#                      still not ours to answer.
+#
+# Getting these the wrong way round is the failure that matters here: an emergency filed as a
+# suitability question is the clinic equivalent of a gas leak filed as a maintenance ticket.
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "1.0.0"
+vertical: clinics
+markets: [EG]
+audience: guests_only
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Languages.  Egyptian Arabic is the default, not a translation of an English original.
+#
+# `ar-EG-latin` is Franco-Arabic: Egyptian Arabic typed in Latin letters with digits standing in
+# for sounds Latin has no letter for (3 = ع, 7 = ح, 2 = ء).  "3ayza a7gez" is a real booking
+# request and a model that has only seen Arabic script reads it as noise.  It carries its own
+# language tag so per-language accuracy reports it separately and you can see it failing.
+# ─────────────────────────────────────────────────────────────────────────────
+languages:
+  - code: ar-EG
+    spoken: true
+    note: Egyptian Arabic in Arabic script. The default for this vertical.
+  - code: ar-EG-latin
+    spoken: false
+    note: Franco-Arabic. Text only, never spoken. Do not send this to a speech model.
+  - code: en
+    spoken: true
+    note: Used on request, and by some patients throughout. Never assume it.
+  - code: mixed
+    spoken: true
+    note: One sentence, two languages. Entirely normal here, not an error.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# What the receptionist can do.  Every `terminal_tool` below must be one of these names, and the
+# tool registry is checked against this list, so a tool cannot exist without an intent knowing
+# about it and an intent cannot name a tool that was never built.
+# ─────────────────────────────────────────────────────────────────────────────
+tools:
+  - greet
+  - close_conversation
+  - check_availability
+  - quote_price
+  - hold_slot
+  - confirm_booking
+  - lookup_appointment
+  - answer_from_knowledge
+  - create_ticket
+  - take_message
+  - handoff_to_human
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Emergencies.  Checked before intent, before confidence, before anything else.
+#
+# Scope note: these are immediate-danger phrases only.  Post-treatment swelling and strong pain
+# are *not* here — they are `clinical_urgent`, because routing every reported side effect to an
+# emergency alert trains staff to ignore the alert, which is how a real one gets missed.
+#
+# Each phrase is Latin or Arabic, never both. The validator rejects a mixed-script phrase because
+# that is how a lookalike character gets in, and a trigger that never matches is worse than no
+# trigger at all.
+# ─────────────────────────────────────────────────────────────────────────────
+emergency:
+  action: handoff_to_human
+  alert: phone_call_to_operator
+  reply_immediately: true
+  triggers:
+    - id: breathing
+      any_of:
+        - "can't breathe"
+        - "cannot breathe"
+        - "difficulty breathing"
+        - "صعوبة في التنفس"
+        - "مش قادرة اتنفس"
+        - "mesh 2adra atnafes"
+      note: Anaphylaxis after an injectable presents this way. Always immediate.
+    - id: airway_swelling
+      any_of:
+        - "throat is swelling"
+        - "tongue swelling"
+        - "face swelling fast"
+        - "ورم في الحلق"
+        - "لساني وارم"
+      note: Airway involvement. Distinct from ordinary post-treatment swelling.
+    - id: anaphylaxis
+      any_of:
+        - "allergic reaction"
+        - "anaphylaxis"
+        - "حساسية شديدة"
+        - "صدمة تحسسية"
+    - id: collapse
+      any_of:
+        - "fainted"
+        - "passed out"
+        - "unconscious"
+        - "أغمي عليه"
+        - "أغمي عليها"
+        - "فقد الوعي"
+    - id: severe_bleeding
+      any_of:
+        - "bleeding heavily"
+        - "won't stop bleeding"
+        - "نزيف شديد"
+        - "الدم مش واقف"
+    - id: burn
+      any_of:
+        - "burned my skin"
+        - "severe burn"
+        - "حرق في الجلد"
+        - "حروق"
+      note: A laser burn is an emergency. Redness after laser is not — that is clinical_urgent.
+    - id: vision
+      any_of:
+        - "can't see"
+        - "lost my vision"
+        - "فقدت النظر"
+        - "مش شايفة"
+      note: Vision change after a facial filler is a vascular occlusion until proven otherwise.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Defaults.  Any intent may override any of these.
+#
+# `max_clarifying_turns: 2` is lower than the holiday-home file's 3, and deliberately. A patient
+# asking about a treatment is more likely to leave than to keep rephrasing, and a receptionist
+# that has asked twice and learned nothing should fetch a person rather than ask a third time.
+# ─────────────────────────────────────────────────────────────────────────────
+defaults:
+  confirm_before_acting: [branch, service, date, time, phone]
+  max_clarifying_turns: 2
+  on_max_turns: handoff_to_human
+  on_tool_failure: handoff_to_human
+  on_no_knowledge: handoff_to_human
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Scheduling systems.
+#
+# `quotable` means exactly one thing: a price it returns can be asked for by an API, in real
+# time, and asked again afterwards to prove what it said. A number nobody can re-check is a
+# number you cannot defend when a patient disputes it.
+# ─────────────────────────────────────────────────────────────────────────────
+property_systems:
+  - id: imported_catalogue
+    quotable: true
+    note: >
+      A validated catalogue and availability import held in tenant-scoped tables. Quotable
+      because every row keeps its service identifier, its import version and the time it was
+      read, so a price said today can be reproduced exactly next month. This is not the same as
+      reading a spreadsheet per message, which is what `custom_sheet` means and is not quotable.
+  - id: salesforce
+    quotable: true
+    note: >
+      The client's own system. API-backed, record identifier on every response. Not yet
+      connected; the adapter implements the same interface `imported_catalogue` does, so which
+      one a tenant runs is configuration rather than a code path.
+  - id: custom_sheet
+    quotable: false
+    note: >
+      A spreadsheet read live. No API, no stable row identifier, no way to prove afterwards what
+      the number was when it was said. Price questions go to a person.
+  - id: none
+    quotable: false
+    note: No connected system yet.
+
+# Money. Every guard here is enforced in code, not left to the prompt to remember.
+quoting:
+  source: property_system_only
+  requires_quotable_system: true
+  never_from_memory: true
+  never_from_knowledge_base: true
+  max_age_seconds: 300
+  on_stale_or_failed: handoff_to_human
+
+  # Written to the audit log before the number reaches the patient, never after. If any of these
+  # is missing the quote is not sent.
+  provenance_required:
+    - property_system_id
+    - rate_or_quote_id
+    - fetched_at
+    - valid_until
+    - currency
+    - the exact service and session count the number covers
+
+  always_state:
+    - the currency
+    - whether the price is a single session or a package, and how many sessions
+    - that a package price is subject to the package terms
+  never:
+    - offer a discount
+    - negotiate
+    - quote a price for a service the catalogue does not list
+    - imply a treatment is suitable by quoting for it
+    - repeat a price from earlier in the conversation without asking the system again
+    - state a price when the system did not answer
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Intents
+# ─────────────────────────────────────────────────────────────────────────────
+intents:
+
+  # ── Opening and closing ────────────────────────────────────────────────────
+  #
+  # These two exist because without them the receptionist has no non-failure answer to the two
+  # most common messages it will ever receive. A greeting classified as `unclear` hands off, and
+  # so does a greeting that reaches `answer_from_knowledge` and finds no matching fact. Both
+  # paths ended in "let me connect you with someone", which is the wrong answer to "hi".
+
+  - name: greeting
+    means: >
+      An opening with no request attached yet: hello, good morning, or the profile name alone.
+      The patient is starting, not asking. Answer, say what can be done here, and invite the
+      actual question. Never treat this as a failure to understand.
+    required_slots: []
+    optional_slots: [customer_name]
+    terminal_tool: greet
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - hand off merely because no request has been made yet
+      - claim to be a human member of staff
+      - ask for personal details before the patient has asked for anything
+      - list every service in the catalogue
+    confusable_with: [general_info, unclear, service_question]
+    examples:
+      - {lang: ar-EG, text: "السلام عليكم"}
+      - {lang: ar-EG, text: "مساء الخير"}
+      - {lang: ar-EG, text: "ازيك"}
+      - {lang: ar-EG-latin, text: "salam alikom"}
+      - {lang: ar-EG-latin, text: "ezayek"}
+      - {lang: en, text: "hi"}
+      - {lang: en, text: "Good morning"}
+      - {lang: mixed, text: "hi مساء الخير"}
+
+  - name: thanks_closing
+    means: >
+      The patient is thanking, agreeing that they are done, or saying goodbye. Nothing is being
+      asked. Close politely and leave the door open. This is a completed conversation, not an
+      unresolved one, and escalating it makes a successful booking look like a failed one.
+    required_slots: []
+    optional_slots: []
+    terminal_tool: close_conversation
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - hand off
+      - re-open a booking that is already confirmed
+      - ask another question after the patient has said they are done
+      - offer an add-on to someone who has just said goodbye
+    confusable_with: [greeting, general_info]
+    examples:
+      - {lang: ar-EG, text: "شكرا"}
+      - {lang: ar-EG, text: "متشكرة جدا"}
+      - {lang: ar-EG, text: "تمام كده شكرا"}
+      - {lang: ar-EG-latin, text: "shokran"}
+      - {lang: ar-EG-latin, text: "tamam keda shokran"}
+      - {lang: en, text: "thank you!"}
+      - {lang: en, text: "great, thanks"}
+
+  # ── Before they have booked ────────────────────────────────────────────────
+
+  - name: availability_check
+    means: >
+      Asking when a treatment can be had, at which branch, or whether a particular day or time is
+      free. The answer must come from real availability, never from the opening hours.
+    required_slots: [service, branch]
+    optional_slots: [requested_date, requested_time, customer_name]
+    confirm_before_acting: [service, branch]
+    terminal_tool: check_availability
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - offer a slot the scheduling system did not return
+      - offer a slot already held for another patient
+      - describe opening hours as if they were availability
+      - offer a time on a day the branch is closed
+    confusable_with: [booking_enquiry, price_enquiry, service_question]
+    examples:
+      - {lang: ar-EG, text: "في مواعيد فاضية لليزر في المعادي؟"}
+      - {lang: ar-EG, text: "عندكم حجز بكرة الساعة ٦؟"}
+      - {lang: ar-EG-latin, text: "fi maw3eed fadya lel laser?"}
+      - {lang: en, text: "do you have anything free on Wednesday in New Cairo?"}
+      - {lang: mixed, text: "عندكم availability بكرة؟"}
+
+  - name: price_enquiry
+    means: >
+      Asking what something costs, whether a package is worth it, or what is included. Answered
+      from the catalogue only, with the session count stated, because a package price quoted as
+      if it were a single session is the complaint that arrives three weeks later.
+    required_slots: [service]
+    optional_slots: [branch, customer_name]
+    terminal_tool: quote_price
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - offer a discount
+      - negotiate a price
+      - quote from memory or from the knowledge base
+      - quote a price for a service the catalogue does not list
+      - suggest a treatment is right for the patient while quoting for it
+    confusable_with: [availability_check, service_question, package_terms_question]
+    examples:
+      - {lang: ar-EG, text: "بكام جلسة الليزر؟"}
+      - {lang: ar-EG, text: "الباكدج السنوي بكام؟"}
+      - {lang: ar-EG-latin, text: "el botox bekam?"}
+      - {lang: en, text: "how much is the hydrafacial?"}
+      - {lang: mixed, text: "بكام الـ full body package؟"}
+
+  - name: booking_enquiry
+    means: >
+      Wanting to book: a named treatment, a branch, a day, or all three at once. This is the
+      journey that ends in a real appointment, so it ends in a confirmation the patient gave
+      explicitly, never in an assumption that they meant yes.
+    required_slots: [service, branch, requested_date]
+    optional_slots: [requested_time, customer_name, phone]
+    confirm_before_acting: [service, branch, requested_date, requested_time, phone]
+    terminal_tool: confirm_booking
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - create a booking before the patient has confirmed in their own words
+      - say a booking is confirmed without a reference from the scheduling system
+      - re-ask for a branch or service the patient already gave
+      - offer an add-on before the main appointment is confirmed
+      - book a treatment that screening has flagged
+    confusable_with: [availability_check, modify_appointment, price_enquiry]
+    examples:
+      - {lang: ar-EG, text: "عايزة احجز جلسة ليزر في مصر الجديدة"}
+      - {lang: ar-EG, text: "ممكن حجز بكرة الساعة ٥؟"}
+      - {lang: ar-EG-latin, text: "3ayza a7gez jalset laser"}
+      - {lang: en, text: "I'd like to book a facial for Saturday"}
+      - {lang: mixed, text: "عايزة أحجز appointment للبوتوكس"}
+
+  - name: service_question
+    means: >
+      Asking what a treatment is, how long it takes, how many sessions it involves, or what to
+      expect afterwards, as a matter of fact rather than of medical suitability. Answered from
+      the clinic's own material. The moment it becomes "is it right for me", it is a different
+      intent.
+    required_slots: []
+    optional_slots: [service, branch, customer_name]
+    terminal_tool: answer_from_knowledge
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - invent a benefit, a result, or a recovery time that is not in the clinic's material
+      - answer a suitability question that has been phrased as a factual one
+      - compare two treatments in a way that recommends one
+      - promise a result
+    confusable_with: [clinical_question, price_enquiry, general_info]
+    examples:
+      - {lang: ar-EG, text: "الجلسة بتاخد قد ايه؟"}
+      - {lang: ar-EG, text: "الباكدج ده كام جلسة؟"}
+      - {lang: ar-EG-latin, text: "el jalsa btakhod ad eh?"}
+      - {lang: en, text: "what's the difference between the two laser packages?"}
+
+  - name: package_terms_question
+    means: >
+      Asking about the terms attached to a paid package: when it expires, whether a session can
+      be moved, whether it can be transferred, what happens if it is not started in time. These
+      have written answers, so they are answered from the written terms and not paraphrased.
+    required_slots: []
+    optional_slots: [service, appointment_ref, customer_name]
+    terminal_tool: answer_from_knowledge
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - paraphrase a term in a way that changes what it says
+      - promise an exception to a term
+      - decide a refund
+      - state a term that is not in the clinic's written conditions
+    confusable_with: [billing_question, price_enquiry, service_question]
+    examples:
+      - {lang: ar-EG, text: "الباكدج بينتهي امتى؟"}
+      - {lang: ar-EG, text: "ينفع احول الباكدج لأختي؟"}
+      - {lang: ar-EG-latin, text: "el package byntahy emta?"}
+      - {lang: en, text: "how long do I have to use my sessions?"}
+
+  # ── After they have booked ─────────────────────────────────────────────────
+
+  - name: modify_appointment
+    means: >
+      Moving an existing appointment to another day, time or branch. Requires proof of which
+      appointment, because moving the wrong person's slot loses two appointments rather than one.
+    required_slots: [appointment_ref]
+    optional_slots: [requested_date, requested_time, branch, service, customer_name]
+    confirm_before_acting: [appointment_ref, requested_date, requested_time]
+    terminal_tool: lookup_appointment
+    max_autonomy: act_and_notify
+    needs_verified_identity: true
+    never:
+      - move an appointment without reading back both the old and the new time
+      - release the original slot before the new one is held
+      - act on a partial match of the patient's name
+    confusable_with: [booking_enquiry, cancel_appointment, availability_check]
+    examples:
+      - {lang: ar-EG, text: "ممكن أأجل ميعادي لبكرة؟"}
+      - {lang: ar-EG-latin, text: "momken a2agel mi3ady?"}
+      - {lang: en, text: "can I move my appointment to Thursday?"}
+
+  - name: cancel_appointment
+    means: >
+      Cancelling an appointment, or asking to cancel a package. Always a person, because inside a
+      paid package a cancellation is a refund question and a refund is never automated.
+    required_slots: [appointment_ref]
+    optional_slots: [customer_name]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: true
+    never:
+      - cancel anything automatically
+      - state what will or will not be refunded
+      - confirm a cancellation the clinic has not processed
+    confusable_with: [modify_appointment, billing_question]
+    examples:
+      - {lang: ar-EG, text: "عايزة الغي الميعاد"}
+      - {lang: en, text: "I need to cancel my session"}
+
+  # ── Clinical. None of these are answered by the receptionist. ──────────────
+  #
+  # Registered in SAFETY["clinics"], so this cannot be loosened by editing this file.
+
+  - name: clinical_question
+    means: >
+      Asking whether a treatment is safe or suitable for them, describing a condition, medication
+      or pregnancy, or asking what a treatment will do for their particular skin. This is medical
+      judgement. The receptionist says so plainly, does not conduct a medical history interview,
+      and fetches a person.
+    required_slots: []
+    optional_slots: [service, customer_name]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - say a treatment is safe, suitable or unsuitable for the patient
+      - interpret a symptom, a photograph or a medical history
+      - ask a series of medical questions in order to decide
+      - suggest a specific alternative treatment as being safe for them
+      - reassure
+    confusable_with: [service_question, clinical_urgent, package_terms_question]
+    examples:
+      - {lang: ar-EG, text: "أنا حامل ينفع أعمل ليزر؟"}
+      - {lang: ar-EG, text: "بستخدم روأكيوتان، ينفع؟"}
+      - {lang: ar-EG-latin, text: "ana 7amel yenfa3 a3mel laser?"}
+      - {lang: en, text: "is this safe for sensitive skin?"}
+
+  - name: clinical_urgent
+    means: >
+      Reporting something wrong after a treatment that is not immediate danger but needs a
+      clinician soon: swelling that is getting worse, spreading redness, strong pain, a blister,
+      or a reaction that is not settling. Acknowledged, never assessed, and escalated at once.
+    required_slots: []
+    optional_slots: [service, appointment_ref, customer_name]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - say the reaction is normal, expected, or nothing to worry about
+      - suggest a remedy, a cream, or a painkiller
+      - ask the patient to wait and see
+      - delay the hand-off in order to collect more detail
+    confusable_with: [clinical_question, complaint]
+    examples:
+      - {lang: ar-EG, text: "وشي وارم بعد الجلسة والألم زاد"}
+      - {lang: ar-EG, text: "في احمرار منتشر مكان الليزر"}
+      - {lang: ar-EG-latin, text: "wishy warem ba3d el jalsa"}
+      - {lang: en, text: "the swelling is getting worse since yesterday"}
+
+  # ── Everything else ────────────────────────────────────────────────────────
+
+  - name: general_info
+    means: >
+      Opening hours, where a branch is, how to reach a person, parking, whether a branch has a
+      particular device. Facts about the clinic rather than about a treatment or a booking.
+    required_slots: []
+    optional_slots: [branch]
+    terminal_tool: answer_from_knowledge
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - invent a branch, an address or an opening time
+      - state hours for a branch that was not asked about
+    confusable_with: [directions, service_question, greeting]
+    examples:
+      - {lang: ar-EG, text: "مواعيد العمل ايه؟"}
+      - {lang: ar-EG, text: "فروعكم فين؟"}
+      - {lang: en, text: "what time do you close on Saturday?"}
+
+  - name: directions
+    means: >
+      Asking where a specific branch is or how to get there. Separated from general_info because
+      the answer is an address and a landmark, and because it is asked on the way in.
+    required_slots: []
+    optional_slots: [branch]
+    terminal_tool: answer_from_knowledge
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - invent a landmark or a street
+      - give directions to a branch that does not exist
+    confusable_with: [general_info]
+    examples:
+      - {lang: ar-EG, text: "الفرع فين بالظبط؟"}
+      - {lang: ar-EG-latin, text: "el far3 fen bel zabt?"}
+      - {lang: en, text: "where exactly is the Maadi branch?"}
+
+  - name: billing_question
+    means: >
+      Payment, an invoice, a refund, what was charged, or what a package cost previously. Money
+      after the fact always reaches a person, whoever is asking.
+    required_slots: []
+    optional_slots: [appointment_ref, customer_name]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - state what was charged
+      - promise a refund
+      - explain a charge the receptionist cannot see
+    confusable_with: [price_enquiry, package_terms_question, complaint]
+    examples:
+      - {lang: ar-EG, text: "اتخصم مني مبلغ غلط"}
+      - {lang: en, text: "I was charged twice"}
+
+  - name: complaint
+    means: >
+      Dissatisfaction with a treatment, a result, a member of staff or a wait. Always a person.
+      An unhappy patient handled by an automation becomes a more unhappy patient.
+    required_slots: []
+    optional_slots: [branch, service, appointment_ref, customer_name]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - defend the clinic
+      - explain why the patient is mistaken
+      - offer compensation
+      - treat a reported side effect as a complaint rather than as clinical_urgent
+    confusable_with: [clinical_urgent, billing_question]
+    examples:
+      - {lang: ar-EG, text: "الخدمة كانت وحشة جدا"}
+      - {lang: en, text: "I waited an hour past my appointment"}
+
+  - name: spam
+    means: >
+      Marketing, a wrong number, or an automated message. Do not reply. Do not engage. A reply
+      confirms the number is live, which is the one thing worth avoiding.
+    required_slots: []
+    optional_slots: []
+    terminal_tool: take_message
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - reply
+      - unsubscribe, which confirms the number is live
+    confusable_with: [unclear]
+    examples:
+      - {lang: en, text: "Congratulations! You have won a free iPhone, click here"}
+      - {lang: ar-EG, text: "اربح الآن! اضغط على الرابط"}
+
+  - name: unclear
+    means: >
+      Genuinely cannot tell. The right answer, not a failure. Offer a choice once — "do you mean
+      X or Y" — then fetch a person. Never guess at an intent in order to appear helpful, and
+      never say "I did not understand" twice.
+    required_slots: []
+    optional_slots: []
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - pick the closest intent and act on it
+      - ask more than one clarifying question
+      - say it did not understand more than once
+    confusable_with: []
+    examples:
+      - {lang: ar-EG, text: "؟؟"}
+      - {lang: en, text: "the thing from before"}
