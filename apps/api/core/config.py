@@ -102,6 +102,14 @@ class Settings(ChannelCredentials):
     # service running.
     tenant_timezone: str = DEFAULT_TIMEZONE
 
+    # ── The number customers may ring directly in an emergency (roadmap G3) ───────────────
+    #
+    # Distinct from `control_chat_phone_e164`, which is where the *alert* goes: this is what the
+    # customer is told. For a clinic they are rarely the same — the alert wakes whoever is on
+    # call, while the number a patient rings for a filler occlusion is a named clinician. Unset,
+    # the emergency reply names no clinic number and points only at public emergency services.
+    tenant_urgent_contact: str | None = None
+
     # ── Classifier tiering (addendum §8 / D8-a) ────────────────────────────────────────────
     anthropic_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
@@ -192,6 +200,7 @@ class Settings(ChannelCredentials):
         return TenantPolicy(
             high_confidence_threshold=self.classifier_confidence_escalation_threshold,
             timezone=self.tenant_timezone,
+            urgent_contact=self.tenant_urgent_contact,
         )
 
     def database_dsn(self) -> str:

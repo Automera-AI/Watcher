@@ -32,6 +32,16 @@ class TenantPolicy:
     classifier_max_attempts: int = 2
     delivery_max_attempts: int = 3
 
+    urgent_contact: str | None = None
+    """A number this tenant's customers may ring directly in an emergency, if it has given one.
+
+    Unset by default and never a literal in shared code — it is a different number for every
+    tenant, and for a clinic it is a specific clinician rather than a support queue. Where it is
+    set, ``emergency_reply`` adds it to the immediate reply so someone in trouble has it in the
+    first message instead of waiting for the call back. Where it is not, the reply still points at
+    public emergency services, which is the safe floor.
+    """
+
     timezone: str = DEFAULT_TIMEZONE
     """Where this tenant's properties are, as an IANA zone name (roadmap G3).
 

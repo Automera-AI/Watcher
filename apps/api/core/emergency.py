@@ -64,6 +64,35 @@ EMERGENCY_REPLY = (
     "إذا كان أي شخص في خطر، اتصل برقم الطوارئ المحلي أولاً."
 )
 
+
+def emergency_reply(contact: str | None = None) -> str:
+    """The immediate reply, with the tenant's own urgent contact when one is configured.
+
+    ``EMERGENCY_REPLY`` says "your local emergency number" and names none, deliberately: 999 in the
+    UAE and 123 in Egypt are per-market facts, and a wrong number printed with confidence is worse
+    than a vague one. But vague is not the best a *configured* tenant can do. A clinic that has
+    given us the number its patients should ring — the on-call clinician for a filler occlusion,
+    which no public ambulance line can treat — should have that number in the first message rather
+    than in the call-back that follows it.
+
+    ``contact`` is therefore tenant configuration and never a literal in shared code. Unset, this
+    returns the neutral text unchanged, which is the right answer for a tenant who has not decided
+    yet: it still says an alert is going out and still points at emergency services.
+
+    The addition goes *after* the "call your local emergency number" line in both languages, and
+    does not replace it. A clinic contact is an addition to emergency services, never a substitute
+    — sending someone who cannot breathe to a clinic's mobile instead of an ambulance is the one
+    way this function could do harm.
+    """
+    if not contact:
+        return EMERGENCY_REPLY
+    return (
+        f"{EMERGENCY_REPLY}\n\n"
+        f"You can also reach our clinical team directly on {contact}.\n"
+        f"يمكنك أيضاً التواصل مع الفريق الطبي مباشرة على {contact}."
+    )
+
+
 #: The default market's zone. AE and EG are the two declared markets; Dubai is where the first
 #: client will be. It is a *default*, not an assumption baked into the detector — see
 #: ``TenantPolicy.timezone``, which is what actually reaches this module.

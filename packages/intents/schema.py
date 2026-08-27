@@ -93,6 +93,14 @@ SAFETY: dict[str, SafetyRules] = {
     # a receptionist that answers "is this safe for me" is practising medicine, and no YAML edit
     # may turn that into an intent it handles alone. ``cancel_appointment`` hands off because a
     # cancellation inside a paid package is a refund question, and refunds reach a person.
+    #
+    # **``must_verify`` names only the intents that act on patient data by themselves.** It first
+    # listed ``modify_appointment`` and ``cancel_appointment``, which was wrong: both hand off to
+    # a person, and demanding proof of identity *before* a hand-off means an unverified patient
+    # cannot reach a human at all — strictly worse than the disclosure it was guarding against.
+    # Verification on those belongs inside the human workflow. What is left is the pair that
+    # genuinely discloses or mutates without a person in the loop: a lookup that reads an
+    # appointment back, and an arrival update that files a ticket against one.
     "clinics": SafetyRules(
         must_hand_off=frozenset(
             {
@@ -104,7 +112,7 @@ SAFETY: dict[str, SafetyRules] = {
                 "unclear",
             }
         ),
-        must_verify=frozenset({"modify_appointment", "cancel_appointment"}),
+        must_verify=frozenset({"appointment_lookup_status", "arrival_late_no_show"}),
         money_intents=frozenset({"price_enquiry"}),
         identity_proof_slot="appointment_ref",
     ),

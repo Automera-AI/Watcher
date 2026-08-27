@@ -60,12 +60,33 @@ class IntentType(StrEnum):
     AVAILABILITY_CHECK = "availability_check"
     PRICE_ENQUIRY = "price_enquiry"
     BOOKING_ENQUIRY = "booking_enquiry"
+    #: An explicit ask for a person. Distinct from every other hand-off: the customer requested
+    #: it rather than the receptionist running out of road, and it needs no justification.
+    HUMAN_REQUEST = "human_request"
+    PROMOTION_ENQUIRY = "promotion_enquiry"
+    PAYMENT_OPTIONS = "payment_options"
+    PRIVACY_DATA_REQUEST = "privacy_data_request"
+    CAREERS_BUSINESS_ENQUIRY = "careers_business_enquiry"
+    POSITIVE_FEEDBACK = "positive_feedback"
+    LOST_PROPERTY = "lost_property"
+    DIGITAL_SUPPORT_ISSUE = "digital_support_issue"
 
     # ── Clinics ──────────────────────────────────────────────────────────────
     SERVICE_QUESTION = "service_question"
     PACKAGE_TERMS_QUESTION = "package_terms_question"
+    PREPARATION_AFTERCARE_INFO = "preparation_aftercare_info"
+    PRACTITIONER_AVAILABILITY = "practitioner_availability"
+    NAMED_PRACTITIONER_REQUEST = "named_practitioner_request"
+    APPOINTMENT_LOOKUP_STATUS = "appointment_lookup_status"
     MODIFY_APPOINTMENT = "modify_appointment"
     CANCEL_APPOINTMENT = "cancel_appointment"
+    ARRIVAL_LATE_NO_SHOW = "arrival_late_no_show"
+    PACKAGE_ACCOUNT_STATUS = "package_account_status"
+    PRODUCT_VOUCHER_ENQUIRY = "product_voucher_enquiry"
+    STOCK_ENQUIRY = "stock_enquiry"
+    ONLINE_ORDER_SUPPORT = "online_order_support"
+    MEDICAL_DOCUMENTS_RESULTS = "medical_documents_results"
+    FOLLOWUP_TOUCHUP_REVIEW = "followup_touchup_review"
     #: Suitability, medical history, "is this safe for me". Never answered by the receptionist.
     CLINICAL_QUESTION = "clinical_question"
     #: A reaction after treatment that needs a clinician soon. Never assessed, always escalated.
