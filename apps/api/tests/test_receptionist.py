@@ -11,7 +11,13 @@ from packages.intents.schema import shipped_vocabularies
 
 from apps.api.conversations.receptionist import _UNBUILT_TEXT, HANDOFF_TEXT, handle
 from apps.api.conversations.task import Task, TaskStatus
-from apps.api.conversations.tools import REGISTRY, AnswerFromKnowledge
+from apps.api.conversations.tools import (
+    REGISTRY,
+    AnswerFromKnowledge,
+    CloseConversation,
+    ConversationCopy,
+    Greet,
+)
 from apps.api.core.knowledge import Fact
 from apps.api.schemas.envelope import InboundTurn
 
@@ -353,3 +359,81 @@ def test_a_turn_within_budget_still_asks() -> None:
         )
     )
     assert action.kind == "ask"
+
+
+# ── Tenant conversation copy ─────────────────────────────────────────────────────────────────
+#
+# The wording here is deliberately fake. Real client copy names the client, and this repo's own
+# `test_no_client_name.py` forbids that — the live lines are set as environment configuration.
+
+_COPY = ConversationCopy(
+    opening="Welcome to the clinic. How can I help?",
+    opening_named="Welcome to the clinic, {customer_name}. How can I help?",
+    closing="Thanks for getting in touch. Have a lovely day.",
+    closing_booking_confirmed="Your booking is confirmed. Reference: {booking_reference}.",
+)
+
+
+@pytest.fixture
+def tenant_copy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(REGISTRY, "greet", Greet(_COPY))
+    monkeypatch.setitem(REGISTRY, "close_conversation", CloseConversation(_COPY))
+
+
+def test_the_tenant_opening_is_used_verbatim(tenant_copy: None) -> None:
+    """A tenant's opening is a whole message, not a fragment something else prefixes.
+
+    The plain and named openings are separate sentences precisely so this holds in a language
+    where a name does not sit at the front — gluing "Hello Rana!" onto an Egyptian Arabic opening
+    would produce a bilingual mess no client would sign off.
+    """
+    action, _ = asyncio.run(handle(_turn("hi"), "greeting", 0.95, {}, None, vocabulary=_CLINICS))
+    assert action.text == _COPY.opening
+
+
+def test_the_named_opening_carries_the_profile_name(tenant_copy: None) -> None:
+    action, _ = asyncio.run(
+        handle(_turn("hi"), "greeting", 0.95, {"customer_name": "Rana"}, None, vocabulary=_CLINICS)
+    )
+    assert action.text == "Welcome to the clinic, Rana. How can I help?"
+
+
+def test_closing_without_a_booking_never_claims_one(tenant_copy: None) -> None:
+    """The regression this whole seam exists to prevent, one language further along.
+
+    "Your booking is confirmed" is the same lie as "All set! I've noted everything down." — said
+    with more authority, and in the customer's own language. A closing may only say it when the
+    scheduling system actually returned a reference.
+    """
+    action, _ = asyncio.run(
+        handle(_turn("thanks"), "thanks_closing", 0.95, {}, None, vocabulary=_CLINICS)
+    )
+    assert action.text == _COPY.closing
+    assert "confirmed" not in (action.text or "")
+
+
+def test_closing_names_the_reference_when_there_is_one(tenant_copy: None) -> None:
+    task = Task(intent="thanks_closing", vocabulary=_CLINICS)
+    task.slots["booking_reference"] = "DC-0042"
+    action, _ = asyncio.run(
+        handle(_turn("thanks"), "thanks_closing", 0.95, {}, task, vocabulary=_CLINICS)
+    )
+    assert action.text == "Your booking is confirmed. Reference: DC-0042."
+
+
+def test_a_typo_in_tenant_copy_degrades_instead_of_crashing() -> None:
+    """Copy is written by someone who is not looking at this code.
+
+    ``str.format`` on a mistyped placeholder raises ``KeyError`` mid-conversation, which would
+    lose the customer's reply entirely. A copy typo should cost a plainer message, nothing more.
+    """
+    broken = ConversationCopy(
+        opening_named="Hello {custmer_name}!",
+        closing_booking_confirmed="Confirmed: {booking_ref}.",
+        closing="Thanks!",
+    )
+    named = asyncio.run(Greet(broken).run(customer_name="Rana"))
+    closed = asyncio.run(CloseConversation(broken).run(booking_reference="DC-1"))
+
+    assert named.ok and "{" not in (named.human_summary or "")
+    assert closed.human_summary == "Thanks!", "a broken booking template must not be sent"

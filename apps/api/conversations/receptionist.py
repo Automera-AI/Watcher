@@ -165,16 +165,23 @@ async def _run_direct(
 ) -> tuple[OutboundAction, Task]:
     """Run a tool whose reply is its ``human_summary`` and which has nothing to look up.
 
-    ``customer_name`` is passed through rather than read from the task's slots because a greeting
-    declares it optional and the name comes from the channel profile, not from anything the
-    customer typed.
+    ``customer_name`` is read from ``extracted_slots`` first because it comes from the channel
+    profile rather than from anything the customer typed, and the task may never have collected it.
+
+    ``booking_reference`` decides whether a closing may say an appointment was confirmed, so it is
+    read from the task the conversation has been building rather than from this one message —
+    the customer says "شكراً", not their reference. It is absent until ``confirm_booking`` exists
+    to put one there, which is exactly why the confirmed-booking wording cannot be reached yet.
     """
     tool = REGISTRY.get(tool_name)
     if tool is None:  # A vocabulary naming a tool nobody registered. Not worth a live crash.
         task.status = TaskStatus.HANDED_OFF
         return OutboundAction(kind="handoff", text=HANDOFF_TEXT), task
 
-    result = await tool.run(customer_name=extracted_slots.get("customer_name"))
+    result = await tool.run(
+        customer_name=extracted_slots.get("customer_name") or task.slots.get("customer_name"),
+        booking_reference=task.slots.get("booking_reference"),
+    )
     task.status = TaskStatus.COMPLETED
     return OutboundAction(kind="say", text=result.human_summary or ""), task
 

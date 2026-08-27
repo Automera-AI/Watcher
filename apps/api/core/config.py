@@ -44,6 +44,7 @@ from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import SettingsConfigDict
 
 from apps.api.channels.config import ChannelCredentials
+from apps.api.conversations.tools import ConversationCopy
 from apps.api.core.emergency import DEFAULT_TIMEZONE, timezone_is_known
 from apps.api.core.policy import TenantPolicy
 from apps.api.schemas.common import HIGH_CONFIDENCE_THRESHOLD, PhoneE164
@@ -109,6 +110,21 @@ class Settings(ChannelCredentials):
     # call, while the number a patient rings for a filler occlusion is a named clinician. Unset,
     # the emergency reply names no clinic number and points only at public emergency services.
     tenant_urgent_contact: str | None = None
+
+    # ── The receptionist's own words (roadmap 2.x) ────────────────────────────────────────
+    #
+    # The two ends of a conversation, in the client's voice. Configuration rather than code
+    # because each names the client, its receptionist and its brand tone — the hardcoding
+    # `tests/test_no_client_name.py` exists to prevent. Unset, the tools answer in neutral
+    # English that names nobody and is still correct.
+    #
+    # `tenant_closing_booking_confirmed` is the one that can lie: it states an appointment
+    # exists. It is rendered only when the scheduling system returned a durable reference to
+    # put in it, and `CloseConversation.run` falls back to the generic closing otherwise.
+    tenant_greeting_opening: str | None = None
+    tenant_greeting_opening_named: str | None = None
+    tenant_closing: str | None = None
+    tenant_closing_booking_confirmed: str | None = None
 
     # ── Classifier tiering (addendum §8 / D8-a) ────────────────────────────────────────────
     anthropic_api_key: SecretStr | None = None
@@ -201,6 +217,15 @@ class Settings(ChannelCredentials):
             high_confidence_threshold=self.classifier_confidence_escalation_threshold,
             timezone=self.tenant_timezone,
             urgent_contact=self.tenant_urgent_contact,
+        )
+
+    def conversation_copy(self) -> ConversationCopy:
+        """The tenant's opening and closing wording, as the tools take it."""
+        return ConversationCopy(
+            opening=self.tenant_greeting_opening,
+            opening_named=self.tenant_greeting_opening_named,
+            closing=self.tenant_closing,
+            closing_booking_confirmed=self.tenant_closing_booking_confirmed,
         )
 
     def database_dsn(self) -> str:
