@@ -291,7 +291,10 @@ class Orchestrator:
         make the resumed conversation worse.
         """
         turn = to_inbound_turn(UUID(tenant_id), message)
-        action = OutboundAction(kind="handoff", text=emergency_reply(self._policy.urgent_contact))
+        action = OutboundAction(
+            kind="handoff",
+            text=emergency_reply(self._policy.urgent_contact, self._policy.emergency_reply),
+        )
 
         if self._conversations is not None:
             state = self._conversations.begin(turn)

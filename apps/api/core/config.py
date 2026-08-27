@@ -111,6 +111,12 @@ class Settings(ChannelCredentials):
     # the emergency reply names no clinic number and points only at public emergency services.
     tenant_urgent_contact: str | None = None
 
+    # Replaces the default emergency wording entirely. May contain {contact}. Set this for any
+    # tenant that must NOT direct customers to public emergency services — a clinic routes to its
+    # own clinician, because deciding that something is an ambulance case is triage and triage is
+    # not the receptionist's to do. Unset, the default wording is used.
+    tenant_emergency_reply: str | None = None
+
     # ── The receptionist's own words (roadmap 2.x) ────────────────────────────────────────
     #
     # The two ends of a conversation, in the client's voice. Configuration rather than code
@@ -217,6 +223,7 @@ class Settings(ChannelCredentials):
             high_confidence_threshold=self.classifier_confidence_escalation_threshold,
             timezone=self.tenant_timezone,
             urgent_contact=self.tenant_urgent_contact,
+            emergency_reply=self.tenant_emergency_reply,
         )
 
     def conversation_copy(self) -> ConversationCopy:

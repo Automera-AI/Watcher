@@ -298,14 +298,59 @@ def test_a_configured_contact_reaches_the_customer_in_both_languages() -> None:
     assert reply.count("+20 100 000 0000") == 2, "one for each language"
 
 
-def test_the_clinic_contact_never_replaces_emergency_services() -> None:
-    """The one way this could do harm.
+def test_the_default_wording_still_points_at_emergency_services() -> None:
+    """Unchanged for the vertical it was written for.
 
-    Someone who cannot breathe needs an ambulance, not a clinic mobile. The tenant's number is an
-    addition to the public-emergency line and must never displace it, so the original text has to
-    survive intact underneath whatever is appended.
+    A short-let guest who smells gas needs the fire service, and no operator substitutes for one.
+    The clinic override below is a *different tenant's* wording, not a replacement for this.
     """
     reply = emergency_reply("+20 100 000 0000")
     assert EMERGENCY_REPLY in reply
     assert "local emergency number" in reply
-    assert "رقم الطوارئ المحلي" in reply
+
+
+def test_a_tenant_override_replaces_the_default_entirely() -> None:
+    """The clinic requirement, and the reason this is per tenant rather than one shared sentence.
+
+    Telling a patient to call an ambulance is a triage judgement — deciding this is an ambulance
+    case rather than a call to the clinician who performed the procedure. Triage is the one thing
+    a clinic receptionist may never do, so the clinic's wording routes to its own doctor and the
+    default's public-emergency line must not survive underneath it.
+    """
+    override = "Please call our doctor now on {contact}. I am alerting them as well."
+    reply = emergency_reply("+20 100 000 0000", override)
+
+    assert reply == "Please call our doctor now on +20 100 000 0000. I am alerting them as well."
+    assert "local emergency number" not in reply
+    assert "رقم الطوارئ المحلي" not in reply
+
+
+def test_an_override_is_used_even_with_no_contact_configured() -> None:
+    """A tenant that has forbidden the default must not fall back to it for want of a number."""
+    override = "I am alerting our doctor right now."
+    assert emergency_reply(None, override) == override
+
+
+def test_a_broken_override_template_still_reaches_the_customer() -> None:
+    """The last text in the system that may raise.
+
+    A KeyError from a mistyped placeholder would mean the person who cannot breathe receives
+    nothing at all. A copy typo must cost the substitution, never the message.
+    """
+    reply = emergency_reply("+20 100 000 0000", "Call our doctor on {phone_number} now.")
+    assert reply == "Call our doctor on {phone_number} now."
+
+
+def test_every_emergency_reply_promises_a_person() -> None:
+    """The one invariant across all four branches.
+
+    A reply that names no number and promises no person is the only genuinely unsafe output here.
+    """
+    for reply in (
+        emergency_reply(),
+        emergency_reply("+20 100 000 0000"),
+        emergency_reply(None, "I am alerting our doctor right now."),
+        emergency_reply("+20 100 000 0000", "Call our doctor on {contact}. Alerting them now."),
+    ):
+        assert reply.strip()
+        assert "alert" in reply.lower() or "doctor" in reply.lower()
