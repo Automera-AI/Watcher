@@ -448,7 +448,7 @@ class CheckAvailability(_ClinicTool):
             return ToolResult(
                 ok=False,
                 error="none_available",
-                data={"times": []},
+                data={"times": [], "service_category": resolved.service.category},
                 human_summary=_fill_all(
                     template,
                     service=resolved.service.name,
@@ -470,6 +470,11 @@ class CheckAvailability(_ClinicTool):
                 "times": times,
                 "slot_ids": [slot.external_id for slot in slots],
                 "service_code": resolved.service.code,
+                # What the clinical gate reads (demo step 7). Reported by the tool that resolved
+                # the service because it is the only thing that knows which catalogue row the
+                # patient's words reached, and the gate must not resolve it a second time and
+                # possibly differently.
+                "service_category": resolved.service.category,
                 "branch_external_id": resolved.branch.external_id,
             },
             human_summary=_fill_all(

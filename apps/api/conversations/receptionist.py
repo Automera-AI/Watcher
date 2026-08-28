@@ -40,6 +40,13 @@ is now read against the read-back that is actually outstanding, *before* the cla
 allowed to switch tasks. That is the clinic vocabulary's dialogue-state rule, in the one place the
 demo needs it.
 
+**What demo step 7 added: the clinical gate.** A receptionist that can write an appointment can
+write one for a filler injection into a pregnant patient and confirm it with a reference number.
+``core/screening.py`` decides what stops a booking; this file is where it is asked, on every turn
+of a booking task and again once the treatment's category is known. A block hands off and says
+nothing else — no reassurance, no follow-up question, because asking one is a medical-history
+interview conducted in order to decide.
+
 The remaining ``terminal_tool`` values (``lookup_reservation``, ``lookup_appointment``,
 ``create_ticket``) still have no implementation, and still hand off.
 """
@@ -54,6 +61,7 @@ from apps.api.conversations.confirmation import reads_as_no, reads_as_yes
 from apps.api.conversations.task import Task, TaskStatus
 from apps.api.conversations.tools import REGISTRY, ToolResult
 from apps.api.core.autonomy import Autonomy, decide_autonomy
+from apps.api.core.screening import ScreeningBlock, screen
 from apps.api.schemas.envelope import InboundTurn, OutboundAction
 
 HANDOFF_TEXT = "Let me connect you with someone who can help."
@@ -174,6 +182,13 @@ async def handle(
     if autonomy == "hand_off":
         return await _hand_off(task, "handoff_to_human")
 
+    # The clinical gate (demo step 7), on what the patient just said. Checked on every turn of a
+    # booking rather than once at the start: a disclosure arrives when the patient thinks of it,
+    # which is usually while they are answering a question about something else. After `absorb`,
+    # so what they told us is kept for the person who takes the conversation over.
+    if _is_booking(intent, vocab) and (block := screen(turn.text, vocabulary=vocab)) is not None:
+        return await _blocked(task, block)
+
     step, slot = task.next_step()
 
     # Asking again is only worth doing while it is still making progress. `turns_taken` counts
@@ -190,7 +205,7 @@ async def handle(
         if slot == _TIME_SLOT and tool_name == _BOOKING_TOOL:
             # Not an open question. The one detail still missing is *which* appointment, and the
             # only honest way to collect it is to offer what the diary actually holds.
-            return await _offer_times(task, turn, conversation_id)
+            return await _offer_times(task, turn, conversation_id, vocab)
         return (
             OutboundAction(
                 kind="ask",
@@ -338,7 +353,7 @@ def _slot_at(result: ToolResult, wanted_time: str) -> str | None:
 
 
 async def _offer_times(
-    task: Task, turn: InboundTurn, conversation_id: str | None
+    task: Task, turn: InboundTurn, conversation_id: str | None, vocab: Vocabulary
 ) -> tuple[OutboundAction, Task]:
     """Collect the appointment time by offering the ones that exist.
 
@@ -349,9 +364,25 @@ async def _offer_times(
     result = await _availability(task, turn, conversation_id)
     if result is None:
         return await _hand_off(task, "handoff_to_human")
+    if (block := _screen_category(result, vocab)) is not None:
+        return await _blocked(task, block)
     if result.human_summary:
         return OutboundAction(kind="ask", text=result.human_summary), task
     return await _hand_off(task, "handoff_to_human")
+
+
+def _screen_category(result: ToolResult, vocab: Vocabulary) -> ScreeningBlock | None:
+    """The clinical gate on the *treatment*, once the catalogue has said which one it is.
+
+    Deliberately not run on the patient's words for the service — "عايزة فيلر" resolving to
+    ``Filler`` is the catalogue's answer, and the gate reads the category the catalogue returned
+    rather than guessing from the message. A booking whose service never resolved has no category
+    to screen, and never reaches a confirmation either.
+    """
+    category = (result.data or {}).get("service_category")
+    if not isinstance(category, str):
+        return None
+    return screen(None, service_category=category, vocabulary=vocab)
 
 
 async def _read_back(
@@ -461,12 +492,17 @@ async def _book(
         return await _unbuilt(task)
 
     availability = await _availability(task, turn, conversation_id)
+    if availability is not None and (block := _screen_category(availability, vocab)) is not None:
+        # Belt and braces on the last line before an appointment is written. The category was
+        # already screened when the times were offered, but a catalogue can be re-imported between
+        # two messages, and this is the check whose absence writes the appointment.
+        return await _blocked(task, block)
     slot_id = _slot_at(availability, wanted_time) if availability is not None else None
     if slot_id is None:
         # The time is no longer on offer. Say what is, rather than booking something else.
         task.slots.pop(_TIME_SLOT, None)
         task.confirmed.discard(_TIME_SLOT)
-        return await _offer_times(task, turn, conversation_id)
+        return await _offer_times(task, turn, conversation_id, vocab)
 
     result = await tool.run(
         tenant_id=str(turn.tenant_id),
@@ -500,3 +536,23 @@ async def _unbuilt(task: Task) -> tuple[OutboundAction, Task]:
         await take_message.run()
     task.status = TaskStatus.HANDED_OFF
     return OutboundAction(kind="handoff", text=_UNBUILT_TEXT), task
+
+
+def _is_booking(intent: str, vocab: Vocabulary) -> bool:
+    """Whether this intent ends in an appointment being written."""
+    found = next((i for i in vocab.intents if i.name == intent), None)
+    return found is not None and found.terminal_tool == _BOOKING_TOOL
+
+
+async def _blocked(task: Task, block: ScreeningBlock) -> tuple[OutboundAction, Task]:
+    """Stop, and fetch the person whose decision this is.
+
+    Nothing is said about *why*. A reply naming the disclosure — "since you're pregnant…" — is the
+    receptionist stating a clinical fact about a patient, which is the line the whole vertical is
+    drawn around; and a reply that asks a follow-up implies the answer could change the outcome.
+    The hand-off wording is the ordinary one, and a clinician says the rest.
+
+    The block's own ``action`` is used rather than a hardcoded name, so a vocabulary that routes
+    screening somewhere other than the general hand-off queue is obeyed rather than overridden.
+    """
+    return await _hand_off(task, block.action)

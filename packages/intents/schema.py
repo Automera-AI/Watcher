@@ -258,6 +258,63 @@ class Emergency(BaseModel):
     triggers: list[EmergencyTrigger] = Field(min_length=1)
 
 
+class ScreeningTrigger(BaseModel):
+    """A phrase whose presence means a clinician decides, not the receptionist.
+
+    Same shape as :class:`EmergencyTrigger` and deliberately not the same type. An emergency is
+    happening *now* and answers immediately; a screening disclosure is a fact about the patient
+    that makes a booking a clinical judgement — "أنا حامل" is not urgent, and treating it as an
+    emergency would put a frightened patient in front of the on-call clinician's phone number for
+    saying something entirely ordinary. There is also no ``only_between``: being pregnant is not
+    a thing that stops mattering at 07:00.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    any_of: list[str] = Field(min_length=1)
+    note: str | None = None
+
+    @model_validator(mode="after")
+    def _no_lookalike_characters(self) -> ScreeningTrigger:
+        for phrase in self.any_of:
+            if len(scripts := _script_of(phrase)) > 1:
+                raise ValueError(
+                    f"screening trigger {self.id!r}: {phrase!r} mixes {sorted(scripts)}. "
+                    "Almost certainly a lookalike character — this phrase would never match."
+                )
+        return self
+
+
+class Screening(BaseModel):
+    """The clinical gate on booking: what the receptionist may not decide by itself.
+
+    Two independent halves, because they catch different things.
+
+    ``screened_categories`` are catalogue categories a clinician must approve **whatever the
+    patient says**. Injectables are a medical procedure; a receptionist taking a filler booking
+    unsupervised is the clinic's licence, not a UX preference.
+
+    ``triggers`` are things a patient discloses that make *any* booking a clinical judgement —
+    pregnancy, isotretinoin, an anticoagulant. The treatment may be ordinary and the patient may
+    not be, and the receptionist is not allowed to weigh that. Anything they match hands off.
+
+    **The contents are a clinical draft written by an engineer.** Like the emergency copy, they
+    are fit for a demo and must be approved by the clinic's medical lead before a real patient
+    reaches the number. What is *structural* — that a match ends autonomy — is not a draft.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    action: str
+    """The tool a block runs, by name. A free tool name rather than a fixed literal, because a
+    clinic that routes screening to a dedicated clinician queue rather than the general hand-off
+    is a configuration this should obey — and ``Vocabulary`` refuses a name the file does not
+    declare, so a gate whose action nobody implements cannot ship."""
+
+    screened_categories: list[str] = Field(default_factory=list)
+    triggers: list[ScreeningTrigger] = Field(default_factory=list)
+    note: str | None = None
+
+
 class Language(BaseModel):
     model_config = ConfigDict(extra="forbid")
     code: str
@@ -285,6 +342,10 @@ class Vocabulary(BaseModel):
     languages: list[Language]
     tools: list[str]
     emergency: Emergency
+    #: The clinical gate on booking (demo step 7). Absent for a vertical that has no clinical
+    #: judgement to make — a holiday-home guest booking a two-bed is not being screened for
+    #: anything — and absence means "nothing is gated", never "gate everything".
+    screening: Screening | None = None
     defaults: Defaults
     property_systems: list[PropertySystem] = Field(min_length=1)
     quoting: Quoting
@@ -358,6 +419,12 @@ class Vocabulary(BaseModel):
         for required in ("handoff_to_human", "take_message"):
             if required not in tools:
                 raise ValueError(f"{required!r} must always be available")
+
+        if self.screening is not None and self.screening.action not in tools:
+            raise ValueError(
+                f"screening acts by {self.screening.action!r}, which this vocabulary does not "
+                "declare as a tool. A gate whose action nobody implements is not a gate."
+            )
 
         # Franco-Arabic is typed, never spoken. An intent that acts alone has to be testable on
         # a call as well as in chat, so it needs at least one example in a language people say
