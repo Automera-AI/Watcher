@@ -1,0 +1,50 @@
+sheet,id,name,aliases,status,note
+Branches,DC01,Maadi,المعادي|معادي,confirmed,Client-confirmed pattern (decision 12).
+Branches,DC02,New Cairo,القاهرة الجديدة|التجمع|التجمع الخامس|تجمع خامس,drafted,"Patients say التجمع far more often than القاهرة الجديدة."
+Branches,DC03,Nasr City,مدينة نصر|نصر سيتي,drafted,"Bare نصر deliberately left off: it is a common word, not a location a patient is naming."
+Branches,DC04,Heliopolis,مصر الجديدة|هليوبوليس|هليوبولس,drafted,
+Branches,DC05,6th of October,السادس من أكتوبر|أكتوبر|6 أكتوبر|٦ أكتوبر,drafted,"Both digit forms: the matcher does not fold ٦ to 6 — see §4 of the review note."
+Branches,DC06,Sheikh Zayed,الشيخ زايد|شيخ زايد|زايد,drafted,
+Branches,DC07,Tanta,طنطا,drafted,
+Branches,DC08,Mansoura,المنصورة|منصورة,drafted,
+Branches,DC09,Zagazig,الزقازيق|زقازيق,drafted,
+Branches,DC10,Zamalek,الزمالك|زمالك,drafted,Placeholder branch — alias is still needed if it is offered at all (decision 5).
+Branches,DC11,Mohandessin,المهندسين|مهندسين,drafted,Placeholder branch.
+Branches,DC12,Alexandria Smouha,سموحة|الإسكندرية سموحة|اسكندرية سموحة,drafted,"Placeholder branch. Bare الإسكندرية left off — it names a city with one listed branch today, but the clinic may open a second."
+Branches,DC13,Ismailia,الإسماعيلية|إسماعيلية,drafted,Placeholder branch.
+Branches,DC14,Damanhour,دمنهور,drafted,Placeholder branch.
+Services,DT001,Basic Facial,فاشيال بيسك|الفاشيال البيسك|فاشيال أساسي,confirmed-shape,"Decision 12: فاشيال goes on DT002 alone, so this one keeps only the qualified forms. That is what resolves the DT001/DT002 tie without a clarifying question."
+Services,DT002,Facial,فاشيال|الفاشيال,confirmed,Client-confirmed (decision 12).
+Services,DT003,Medical Facial + Dermapen,فاشيال طبي|الفاشيال الطبي|ديرمابن|ديرما بن|فاشيال ديرمابن,drafted,
+Services,DT004,Peeling,بيلينج|بيلنج|تقشير|التقشير,drafted,
+Services,DT005,Hair Treatments,علاج الشعر|علاجات الشعر|جلسة شعر,drafted,"Bare شعر deliberately left off: for this clinic's patients شعر almost always means laser hair removal."
+Services,DT006,Skin Boosters,سكين بوستر|سكين بوسترز|بوسترات البشرة,drafted,"حقن نضارة is the term most patients use, but it also covers mesotherapy, which is not in this catalogue. Left off pending the clinic's answer — see open question 3."
+Services,DT007,Botox,بوتوكس|البوتوكس,drafted,
+Services,DT008,Botox + Lip Booster,بوتوكس وليب بوستر|بوتوكس + ليب بوستر|ليب بوستر,drafted,
+Services,DT009,Filler,فيلر|الفيلر,drafted,
+Services,DT010,Filler 1 Syringe,فيلر سرنجة|فيلر سرنجة واحدة|سرنجة فيلر,drafted,
+Services,DT011,Filler 2 Syringes + 1 Free,فيلر سرنجتين|فيلر 2 سرنجة|فيلر ٢ سرنجة,drafted,
+Services,DT012,Apriline Dermal Filler - Buy 2 Get 1 FREE,أبريلين|فيلر أبريلين,drafted,"DT011 and DT012 are both 10,000 EGP for 30 minutes; the alias for each is its own distinguishing word, so neither is reachable by a generic فيلر phrase."
+Services,DT013,Biostimulator,بيوستيميوليتور|بيو ستيميوليتور,drafted,"Transliteration only. Many patients call this محفزات الكولاجين — needs the clinic's word before it goes in (open question 3)."
+Services,DT014,Sculpting Injection (حقن تكميم) 4 Sessions,حقن تكميم|إبر التكميم|حقن التكميم,drafted,
+Services,DT015,Sculpting Alternative Injection (حقن بديل التكميم),حقن بديل التكميم|بديل التكميم|بديل تكميم,drafted,
+Services,DT016,Bikini & Underarm Laser Hair Removal - 6 Sessions,ليزر بيكيني|ليزر بيكيني وتحت الإبط|بيكيني وتحت الإبط,drafted,
+Services,DT017,Full Body Laser Hair Removal - 3 Sessions,ليزر فل بودي 3 جلسات|ليزر فل بودي ٣ جلسات|ليزر جسم كامل 3 جلسات,drafted,
+Services,DT018,Full Body Laser Hair Removal - 6 Sessions,ليزر فل بودي 6 جلسات|ليزر فل بودي ٦ جلسات|ليزر جسم كامل 6 جلسات,drafted,
+Services,DT019,Full Body Laser Hair Removal - 12 Sessions,ليزر فل بودي 12 جلسة|ليزر فل بودي ١٢ جلسة|ليزر جسم كامل 12 جلسة,drafted,
+Services,DT020,Annual Half Body (12 Sessions),,blocked,"Indistinguishable from DT023 in Arabic — both are a 12-session annual half-body laser package (17,800 vs 14,300). No alias until the clinic says what a patient asks for differently. See open question 1."
+Services,DT021,Laser Hair Removal Annual 12 Sessions,الباقة السنوية|ليزر سنوي 12 جلسة|ليزر سنوي ١٢ جلسة,drafted,
+Services,DT022,Laser Hair Removal GenZ 3 Sessions,جين زد|ليزر جين زد|باقة جين زد,drafted,
+Services,DT023,Laser Hair Removal Half Body Annual 12 Sessions,,blocked,See DT020 and open question 1.
+Services,DT024,Laser Hair Removal Maintenance 4 Sessions,,blocked,"Indistinguishable from DT027 in Arabic — both are a 4-session maintenance package (6,900 vs 8,600). See open question 2."
+Services,DT025,Laser Hair Removal Semi-Annual 6 Sessions,ليزر نصف سنوي|نص سنوي 6 جلسات|نص سنوي ٦ جلسات,drafted,
+Services,DT026,Laser Hair Removal Super Annual Unlimited Sessions,سوبر انيوال|جلسات غير محدودة|باقة غير محدودة,drafted,"The only package with no countable session number — the price quote says so rather than quoting a count."
+Services,DT027,Maintenance Package (4 Sessions Full Body),,blocked,See DT024 and open question 2.
+Services,DT028,Primelase Laser Hair Removal - Single Session,برايم ليز جلسة واحدة|برايمليز جلسة واحدة|جلسة برايم ليز,drafted,
+Services,DT029,Primelase Laser Package - 6 Sessions,برايم ليز 6 جلسات|برايم ليز ٦ جلسات|برايمليز 6 جلسات,drafted,"The 15,000 EGP package (decision 4). The alias must carry the session count or the quote is a fifth of the treatment."
+Services,DT030,Primelase Laser Package - 12 Sessions,برايم ليز 12 جلسة|برايم ليز ١٢ جلسة|برايمليز 12 جلسة,drafted,
+Services,DT031,Anti-Cellulite 4 Sessions,سيلوليت|السيلوليت|علاج السيلوليت,drafted,
+Services,DT032,Body Shaping,تنسيق قوام,drafted,"Same modality as DT035 in the suitability PDF (deviation 3), so each keeps only its own distinguishing word. See open question 2."
+Services,DT033,Cool Shaping 4 Sessions,كول شيبنج|كول شيبينج,drafted,"Kept distinct from DT034 by spelling alone, which is thin — see open question 2."
+Services,DT034,CoolShape Fat Freezing - 4 Sessions,تجميد الدهون|تجميد دهون|كول شيب تجميد الدهون,drafted,
+Services,DT035,PowerShape Body Contouring - 4 Sessions,باور شيب|باورشيب|باور شيب 4 جلسات,drafted,
