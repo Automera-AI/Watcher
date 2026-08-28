@@ -91,13 +91,31 @@ def _load_draft(path: Path) -> dict[str, tuple[str, ...]]:
     return proposed
 
 
+def _merge(existing: Sequence[str], proposed: Sequence[str]) -> tuple[str, ...]:
+    """Existing aliases plus the proposed ones the row does not already carry.
+
+    Deduplicated on the *normalised* form, because that is what the importer counts: once a draft
+    has been written into the workbook, overlaying the same draft again would put every alias on
+    its row twice and be reported as a collision the file does not have.
+    """
+    merged = list(existing)
+    seen = {normalise_service_name(name) for name in merged}
+    for name in proposed:
+        folded = normalise_service_name(name)
+        if folded not in seen:
+            seen.add(folded)
+            merged.append(name)
+    return tuple(merged)
+
+
 def _overlay(plan: CataloguePlan, proposed: dict[str, tuple[str, ...]]) -> CataloguePlan:
     """The same catalogue with the proposed aliases added. The workbook itself is not touched."""
     branches = tuple(
-        replace(b, aliases=(*b.aliases, *proposed.get(b.external_id, ()))) for b in plan.branches
+        replace(b, aliases=_merge(b.aliases, proposed.get(b.external_id, ())))
+        for b in plan.branches
     )
     services = tuple(
-        replace(s, aliases=(*s.aliases, *proposed.get(s.code, ()))) for s in plan.services
+        replace(s, aliases=_merge(s.aliases, proposed.get(s.code, ()))) for s in plan.services
     )
     return replace(plan, branches=branches, services=services)
 

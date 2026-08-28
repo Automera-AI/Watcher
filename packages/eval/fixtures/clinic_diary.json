@@ -6,7 +6,7 @@
   "now": "2026-09-01T09:00:00+00:00",
   "reference_prefix": "DC",
   "next_serial": 266,
-  "aliases_status": "PROPOSED, not in the client's workbook yet — docs/dermaclub-aliases-draft.csv. A journey that resolves an Arabic name here resolves it in production only once the clinic has put these in their own file and it has been re-imported.",
+  "aliases_status": "From the workbook's own Aliases columns, reviewed and confirmed by the clinic on 28 August. Regenerate this file whenever the workbook changes — apps/api/tests/test_clinic_workbook_integration.py fails if the two drift apart.",
   "branches": [
     {
       "external_id": "DC01",
