@@ -65,6 +65,10 @@ def test_all_tables_create() -> None:
         "understandings",
         "corrections",
         "usage_events",
+        "clinic_branches",
+        "clinic_services",
+        "clinic_availability_slots",
+        "clinic_bookings",
     }
     assert expected <= set(Base.metadata.tables)
 

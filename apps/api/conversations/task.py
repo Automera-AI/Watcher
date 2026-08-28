@@ -101,6 +101,29 @@ class Task:
                 self.confirmed.discard(key)
             self.slots[key] = value
 
+    @property
+    def awaiting_agreement(self) -> bool:
+        """Whether a read-back is outstanding: everything collected, nothing agreed to yet.
+
+        This *is* the pending-confirmation state the clinic vocabulary's dialogue-state rule talks
+        about, derived rather than stored. There is no third thing to remember — a task with
+        nothing missing and something unconfirmed has just read those details back and is waiting
+        for an answer, which is why no column and no migration are needed to know it.
+        """
+        return not self.missing and bool(self.unconfirmed)
+
+    def agree(self) -> None:
+        """The customer said yes to what was read back to them.
+
+        Everything outstanding at once, because they were read back at once. Before this existed
+        ``confirmed`` was a set that was only ever *emptied* — ``absorb`` discards from it and
+        nothing added — so an intent declaring ``confirm_before_acting`` read a detail back, was
+        told "أيوه", and read it back again until the clarifying-turn limit fetched a person. No
+        task with a confirmable slot could reach ``execute``, which is why ``confirm_booking``
+        was unreachable even once it was built.
+        """
+        self.confirmed.update(self.unconfirmed)
+
     def next_step(self) -> tuple[str, str | None]:
         """What to do next: ask for a detail, read one back, or go ahead."""
         if missing := self.missing:

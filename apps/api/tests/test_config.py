@@ -257,3 +257,30 @@ def test_every_documented_variable_is_readable(_settings: SettingsFactory) -> No
 
     assert documented, "no variables parsed out of .env.example — the parser or the file moved"
     assert documented <= readable, f"documented but unreadable: {sorted(documented - readable)}"
+
+
+# ── Which vocabulary this deployment speaks (demo step 5) ──────────────────────────────────
+
+
+def test_the_default_vertical_is_the_one_this_service_shipped_with() -> None:
+    """An existing deploy is unchanged by ``TENANT_VERTICAL`` existing."""
+    assert Settings().vocabulary().vertical == "holiday_homes"
+
+
+def test_a_clinic_deploy_gets_the_clinic_vocabulary() -> None:
+    """The whole point: the clinic taxonomy was shipped and reachable by nothing before this.
+
+    Without it the classifier describes holiday-home intents to the model, ``decide_autonomy``
+    looks up ceilings in the holiday-home file, and a patient asking to book an appointment is
+    labelled against a vocabulary that has never heard of one.
+    """
+    vocab = Settings(tenant_vertical="clinics").vocabulary()
+    assert vocab.vertical == "clinics"
+    assert {i.name for i in vocab.intents} >= {"booking_enquiry", "clinical_question"}
+
+
+def test_a_vertical_nobody_shipped_is_refused_at_startup() -> None:
+    """Never a fallback to the default. Serving a clinic out of another vertical's safety floor
+    is the cross-vertical leak the union taxonomy exists to make fail safe."""
+    with pytest.raises(ValidationError, match="TENANT_VERTICAL"):
+        Settings(tenant_vertical="dental")

@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from packages.intents.schema import Vocabulary, default_vocabulary, vocabulary_for
 
 from apps.api.audit.log import AuditEntry
 from apps.api.classifier.service import Classifier
@@ -23,6 +24,7 @@ from apps.api.conversations.tools import REGISTRY, AnswerFromKnowledge
 from apps.api.core.alerts import AlertOutcome, EmergencyAlert
 from apps.api.core.emergency import EMERGENCY_REPLY
 from apps.api.core.knowledge import Fact
+from apps.api.core.policy import DEFAULT_POLICY, TenantPolicy
 from apps.api.identity.models import CrmRecord
 from apps.api.identity.resolver import IncomingContact
 from apps.api.orchestration.ports import (
@@ -46,13 +48,18 @@ TENANT_UUID = "00000000-0000-0000-0000-000000000001"
 MSG_ID = "msg-1"
 
 
-def _result_json(confidence: float, intent: str = "availability_check") -> dict[str, Any]:
+def _result_json(
+    confidence: float,
+    intent: str = "availability_check",
+    slots: dict[str, str] | None = None,
+) -> dict[str, Any]:
     return {
         "intent": intent,
         "summary_one_line": "summary",
         "language": "en",
         "person_name": "Sara",
         "company_name": "Acme",
+        "extracted_slots": slots or {},
         "confidence_overall": confidence,
         "confidence_intent": confidence,
         "confidence_person": confidence,
@@ -331,10 +338,13 @@ def _conversing(
     conversations: _FakeConversations | None = None,
     sender: _FakeSender | None = None,
     alerter: _FakeAlerter | None = None,
+    slots: dict[str, str] | None = None,
+    vocabulary: Vocabulary | None = None,
+    policy: TenantPolicy | None = None,
 ) -> tuple[Orchestrator, _FakeAudit, _FakeInbox, _FakeConversations]:
     classifier = Classifier(
-        _ScriptedProvider("cheap", [_result_json(confidence, intent)]),
-        _ScriptedProvider("big", [_result_json(confidence, intent)]),
+        _ScriptedProvider("cheap", [_result_json(confidence, intent, slots)]),
+        _ScriptedProvider("big", [_result_json(confidence, intent, slots)]),
     )
     audit = _FakeAudit()
     inbox = _FakeInbox()
@@ -348,6 +358,8 @@ def _conversing(
         conversations=store,
         sender=sender,
         alerter=alerter,
+        vocabulary=vocabulary or default_vocabulary(),
+        policy=policy if policy is not None else DEFAULT_POLICY,
     )
     return orch, audit, inbox, store
 
@@ -641,3 +653,107 @@ def test_an_ordinary_message_still_takes_the_ordinary_path(
     assert outcome.action is RoutingAction.RECEPTIONIST_REPLY
     assert outcome.emergency is None
     assert alerter.alerts == []
+
+
+# ── Slot extraction reaching the task (demo step 5) ────────────────────────────────────────
+
+
+def _clinic_message(text: str, at: datetime) -> MessageEnvelope:
+    envelope = _message(text)
+    return envelope.model_copy(update={"received_at": at})
+
+
+def test_what_the_model_extracted_reaches_the_task() -> None:
+    """The gap ``worker.py`` carried as ``{}`` since the receptionist was wired.
+
+    Three of ``booking_enquiry``'s four required slots arrive in one message and all three are
+    kept — the difference between a booking journey and three clarifying questions ending in a
+    hand-off. The fourth, the time, is not asked for here: the receptionist offers the times the
+    diary actually holds (step 6), so it is still outstanding at this point by design.
+    """
+    orch, _audit, _inbox, store = _conversing(
+        "booking_enquiry",
+        0.95,
+        slots={"service": "ليزر", "branch": "الشيخ زايد", "requested_date": "بكرة"},
+        vocabulary=vocabulary_for("clinics"),
+        policy=TenantPolicy(timezone="Africa/Cairo"),
+    )
+    asyncio.run(
+        orch.process(
+            TENANT_UUID,
+            MSG_ID,
+            _clinic_message(
+                "عاوزة أحجز ليزر في الشيخ زايد بكرة", datetime(2026, 8, 31, 12, tzinfo=UTC)
+            ),
+        )
+    )
+
+    assert store.task is not None
+    assert store.task.slots["service"] == "ليزر"
+    assert store.task.slots["branch"] == "الشيخ زايد"
+    # Resolved against the tenant's clock, not the model's sense of the date.
+    assert store.task.slots["requested_date"] == "2026-09-01"
+    assert store.task.missing == ["requested_time"]
+
+
+def test_a_slot_the_intent_never_declares_does_not_reach_the_task() -> None:
+    """``normalise_slots`` is between the model and the task, and it is not optional."""
+    orch, _audit, _inbox, store = _conversing(
+        "price_enquiry",
+        0.95,
+        slots={"service": "فيلر", "patient_age": "34"},
+        vocabulary=vocabulary_for("clinics"),
+    )
+    _converse(orch, "الفيلر بكام؟")
+    assert store.task is not None
+    assert store.task.slots == {"service": "فيلر"}
+
+
+def test_the_date_is_resolved_on_the_tenants_clock_not_the_servers() -> None:
+    """23:30 UTC is 01:30 the next day in Cairo, and "tomorrow" moves with the patient."""
+    orch, _audit, _inbox, store = _conversing(
+        "booking_enquiry",
+        0.95,
+        slots={"service": "فاشيال", "branch": "المعادي", "requested_date": "بكرة"},
+        vocabulary=vocabulary_for("clinics"),
+        policy=TenantPolicy(timezone="Africa/Cairo"),
+    )
+    asyncio.run(
+        orch.process(
+            TENANT_UUID,
+            MSG_ID,
+            _clinic_message("احجزيلي بكرة", datetime(2026, 8, 31, 23, 30, tzinfo=UTC)),
+        )
+    )
+    assert store.task is not None
+    assert store.task.slots["requested_date"] == "2026-09-02"
+
+
+def test_the_model_is_told_todays_date_on_the_tenants_clock() -> None:
+    """It has no clock of its own; without this "بكرة" resolves against a training cut."""
+    seen: list[Any] = []
+
+    class _Recording(_ScriptedProvider):
+        def complete_json(self, value: Any) -> dict[str, Any]:
+            seen.append(value)
+            return super().complete_json(value)
+
+    classifier = Classifier(
+        _Recording("cheap", [_result_json(0.95, "greeting")]),
+        _Recording("big", [_result_json(0.95, "greeting")]),
+    )
+    orch = Orchestrator(
+        classifier,
+        _FakeAudit(),
+        _FakeInbox(),
+        crm_lookup=lambda _t, _c: [],
+        policy=TenantPolicy(timezone="Africa/Cairo"),
+        vocabulary=vocabulary_for("clinics"),
+    )
+    asyncio.run(
+        orch.process(
+            TENANT_UUID, MSG_ID, _clinic_message("اهلا", datetime(2026, 8, 31, 23, 30, tzinfo=UTC))
+        )
+    )
+    assert seen and seen[0].local_now is not None
+    assert seen[0].local_now.date().isoformat() == "2026-09-01"

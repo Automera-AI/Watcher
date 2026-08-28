@@ -215,6 +215,17 @@ def _pattern(phrase: str) -> re.Pattern[str]:
     return re.compile(body)
 
 
+def phrase_matches(phrase: str, normalised_text: str) -> bool:
+    r"""Whether a declared phrase occurs in text that :func:`normalise` has already folded.
+
+    The public form of the matcher, so the screening gate (demo step 7) reads disclosures the same
+    way this reads symptom reports — one set of Arabic folding tables, one Latin word-boundary
+    rule. A second implementation of "does this phrase appear" is how the two drift, and the one
+    that drifts silently is the one nobody is testing on real messages.
+    """
+    return _pattern(phrase).search(normalised_text) is not None
+
+
 @lru_cache(maxsize=8)
 def _zone(name: str) -> ZoneInfo:
     return ZoneInfo(name)

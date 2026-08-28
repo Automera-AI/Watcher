@@ -13,10 +13,19 @@ prompt keeps describing the old vocabulary. ``build_system_prompt`` reads the sa
 intents are not all valid ``IntentType`` members, because an intent the model can name but the
 schema cannot parse is a guaranteed validation failure → unclear → inbox.
 
-What is deliberately *not* in this prompt: tools, autonomy ceilings, identity requirements, slot
-lists. The model here answers one question — *what is this message* — and nothing else. Telling
-it that ``cancel_reservation`` always reaches a human invites it to reason about consequences and
-label defensively; the consequences are decided in ``core/autonomy.py`` where they are testable.
+What is deliberately *not* in this prompt: tools, autonomy ceilings, identity requirements. The
+model answers *what is this message, and what does it say* — never what should happen next.
+Telling it that ``cancel_reservation`` always reaches a human invites it to reason about
+consequences and label defensively; the consequences are decided in ``core/autonomy.py`` where
+they are testable.
+
+**Slot lists were on that list until demo step 5, and are not any more.** The model is now asked
+to copy out the details a message supplies, and it cannot do that without knowing what they are
+called. That is a smaller change than it looks: naming ``requested_date`` says nothing about what
+booking a patient costs, so the reason the other three are excluded does not reach it. What it
+does *not* buy is resolution — the model copies the patient's words and
+``conversations/slots.py`` decides what they mean, because a calendar is arithmetic and belongs
+somewhere it can be tested against a fixed today.
 
 **Layout is cache-friendly on purpose.** Everything static lives in the system prompt (~5k
 tokens, byte-identical between calls, so a provider's prompt cache pays for it once); everything
@@ -42,7 +51,7 @@ from apps.api.schemas.common import HIGH_CONFIDENCE_THRESHOLD, MEDIUM_CONFIDENCE
 from apps.api.schemas.enums import IntentType, MessageType
 
 # Bump on any prompt-text or output-schema change (§8).
-PROMPT_VERSION = "v3"
+PROMPT_VERSION = "v4"
 
 # JSON Schema of the required structured output; providers bind this as the tool/response schema.
 CLASSIFICATION_TOOL_SCHEMA: dict[str, Any] = ClassificationResult.model_json_schema()
@@ -216,9 +225,43 @@ _FIELD_RULES = """
 * **phone_e164** — the number to reach this person, in E.164 with the leading `+`. Use the
   sender's number when it is given to you, unless the message asks to be called back on a
   different number, in which case use that one. Null if you have neither.
+* **extracted_slots** — the details this message supplies, keyed by the chosen intent's slot
+  names. Empty object when it supplies none. The section below is the whole rule set for it.
 * **suggested_record_type** — `individual_only` for a guest, which is nearly all of them.
   `contact_under_company` when a named individual writes for a named company. `company_only` when
   a company writes with no named person.
+""".strip()
+
+
+_SLOT_RULES = """
+## extracted_slots: the details, copied out
+
+Alongside the label, copy out the details the message supplies. This is what stops the
+receptionist asking a customer for something they have already said — and asking again, and then
+fetching a person because the conversation went nowhere.
+
+* **Only the names listed under the intent you chose.** Never a key from another intent, never one
+  you invented. A detail with nowhere to go is dropped, not renamed into the nearest slot.
+* **Only what this message supplies.** History is for *interpreting* the message — "the 4th"
+  needs the month somebody mentioned earlier — not for re-listing details from previous turns.
+  The receptionist already remembers those.
+* **The customer's own words for anything you cannot look up.** A service, a treatment, a branch,
+  a unit: copy what they wrote. Do not translate it, do not tidy it into a catalogue name, and do
+  not guess an ID or a code. The receptionist matches it against the tenant's actual catalogue,
+  which you have never seen.
+* **Dates as `YYYY-MM-DD`**, resolved against the `<today>` block in the user turn. "tomorrow",
+  "بكرة", "Wednesday" all become a real date. **If you cannot pin it to one day — "next month",
+  "after Eid", "sometime that week", a range — leave the key out.** A missing date gets asked
+  about. A wrong date books someone into a day they never chose, and is confirmed to them.
+* **Times as 24-hour `HH:MM`.** "6pm" → `18:00`. A time with no am/pm and no context: copy it as
+  the customer wrote it and let the receptionist settle it.
+* **Names and numbers exactly as given.** `customer_name` is the name the person calls themselves
+  in this message, not the sender profile — `person_name` already carries that.
+* An empty object is the normal answer for most messages. `{}` is correct and common.
+
+**Extracting nothing never changes the label**, and neither does extracting a lot. A greeting with
+a name is still `greeting`. Pick the intent first, on what the message is for, then read the slots
+off the intent you picked.
 """.strip()
 
 
@@ -342,8 +385,27 @@ def _render_intent(intent: Intent) -> str:
     lines = [f"### {intent.name}", " ".join(intent.means.split())]
     if intent.confusable_with:
         lines.append(f"Check against: {', '.join(intent.confusable_with)}.")
+    if slots := _slot_line(intent):
+        lines.append(slots)
     lines.extend(f'  e.g. "{text}"' for text in _examples_for(intent))
     return "\n".join(lines)
+
+
+def _slot_line(intent: Intent) -> str:
+    """The slot names this intent may carry, or an empty string for one that carries none.
+
+    Required and optional are shown apart because they are different instructions. A required slot
+    that is missing is a question the receptionist has to ask, so an extraction the model *could*
+    have made and did not costs a turn; an optional one costs nothing. The model is not told which
+    of them are confirmed before acting — that is the receptionist's decision and it would only
+    invite the model to hedge.
+    """
+    parts = []
+    if intent.required_slots:
+        parts.append(f"needed: {', '.join(intent.required_slots)}")
+    if intent.optional_slots:
+        parts.append(f"also: {', '.join(intent.optional_slots)}")
+    return f"Slots — {'; '.join(parts)}." if parts else ""
 
 
 def _intent_catalogue(vocab: Vocabulary) -> str:
@@ -377,6 +439,7 @@ def build_system_prompt(vocabulary: Vocabulary | None = None) -> str:
             _language_rules(vocab),
             _USING_THE_CONTEXT,
             _FIELD_RULES,
+            _SLOT_RULES,
             _CONFIDENCE_RULES,
             _WORKED_EXAMPLES,
             _OUTPUT_DISCIPLINE,
@@ -414,6 +477,13 @@ def render_user_prompt(value: ClassificationInput) -> str:
     the model was asked for them without ever being shown them.
     """
     lines: list[str] = []
+
+    if value.local_now is not None:
+        # The model has no clock of its own — left to itself it resolves "tomorrow" against its
+        # training cut. Rendered first so it is in view before the message that needs it, and on
+        # the tenant's clock rather than the server's.
+        lines.append(f"<today>{value.local_now:%A %d %B %Y, %H:%M} ({value.local_now:%Z})</today>")
+        lines.append("")
 
     known: list[str] = []
     if value.sender_display_name:

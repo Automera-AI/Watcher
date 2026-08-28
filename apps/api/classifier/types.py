@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apps.api.schemas.classification import ClassificationResult
 from apps.api.schemas.enums import MessageDirection, MessageType
@@ -35,6 +36,19 @@ class ClassificationInput:
     history: tuple[HistoryTurn, ...] = field(default_factory=tuple)
     sender_display_name: str | None = None
     sender_phone: str | None = None
+    local_now: datetime | None = None
+    """When this message arrived, on the *tenant's* clock (demo step 5).
+
+    Slot extraction asks the model to resolve "tomorrow" and "الأربع" to a real date, and nothing
+    else in this input says what day it is — a model's own sense of the date is its training cut,
+    which is months wrong and confidently so. It is the tenant's clock rather than the server's for
+    the same reason ``TenantPolicy.timezone`` exists: Cairo and Dubai are an hour apart, and for
+    an hour either side of midnight that is a different day.
+
+    Optional because a caller that never asks for slots does not need it, and because the shipped
+    default zone is not every tenant's — ``conversations/slots.py`` drops a date it cannot pin, so
+    an absent block costs a clarifying question rather than a wrong booking.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,9 +83,18 @@ def _role_for(direction: MessageDirection) -> str:
 
 
 def input_from(
-    message: MessageEnvelope, history: Sequence[MessageEnvelope] = ()
+    message: MessageEnvelope,
+    history: Sequence[MessageEnvelope] = (),
+    *,
+    timezone: str | None = None,
 ) -> ClassificationInput:
-    """Build a classifier input from the current message and its prior turns (oldest→newest)."""
+    """Build a classifier input from the current message and its prior turns (oldest→newest).
+
+    ``timezone`` is the tenant's IANA zone; given one, the message's arrival time is converted to
+    it and shown to the model so relative dates resolve. An unresolvable zone name is ignored
+    rather than raised on: the classifier's job is to label the message, and a typo in a config
+    value is not a reason to drop it.
+    """
     turns = tuple(
         HistoryTurn(role=_role_for(m.direction), text=m.classifiable_text or "", at=m.received_at)
         for m in history
@@ -82,4 +105,22 @@ def input_from(
         history=turns,
         sender_display_name=message.sender_display_name,
         sender_phone=message.sender_phone_e164,
+        local_now=_local(message.received_at, timezone),
     )
+
+
+def _local(received_at: datetime, timezone: str | None) -> datetime | None:
+    """``received_at`` on the tenant's clock, or ``None`` if there is no usable zone.
+
+    A naive timestamp is read as UTC — that is what every adapter that writes one means by it, and
+    the alternative is treating a stored time as the server's local zone, which differs between a
+    developer's laptop and Render.
+    """
+    if timezone is None:
+        return None
+    try:
+        zone = ZoneInfo(timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+    stamped = received_at if received_at.tzinfo is not None else received_at.replace(tzinfo=UTC)
+    return stamped.astimezone(zone)

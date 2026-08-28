@@ -33,7 +33,10 @@ from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session
 
 from apps.api.audit.log import AuditEntry
+from apps.api.clinic.importer import CataloguePlan
 from apps.api.conversations.task import Task, TaskStatus
+from apps.api.core.clinic import Branch, Service
+from apps.api.db.clinic_repo import SqlAlchemyClinicRepository
 from apps.api.db.engine import (
     TENANT_SETTING,
     Database,
@@ -233,6 +236,29 @@ def test_the_rules_provider_and_crm_lookup_act_as_the_tenant_they_are_given(
     SqlAlchemyCrmLookup(scope)(TENANT, IncomingContact(phone_e164="+966500000000"))
 
     assert scope.seen == [TENANT, TENANT]
+
+
+def test_the_clinic_repository_acts_as_the_tenant_on_every_method(scope: _WatchedScope) -> None:
+    """The clinic tables are the newest tenant-scoped ones (migration 008) and the easiest to
+    reach without a stamp: an import is operator-run, and a read is four joins deep."""
+    repository = SqlAlchemyClinicRepository(scope)
+
+    repository.import_catalogue(
+        TENANT,
+        CataloguePlan(
+            branches=(Branch(external_id="B01", name="Riverside"),),
+            services=(
+                Service(code="DT001", name="Deep Facial", price_minor=75_000, duration_minutes=45),
+            ),
+        ),
+        import_version="rls-test",
+    )
+    repository.list_branches(TENANT)
+    repository.list_services(TENANT)
+    repository.list_slots(TENANT)
+    repository.list_bookings(TENANT)
+
+    assert scope.seen == [TENANT] * 5
 
 
 def test_the_conversation_store_acts_as_the_tenant_on_the_turn(scope: _WatchedScope) -> None:

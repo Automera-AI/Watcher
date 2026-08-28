@@ -44,6 +44,26 @@ class ClassificationResult(BaseModel):
         default=None, description="Shape of the destination record to create (locked taxonomy)."
     )
 
+    extracted_slots: dict[str, str] = Field(
+        default_factory=dict,
+        description="Details this message supplies, keyed by the chosen intent's slot names.",
+    )
+    """What the message actually said, in the model's own reading of it (demo step 5).
+
+    **This is the field that makes a conversation multi-turn.** Without it the receptionist re-asks
+    for a detail the patient has already given, every turn, until the clarifying-turn limit fetches
+    a person — which is what "I'd like to book a laser session at Zayed on Wednesday" did before
+    this existed. ``conversations/slots.py`` decides which of these keys are real and what their
+    values mean; nothing downstream reads this dict raw.
+
+    Free text, deliberately: the model copies out what the patient wrote and does not resolve it to
+    a catalogue code or a slot id. Matching "الفاشيال" to ``DT004`` needs the tenant's own
+    catalogue, which the classifier has never seen and must not guess at.
+
+    Defaulted to empty, so a provider, a fixture or a golden-set line written before this field
+    existed still validates — an absent extraction is exactly the behaviour that shipped.
+    """
+
     confidence_overall: Confidence
     confidence_intent: Confidence
     confidence_person: Confidence
