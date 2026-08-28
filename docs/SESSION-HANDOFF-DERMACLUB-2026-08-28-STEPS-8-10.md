@@ -34,7 +34,7 @@ no longer reports. Coverage 96.2% (gate 95%).
 | Step | Scope | Status |
 |---|---|---|
 | 0–7 | Through the clinical screening gate | ✅ done (previous handoffs) |
-| — | Arabic aliases | ✅ **drafted and sent for review** — not shipped, by decision 12 |
+| — | Arabic aliases | ✅ **drafted, reviewed by the clinic, folded in** — still not imported (decision 12) |
 | 8 | Client pack | ✅ **done** |
 | 9 | Journey evals | ✅ **done** |
 | 10 | Deploy + rehearse | ⚠️ **runbook written and locally rehearsed; nothing applied on Render** |
@@ -50,28 +50,43 @@ no longer reports. Coverage 96.2% (gate 95%).
 
 ---
 
-## 2. The Arabic aliases — drafted, for review
+## 2. The Arabic aliases — drafted, reviewed, folded in
 
 `docs/dermaclub-aliases-draft.csv` is the data; `DERMACLUB-ARABIC-ALIASES-DRAFT-2026-08-28.md` is
 the review document; `DermaClub_Aliases_DRAFT_2026-08-28.xlsx` is the two columns ready to paste
 into the client's own workbook. **Nothing is imported and the client's file is untouched** —
 decision 12 puts this data in their workbook, not in this repository.
 
-121 aliases over 45 rows, following the two confirmed mappings. Measured with
-`scripts/check_alias_resolution.py` over the demo's own phrases:
+134 aliases over 49 rows. Measured with `scripts/check_alias_resolution.py` over the demo's own
+phrases:
 
 ```
-today               18 phrases: 2 resolved, 0 ask, 16 reach nothing
-with the draft      18 phrases: 17 resolved, 1 asks, 0 reach nothing
+today                    23 phrases: 2 resolved, 0 ask, 21 reach nothing
+with the reviewed list   23 phrases: 20 resolved, 3 ask, 0 reach nothing
 ```
 
-The one that asks is a bare `ليزر`, which reaches seven packages. That is the correct answer.
+The three that ask are the right ones: a bare `ليزر`, which reaches ten packages, and the two
+phrasings for a 12-session half-body package that do not say which of the two they mean.
 
-**Four services deliberately have no alias**, because giving them one would be a clinical-catalogue
-decision an engineer should not take: DT020/DT023 are the same words in Arabic for two different
-12-session half-body packages (17,800 and 14,300), and DT024/DT027 likewise for two 4-session
-maintenance packages (6,900 and 8,600). Three questions for the clinic are in §7 of the review
-document.
+### 2.1 The clinic's review, 28 August
+
+Five comment threads on the review page, all on services that were blocked or flagged. All applied.
+
+* **DT020 / DT023** (Q1, the two 12-session half-body packages at 17,800 and 14,300) — named, and
+  the names confirm rather than resolve the ambiguity: both sets say the same thing, and one phrase,
+  `ليزر 12 جلسة نص الجسم`, was given to **both**. An identical alias on two rows is refused at
+  import, so each carries it in the form the clinic wrote for that one. The effect is the honest
+  one — `هاف بودي` and the 12-session phrasing both reach the pair and Nada asks which — and both
+  packages are now reachable in Arabic, which neither was before. Answering one of them outright
+  needs one distinguishing word, which is a catalogue decision.
+* **DT024 / DT027** (Q2, the two 4-session maintenance packages) — answered cleanly. Every name the
+  clinic gave DT027 says full body; none of DT024's do. Both resolve outright.
+* **DT006 Skin Boosters** (Q3a) — `حقن ترطيب ونضارة البشرة` and `معززات البشرة`, kept alongside the
+  transliterations because patients type both.
+
+**Still open: DT013, the Biostimulator.** It carries a transliteration and nothing else, so a
+patient using the clinic's word for it reaches nothing. The two body-shaping pairs (DT032/DT035,
+DT033/DT034) drew no comment and keep the draft's one-distinguishing-word approach.
 
 `scripts/check_alias_resolution.py` is the tool to run on whatever the client sends back. It
 answers the question the importer does not: a catalogue can import perfectly and still leave a
@@ -202,8 +217,9 @@ catalogue's.
 ### Before the demo — required
 
 1. **Step 10 itself.** Migrations 007 and 008, the environment, the import, the rehearsal.
-2. **The aliases back from the client**, with the three questions answered. Nothing Arabic resolves
-   until then; the English names still work.
+2. **The aliases into the client's workbook.** The list is reviewed (§2.1); it still has to go into
+   their file and be re-imported. Nothing Arabic resolves until then; the English names still work.
+   One question is open — what they call a Biostimulator (DT013).
 3. **The medical lead's approval** of the screening categories, the eleven disclosures and the
    emergency wording. Unchanged, and still unsigned.
 4. **Re-script the demo around 19:00** (or Nasr City's 17:00). See the warning at the top.

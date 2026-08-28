@@ -61,6 +61,12 @@ DEMO_PHRASES: tuple[tuple[str, str], ...] = (
     ("service", "برايم ليز 6 جلسات"),
     ("service", "تقشير"),
     ("service", "سيلوليت"),
+    # The four the clinic named after the first review, and the phrase it gave to two of them.
+    ("service", "حقن ترطيب ونضارة البشرة"),
+    ("service", "باقة متابعة الليزر 4 جلسات"),
+    ("service", "متابعة 4 جلسات فل بودي"),
+    ("service", "ليزر 12 جلسة نص الجسم"),
+    ("service", "هاف بودي"),
     ("service", "Basic Facial"),
     ("branch", "المعادي"),
     ("branch", "معادي"),

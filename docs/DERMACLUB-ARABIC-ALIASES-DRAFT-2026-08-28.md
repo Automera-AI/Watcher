@@ -1,8 +1,12 @@
 # Arabic aliases — draft for client review
 
-**Status: DRAFT. Not imported, not shipped.** These are proposed values for two new columns in the
-clinic's own workbook. Nothing here is in the database, in the code, or in the committed workbook,
-and nothing should be until the clinic has read it.
+**Status: reviewed by the clinic, 28 August.** Four of the five services that were blocked now have
+the clinic's own names, and Skin Boosters has the words its patients use. **Still not imported** —
+these are values for two new columns in the clinic's own workbook, and they go in when the clinic
+puts them there.
+
+**One question is still open:** what the clinic calls a Biostimulator (DT013). It carries a
+transliteration and nothing else.
 
 **Date:** 28 August 2026 · **For:** the DermaClub demo, Tuesday 1 September
 **Data:** `docs/dermaclub-aliases-draft.csv` (the same table, machine-readable)
@@ -21,14 +25,17 @@ data the clinic owns, in the file decision 2 already makes the source of truth.
 Measured against the committed workbook, today:
 
 ```
-18 phrases: 2 resolved, 0 ask a clarifying question, 16 reach nothing
+23 phrases: 2 resolved, 0 ask a clarifying question, 21 reach nothing
 ```
 
-The two that resolve are the two written in English. With this draft laid over the same file:
+The two that resolve are the two written in English. With this list laid over the same file:
 
 ```
-18 phrases: 17 resolved, 1 ask a clarifying question, 0 reach nothing
+23 phrases: 20 resolved, 3 ask a clarifying question, 0 reach nothing
 ```
+
+The three that ask are the right ones: a bare `ليزر`, which reaches ten packages, and the two
+phrasings that name a 12-session half-body package without saying which of the two it is.
 
 Both numbers come from `scripts/check_alias_resolution.py` against
 `docs/DermaClub_Availability_DEMO_2026-08-26_1.xlsx`; re-run it on whatever the clinic sends back.
@@ -38,7 +45,7 @@ Both numbers come from `scripts/check_alias_resolution.py` against
 ## 2. What to do with this
 
 1. Read §5 and §6 and correct anything that is not what the clinic's own patients say.
-2. Answer the three questions in §7 — two of them block four services outright.
+2. Answer the one question still open in §7 — DT013, the Biostimulator.
 3. Add one column headed **`Aliases`** to the **Branches** sheet and one to the **Services** sheet,
    and paste the corrected values in. Separate alternatives with `|`.
 4. Send the workbook back. It is re-imported, and `check_alias_resolution.py` is run against it
@@ -137,28 +144,28 @@ ID with an alias map behind it, which is what deviation 3 asked for.
 | DT003 | Medical Facial + Dermapen | `فاشيال طبي\|الفاشيال الطبي\|ديرمابن\|ديرما بن\|فاشيال ديرمابن` | drafted |
 | DT004 | Peeling | `بيلينج\|بيلنج\|تقشير\|التقشير` | drafted |
 | DT005 | Hair Treatments | `علاج الشعر\|علاجات الشعر\|جلسة شعر` | drafted |
-| DT006 | Skin Boosters | `سكين بوستر\|سكين بوسترز\|بوسترات البشرة` | drafted — see Q3 |
+| DT006 | Skin Boosters | `سكين بوستر\|سكين بوسترز\|بوسترات البشرة\|حقن ترطيب ونضارة البشرة\|معززات البشرة` | **clinic's own** |
 | DT007 | Botox | `بوتوكس\|البوتوكس` | drafted |
 | DT008 | Botox + Lip Booster | `بوتوكس وليب بوستر\|بوتوكس + ليب بوستر\|ليب بوستر` | drafted |
 | DT009 | Filler | `فيلر\|الفيلر` | drafted |
 | DT010 | Filler 1 Syringe | `فيلر سرنجة\|فيلر سرنجة واحدة\|سرنجة فيلر` | drafted |
 | DT011 | Filler 2 Syringes + 1 Free | `فيلر سرنجتين\|فيلر 2 سرنجة\|فيلر ٢ سرنجة` | drafted |
 | DT012 | Apriline Dermal Filler | `أبريلين\|فيلر أبريلين` | drafted |
-| DT013 | Biostimulator | `بيوستيميوليتور\|بيو ستيميوليتور` | drafted — see Q3 |
+| DT013 | Biostimulator | `بيوستيميوليتور\|بيو ستيميوليتور` | **still open — Q3** |
 | DT014 | Sculpting Injection 4 Sessions | `حقن تكميم\|إبر التكميم\|حقن التكميم` | drafted |
 | DT015 | Sculpting Alternative Injection | `حقن بديل التكميم\|بديل التكميم\|بديل تكميم` | drafted |
 | DT016 | Bikini & Underarm Laser — 6 Sessions | `ليزر بيكيني\|ليزر بيكيني وتحت الإبط\|بيكيني وتحت الإبط` | drafted |
 | DT017 | Full Body Laser — 3 Sessions | `ليزر فل بودي 3 جلسات\|ليزر فل بودي ٣ جلسات\|ليزر جسم كامل 3 جلسات` | drafted |
 | DT018 | Full Body Laser — 6 Sessions | `ليزر فل بودي 6 جلسات\|ليزر فل بودي ٦ جلسات\|ليزر جسم كامل 6 جلسات` | drafted |
 | DT019 | Full Body Laser — 12 Sessions | `ليزر فل بودي 12 جلسة\|ليزر فل بودي ١٢ جلسة\|ليزر جسم كامل 12 جلسة` | drafted |
-| DT020 | Annual Half Body (12 Sessions) | *(none)* | **blocked — Q1** |
+| DT020 | Annual Half Body (12 Sessions) | `ليزر سنوي 12 جلسة هاف بودي\|ليزر نص الجسم 12 جلسة سنوي` | **clinic's own** |
 | DT021 | Laser Annual 12 Sessions | `الباقة السنوية\|ليزر سنوي 12 جلسة\|ليزر سنوي ١٢ جلسة` | drafted |
 | DT022 | Laser GenZ 3 Sessions | `جين زد\|ليزر جين زد\|باقة جين زد` | drafted |
-| DT023 | Laser Half Body Annual 12 Sessions | *(none)* | **blocked — Q1** |
-| DT024 | Laser Maintenance 4 Sessions | *(none)* | **blocked — Q2** |
+| DT023 | Laser Half Body Annual 12 Sessions | `ليزر سنوي هاف بودي 12 جلسة\|باقة هاف بودي نص سنوي\|باقة ليزر نصف الجسم هاف بودي\|ليزر نص الجسم 12 جلسة` | **clinic's own** |
+| DT024 | Laser Maintenance 4 Sessions | `باقة متابعة الليزر 4 جلسات\|باقة 4 جلسات متابعة ازالة شعر` | **clinic's own** |
 | DT025 | Laser Semi-Annual 6 Sessions | `ليزر نصف سنوي\|نص سنوي 6 جلسات\|نص سنوي ٦ جلسات` | drafted |
 | DT026 | Laser Super Annual Unlimited | `سوبر انيوال\|جلسات غير محدودة\|باقة غير محدودة` | drafted |
-| DT027 | Maintenance Package (4 Sessions Full Body) | *(none)* | **blocked — Q2** |
+| DT027 | Maintenance Package (4 Sessions Full Body) | `4 جلسات متابعة ليزر جسم كامل\|متابعة ليزر 4 جلسات فل بودي\|متابعة 4 جلسات فل بودي` | **clinic's own** |
 | DT028 | Primelase — Single Session | `برايم ليز جلسة واحدة\|برايمليز جلسة واحدة\|جلسة برايم ليز` | drafted |
 | DT029 | Primelase — 6 Sessions | `برايم ليز 6 جلسات\|برايم ليز ٦ جلسات\|برايمليز 6 جلسات` | drafted |
 | DT030 | Primelase — 12 Sessions | `برايم ليز 12 جلسة\|برايم ليز ١٢ جلسة\|برايمليز 12 جلسة` | drafted |
@@ -178,29 +185,31 @@ Two deliberate omissions here too:
 
 ---
 
-## 7. Questions that need an answer
+## 7. Where the answers landed
 
-**Q1 — DT020 vs DT023.** `Annual Half Body (12 Sessions)` at 17,800 and
-`Laser Hair Removal Half Body Annual 12 Sessions` at 14,300 are the same words in Arabic. What does
-a patient ask for that distinguishes them? Until there is an answer neither has an alias, so
-neither can be reached in Arabic.
+**Q1 — DT020 vs DT023, the two 12-session half-body packages. Answered, and the answer is that they
+are not distinguishable by name.** Both sets of words the clinic gave say the same thing: a
+12-session annual half-body laser package. One phrase — `ليزر 12 جلسة نص الجسم` — was given to
+*both*, and one string cannot name two rows: the import refuses a file where it does, precisely
+because that is how a patient is booked into the treatment they did not ask for. So it sits on each
+in the form the clinic wrote for that one, and the effect is the honest one: a patient who says
+either "هاف بودي" or "12 جلسة نص الجسم" reaches both and is asked which. Both are now reachable in
+Arabic, which they were not before.
 
-**Q2 — the four maintenance and body-shaping look-alikes.** The same problem in three places:
+> If the clinic would rather one of them answered outright, it needs one word the other does not
+> have — a tier, a device name, anything. That is a catalogue decision, not a translation.
 
-* DT024 `Laser Maintenance 4 Sessions` (6,900) vs DT027 `Maintenance Package (4 Sessions Full
-  Body)` (8,600) — both `صيانة 4 جلسات`. Neither has an alias.
-* DT032 `Body Shaping` (400) vs DT035 `PowerShape Body Contouring - 4 Sessions` (4,000) — the same
-  modality in the suitability PDF. Each keeps only its own distinguishing word.
-* DT033 `Cool Shaping 4 Sessions` (4,500) vs DT034 `CoolShape Fat Freezing - 4 Sessions` (5,600) —
-  currently separated by an English spelling. Thin, and it holds only because no Arabic alias
-  crosses them.
+**Q2 — the four maintenance and body-shaping look-alikes. Answered cleanly for the pair that
+mattered.** Every name the clinic gave DT027 says full body (`جسم كامل`, `فل بودي`) and none of
+DT024's do, which is exactly the distinguishing word that was missing. Both now resolve outright.
 
-**Q3 — two terms an engineer should not choose.** `Skin Boosters` are widely called `حقن نضارة`,
-but so is mesotherapy, which is not in this catalogue; and `Biostimulator` is often
-`محفزات الكولاجين`. Both are drafted with transliterations only. What does the clinic call them to
-patients?
+The two body-shaping pairs the clinic did not comment on — DT032 vs DT035, and DT033 vs DT034 —
+keep the draft's approach of one distinguishing word each. Worth a look, not blocking.
 
----
+**Q3 — two terms an engineer should not choose. Half answered.** Skin Boosters are
+`حقن ترطيب ونضارة البشرة` and `معززات البشرة`, both now on DT006 alongside the transliterations,
+because patients type both. **DT013, the Biostimulator, is still open** — it carries a
+transliteration and nothing else, so a patient who calls it anything else reaches nothing.
 
 ## 8. What this does not cover
 
