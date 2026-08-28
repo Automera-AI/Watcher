@@ -1,0 +1,387 @@
+{
+  "note": "The client's own diary for two branches on one day, cut out of docs/DermaClub_Availability_DEMO_2026-08-26_1.xlsx by the importer. Regenerate rather than edit. apps/api/tests/test_clinic_workbook_integration.py checks it still agrees with the workbook.",
+  "source": "docs/DermaClub_Availability_DEMO_2026-08-26_1.xlsx",
+  "day": "2026-09-02",
+  "timezone": "Africa/Cairo",
+  "now": "2026-09-01T09:00:00+00:00",
+  "reference_prefix": "DC",
+  "next_serial": 266,
+  "aliases_status": "PROPOSED, not in the client's workbook yet — docs/dermaclub-aliases-draft.csv. A journey that resolves an Arabic name here resolves it in production only once the clinic has put these in their own file and it has been re-imported.",
+  "branches": [
+    {
+      "external_id": "DC01",
+      "name": "Maadi",
+      "area": "Maadi, Cairo",
+      "aliases": [
+        "المعادي",
+        "معادي"
+      ],
+      "placeholder": false
+    },
+    {
+      "external_id": "DC02",
+      "name": "New Cairo",
+      "area": "Fifth Settlement, New Cairo",
+      "aliases": [
+        "القاهرة الجديدة",
+        "التجمع",
+        "التجمع الخامس",
+        "تجمع خامس"
+      ],
+      "placeholder": false
+    }
+  ],
+  "services": [
+    {
+      "code": "DT001",
+      "name": "Basic Facial",
+      "category": "Facial",
+      "price_minor": 75000,
+      "currency": "EGP",
+      "duration_minutes": 45,
+      "session_count": 1,
+      "aliases": [
+        "فاشيال بيسك",
+        "الفاشيال البيسك",
+        "فاشيال أساسي"
+      ]
+    },
+    {
+      "code": "DT002",
+      "name": "Facial",
+      "category": "Facial",
+      "price_minor": 75000,
+      "currency": "EGP",
+      "duration_minutes": 45,
+      "session_count": 1,
+      "aliases": [
+        "فاشيال",
+        "الفاشيال"
+      ]
+    },
+    {
+      "code": "DT003",
+      "name": "Medical Facial + Dermapen",
+      "category": "Facial",
+      "price_minor": 150000,
+      "currency": "EGP",
+      "duration_minutes": 60,
+      "session_count": 1,
+      "aliases": [
+        "فاشيال طبي",
+        "الفاشيال الطبي",
+        "ديرمابن",
+        "ديرما بن",
+        "فاشيال ديرمابن"
+      ]
+    },
+    {
+      "code": "DT004",
+      "name": "Peeling",
+      "category": "Facial",
+      "price_minor": 75000,
+      "currency": "EGP",
+      "duration_minutes": 45,
+      "session_count": 1,
+      "aliases": [
+        "بيلينج",
+        "بيلنج",
+        "تقشير",
+        "التقشير"
+      ]
+    },
+    {
+      "code": "DT005",
+      "name": "Hair Treatments",
+      "category": "Hair",
+      "price_minor": 85000,
+      "currency": "EGP",
+      "duration_minutes": 45,
+      "session_count": 1,
+      "aliases": [
+        "علاج الشعر",
+        "علاجات الشعر",
+        "جلسة شعر"
+      ]
+    },
+    {
+      "code": "DT006",
+      "name": "Skin Boosters",
+      "category": "Skin",
+      "price_minor": 245000,
+      "currency": "EGP",
+      "duration_minutes": 45,
+      "session_count": 1,
+      "aliases": [
+        "سكين بوستر",
+        "سكين بوسترز",
+        "بوسترات البشرة"
+      ]
+    },
+    {
+      "code": "DT007",
+      "name": "Botox",
+      "category": "Injectables",
+      "price_minor": 400000,
+      "currency": "EGP",
+      "duration_minutes": 30,
+      "session_count": 1,
+      "aliases": [
+        "بوتوكس",
+        "البوتوكس"
+      ]
+    },
+    {
+      "code": "DT008",
+      "name": "Botox + Lip Booster",
+      "category": "Injectables",
+      "price_minor": 550000,
+      "currency": "EGP",
+      "duration_minutes": 30,
+      "session_count": 1,
+      "aliases": [
+        "بوتوكس وليب بوستر",
+        "بوتوكس + ليب بوستر",
+        "ليب بوستر"
+      ]
+    },
+    {
+      "code": "DT009",
+      "name": "Filler",
+      "category": "Injectables",
+      "price_minor": 720000,
+      "currency": "EGP",
+      "duration_minutes": 30,
+      "session_count": 1,
+      "aliases": [
+        "فيلر",
+        "الفيلر"
+      ]
+    },
+    {
+      "code": "DT010",
+      "name": "Filler 1 Syringe",
+      "category": "Injectables",
+      "price_minor": 400000,
+      "currency": "EGP",
+      "duration_minutes": 30,
+      "session_count": 1,
+      "aliases": [
+        "فيلر سرنجة",
+        "فيلر سرنجة واحدة",
+        "سرنجة فيلر"
+      ]
+    },
+    {
+      "code": "DT028",
+      "name": "Primelase Laser Hair Removal - Single Session",
+      "category": "Laser",
+      "price_minor": 310000,
+      "currency": "EGP",
+      "duration_minutes": 45,
+      "session_count": 1,
+      "aliases": [
+        "برايم ليز جلسة واحدة",
+        "برايمليز جلسة واحدة",
+        "جلسة برايم ليز"
+      ]
+    },
+    {
+      "code": "DT029",
+      "name": "Primelase Laser Package - 6 Sessions",
+      "category": "Laser",
+      "price_minor": 1500000,
+      "currency": "EGP",
+      "duration_minutes": 45,
+      "session_count": 6,
+      "aliases": [
+        "برايم ليز 6 جلسات",
+        "برايم ليز ٦ جلسات",
+        "برايمليز 6 جلسات"
+      ]
+    },
+    {
+      "code": "DT030",
+      "name": "Primelase Laser Package - 12 Sessions",
+      "category": "Laser",
+      "price_minor": 1635000,
+      "currency": "EGP",
+      "duration_minutes": 45,
+      "session_count": 12,
+      "aliases": [
+        "برايم ليز 12 جلسة",
+        "برايم ليز ١٢ جلسة",
+        "برايمليز 12 جلسة"
+      ]
+    },
+    {
+      "code": "DT031",
+      "name": "Anti-Cellulite 4 Sessions",
+      "category": "Body",
+      "price_minor": 300000,
+      "currency": "EGP",
+      "duration_minutes": 60,
+      "session_count": 4,
+      "aliases": [
+        "سيلوليت",
+        "السيلوليت",
+        "علاج السيلوليت"
+      ]
+    },
+    {
+      "code": "DT032",
+      "name": "Body Shaping",
+      "category": "Body",
+      "price_minor": 40000,
+      "currency": "EGP",
+      "duration_minutes": 60,
+      "session_count": 1,
+      "aliases": [
+        "تنسيق قوام"
+      ]
+    },
+    {
+      "code": "DT033",
+      "name": "Cool Shaping 4 Sessions",
+      "category": "Body",
+      "price_minor": 450000,
+      "currency": "EGP",
+      "duration_minutes": 60,
+      "session_count": 4,
+      "aliases": [
+        "كول شيبنج",
+        "كول شيبينج"
+      ]
+    }
+  ],
+  "slots": [
+    {
+      "external_id": "S00225",
+      "branch_external_id": "DC01",
+      "service_code": "DT028",
+      "starts_at": "2026-09-02T11:00:00+03:00",
+      "ends_at": "2026-09-02T11:45:00+03:00",
+      "status": "open"
+    },
+    {
+      "external_id": "S00226",
+      "branch_external_id": "DC01",
+      "service_code": "DT029",
+      "starts_at": "2026-09-02T12:00:00+03:00",
+      "ends_at": "2026-09-02T12:45:00+03:00",
+      "status": "booked"
+    },
+    {
+      "external_id": "S00227",
+      "branch_external_id": "DC01",
+      "service_code": "DT030",
+      "starts_at": "2026-09-02T13:00:00+03:00",
+      "ends_at": "2026-09-02T13:45:00+03:00",
+      "status": "open"
+    },
+    {
+      "external_id": "S00228",
+      "branch_external_id": "DC01",
+      "service_code": "DT031",
+      "starts_at": "2026-09-02T14:00:00+03:00",
+      "ends_at": "2026-09-02T15:00:00+03:00",
+      "status": "booked"
+    },
+    {
+      "external_id": "S00229",
+      "branch_external_id": "DC01",
+      "service_code": "DT032",
+      "starts_at": "2026-09-02T16:00:00+03:00",
+      "ends_at": "2026-09-02T17:00:00+03:00",
+      "status": "open"
+    },
+    {
+      "external_id": "S00230",
+      "branch_external_id": "DC01",
+      "service_code": "DT033",
+      "starts_at": "2026-09-02T17:00:00+03:00",
+      "ends_at": "2026-09-02T18:00:00+03:00",
+      "status": "booked"
+    },
+    {
+      "external_id": "S00231",
+      "branch_external_id": "DC01",
+      "service_code": "DT001",
+      "starts_at": "2026-09-02T18:00:00+03:00",
+      "ends_at": "2026-09-02T18:45:00+03:00",
+      "status": "open"
+    },
+    {
+      "external_id": "S00232",
+      "branch_external_id": "DC01",
+      "service_code": "DT002",
+      "starts_at": "2026-09-02T19:00:00+03:00",
+      "ends_at": "2026-09-02T19:45:00+03:00",
+      "status": "open"
+    },
+    {
+      "external_id": "S00233",
+      "branch_external_id": "DC02",
+      "service_code": "DT003",
+      "starts_at": "2026-09-02T11:00:00+03:00",
+      "ends_at": "2026-09-02T12:00:00+03:00",
+      "status": "booked"
+    },
+    {
+      "external_id": "S00234",
+      "branch_external_id": "DC02",
+      "service_code": "DT004",
+      "starts_at": "2026-09-02T12:00:00+03:00",
+      "ends_at": "2026-09-02T12:45:00+03:00",
+      "status": "open"
+    },
+    {
+      "external_id": "S00235",
+      "branch_external_id": "DC02",
+      "service_code": "DT005",
+      "starts_at": "2026-09-02T13:00:00+03:00",
+      "ends_at": "2026-09-02T13:45:00+03:00",
+      "status": "booked"
+    },
+    {
+      "external_id": "S00236",
+      "branch_external_id": "DC02",
+      "service_code": "DT006",
+      "starts_at": "2026-09-02T14:00:00+03:00",
+      "ends_at": "2026-09-02T14:45:00+03:00",
+      "status": "booked"
+    },
+    {
+      "external_id": "S00237",
+      "branch_external_id": "DC02",
+      "service_code": "DT007",
+      "starts_at": "2026-09-02T16:00:00+03:00",
+      "ends_at": "2026-09-02T16:30:00+03:00",
+      "status": "open"
+    },
+    {
+      "external_id": "S00238",
+      "branch_external_id": "DC02",
+      "service_code": "DT008",
+      "starts_at": "2026-09-02T17:00:00+03:00",
+      "ends_at": "2026-09-02T17:30:00+03:00",
+      "status": "open"
+    },
+    {
+      "external_id": "S00239",
+      "branch_external_id": "DC02",
+      "service_code": "DT009",
+      "starts_at": "2026-09-02T18:00:00+03:00",
+      "ends_at": "2026-09-02T18:30:00+03:00",
+      "status": "open"
+    },
+    {
+      "external_id": "S00240",
+      "branch_external_id": "DC02",
+      "service_code": "DT010",
+      "starts_at": "2026-09-02T19:00:00+03:00",
+      "ends_at": "2026-09-02T19:30:00+03:00",
+      "status": "open"
+    }
+  ]
+}

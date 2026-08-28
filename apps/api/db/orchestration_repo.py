@@ -286,9 +286,18 @@ class SqlAlchemyConversationStore:
                 conversation_id=str(conversation.id),
                 task=(task_from_row(row, vocabulary=self._vocabulary) if row is not None else None),
                 # Only replies sent in service of the job now in flight count against its
-                # clarifying-turn budget; see `count_outbound_turns`.
-                replies_sent=repo.count_outbound_turns(
-                    conversation.id, since=row.created_at if row is not None else None
+                # clarifying-turn budget; see `count_outbound_turns`. With no job in flight,
+                # nothing has been spent yet: the budget belongs to the task the next message is
+                # about to open, and counting the whole conversation instead meant a patient who
+                # had just been given a booking reference was handed to a person the moment they
+                # asked anything that needed a second question — three replies spent on finished
+                # work is already over `max_clarifying_turns`. Found by the booking journey eval
+                # (`packages/eval/journeys.py`), which is the only place a whole conversation is
+                # played end to end.
+                replies_sent=(
+                    repo.count_outbound_turns(conversation.id, since=row.created_at)
+                    if row is not None
+                    else 0
                 ),
             )
 
