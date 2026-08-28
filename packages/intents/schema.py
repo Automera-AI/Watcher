@@ -528,6 +528,58 @@ def default_vocabulary() -> Vocabulary:
 #: complete ``Vocabulary`` validated by the same rules.
 _VERTICALS_DIR = _DEFAULT_DIR / "verticals"
 
+_by_vertical: dict[str, Vocabulary] = {}
+
+
+class UnknownVertical(KeyError):
+    """A vertical no shipped vocabulary declares. See :func:`vocabulary_for`."""
+
+
+def _load_vertical(vertical: str) -> Vocabulary | None:
+    """The vocabulary for one vertical, preferring a fresh compiled file, or ``None``.
+
+    Same prefer-JSON-unless-stale rule as :func:`default_vocabulary`, and for the same reasons;
+    the base vertical goes through that function so there is one cache of it rather than two.
+    """
+    if vertical == default_vocabulary().vertical:
+        return default_vocabulary()
+    for source in sorted(_VERTICALS_DIR.glob("*.yaml")) if _VERTICALS_DIR.is_dir() else ():
+        compiled = _DEFAULT_DIR / "build" / f"vertical-{source.stem}.json"
+        if compiled.exists() and compiled.stat().st_mtime >= source.stat().st_mtime:
+            vocab = load_compiled(compiled)
+        else:
+            vocab = load(source)
+        if vocab.vertical == vertical:
+            return vocab
+    return None
+
+
+def vocabulary_for(vertical: str) -> Vocabulary:
+    """The shipped vocabulary a tenant on ``vertical`` speaks, loaded once and held in memory.
+
+    **Why this exists.** Every runtime caller went through :func:`default_vocabulary`, which reads
+    one file — ``intents.yaml``, the holiday-home vertical. A clinic vocabulary could therefore be
+    written, validated, shipped and reached by nothing: the classifier described holiday-home
+    intents to the model, ``decide_autonomy`` looked up its ceilings in the holiday-home file, and
+    the clinic taxonomy was live only in its own tests. Selecting the vertical is what makes a
+    second vertical a deployment rather than a branch, so it is configuration
+    (``TENANT_VERTICAL``) resolved here.
+
+    Raises :class:`UnknownVertical` rather than falling back to the default. A tenant configured
+    for a vertical nobody shipped must not quietly be served another one's intents — that is the
+    cross-vertical leak ``IntentType`` is a union to make fail safe, and answering a patient out of
+    a holiday-home vocabulary is exactly the failure it guards against.
+    """
+    if vertical not in _by_vertical:
+        found = _load_vertical(vertical)
+        if found is None:
+            raise UnknownVertical(
+                f"no shipped vocabulary declares vertical {vertical!r}; "
+                f"known: {sorted(shipped_vocabularies())}"
+            )
+        _by_vertical[vertical] = found
+    return _by_vertical[vertical]
+
 
 def shipped_vocabularies() -> dict[str, Vocabulary]:
     """Every vertical vocabulary in the package, keyed by ``vertical``.

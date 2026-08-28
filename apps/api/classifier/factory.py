@@ -22,6 +22,7 @@ import httpx
 from apps.api.channels import ConfigError
 from apps.api.classifier.anthropic import DEFAULT_MAX_OUTPUT_TOKENS, AnthropicProvider
 from apps.api.classifier.openai import OpenAIProvider
+from apps.api.classifier.prompt import build_system_prompt
 from apps.api.classifier.provider import LLMProvider
 from apps.api.classifier.service import Classifier
 from apps.api.core.config import Settings
@@ -63,11 +64,24 @@ def _thinking_policy(model_id: str) -> tuple[dict[str, Any] | None, int]:
 
 
 def build_provider(
-    settings: Settings, model_id: str, client: httpx.Client | None = None
+    settings: Settings,
+    model_id: str,
+    client: httpx.Client | None = None,
+    *,
+    system_prompt: str | None = None,
 ) -> LLMProvider:
-    """Concrete provider for one pinned model. Raises ``ConfigError`` if its key is missing."""
+    """Concrete provider for one pinned model. Raises ``ConfigError`` if its key is missing.
+
+    ``system_prompt`` is the assembled prompt for this deployment's vertical. Passed rather than
+    left to each provider's import-time default because the default is built from the *base*
+    vocabulary: a clinic deploy that did not pass one would describe holiday-home intents to the
+    model and then reject every clinic label it could not parse.
+    """
     credentials = settings.llm_credentials(model_id)
     http = client if client is not None else _default_client()
+    prompt = (
+        system_prompt if system_prompt is not None else build_system_prompt(settings.vocabulary())
+    )
 
     if model_id.startswith("claude"):
         api_key = credentials.api_key
@@ -83,6 +97,7 @@ def build_provider(
             max_retries=credentials.max_retries,
             thinking=thinking,
             max_output_tokens=max_output_tokens,
+            system_prompt=prompt,
         )
 
     return OpenAIProvider(
@@ -92,6 +107,7 @@ def build_provider(
         base_url=credentials.base_url,
         timeout_seconds=credentials.timeout_seconds,
         max_retries=credentials.max_retries,
+        system_prompt=prompt,
     )
 
 
@@ -103,9 +119,17 @@ def build_classifier(settings: Settings, client: httpx.Client | None = None) -> 
     it would add more latency than the escalation itself costs.
     """
     http = client if client is not None else _default_client()
+    # Assembled once and shared by both tiers: it is ~5k tokens of identical text, and building it
+    # twice would also let the two tiers drift apart if the vocabulary were ever reloaded between
+    # the calls.
+    system_prompt = build_system_prompt(settings.vocabulary())
     return Classifier(
-        build_provider(settings, settings.classifier_model_first_pass, http),
-        build_provider(settings, settings.classifier_model_escalation, http),
+        build_provider(
+            settings, settings.classifier_model_first_pass, http, system_prompt=system_prompt
+        ),
+        build_provider(
+            settings, settings.classifier_model_escalation, http, system_prompt=system_prompt
+        ),
         escalation_threshold=settings.classifier_confidence_escalation_threshold,
     )
 

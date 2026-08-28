@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
 
+from packages.intents.schema import UnknownVertical, Vocabulary, vocabulary_for
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import SettingsConfigDict
 
@@ -102,6 +103,18 @@ class Settings(ChannelCredentials):
     # error, whereas refusing to start over a timezone would be a safety feature that stops the
     # service running.
     tenant_timezone: str = DEFAULT_TIMEZONE
+
+    # ── Which vocabulary this deployment speaks (demo step 5) ─────────────────────────────
+    #
+    # A vertical name — `holiday_homes` or `clinics` — naming one of the shipped vocabularies.
+    # Everything downstream reads it: the intents described to the classifier, the autonomy
+    # ceilings, the slots the receptionist collects, the safety floor a YAML edit may not unset.
+    #
+    # It defaults to the vertical this service was built for, so an existing deploy is unchanged
+    # by this variable existing. A clinic deploy MUST set it: without it the clinic taxonomy is
+    # shipped and reachable by nothing, and a patient asking to book is classified against
+    # holiday-home intents.
+    tenant_vertical: str = "holiday_homes"
 
     # ── The number customers may ring directly in an emergency (roadmap G3) ───────────────
     #
@@ -187,6 +200,22 @@ class Settings(ChannelCredentials):
     # arq worker process (`apps/api/worker.py`) — the durability B5 exists for is that swap.
     redis_url: SecretStr | None = None
 
+    @field_validator("tenant_vertical")
+    @classmethod
+    def _shipped_vertical(cls, value: str) -> str:
+        """Refuse a vertical no shipped vocabulary declares, at startup.
+
+        The same trade as ``tenant_timezone`` below and a sharper one: an unknown vertical has no
+        safe default. Serving a clinic out of the holiday-home vocabulary would answer patients
+        from the wrong taxonomy with the wrong safety floor, so this fails where somebody is
+        watching rather than in front of one.
+        """
+        try:
+            vocabulary_for(value)
+        except UnknownVertical as exc:
+            raise ValueError(f"TENANT_VERTICAL={value!r}: {exc.args[0]}") from exc
+        return value
+
     @field_validator("tenant_timezone")
     @classmethod
     def _resolvable_zone(cls, value: str) -> str:
@@ -225,6 +254,14 @@ class Settings(ChannelCredentials):
             urgent_contact=self.tenant_urgent_contact,
             emergency_reply=self.tenant_emergency_reply,
         )
+
+    def vocabulary(self) -> Vocabulary:
+        """The intent vocabulary this deployment speaks (``TENANT_VERTICAL``).
+
+        One call, so the classifier prompt, the autonomy gate and the receptionist are all reading
+        the same file. Validated at startup, so this cannot raise here.
+        """
+        return vocabulary_for(self.tenant_vertical)
 
     def conversation_copy(self) -> ConversationCopy:
         """The tenant's opening and closing wording, as the tools take it."""

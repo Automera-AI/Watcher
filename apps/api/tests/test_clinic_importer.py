@@ -389,8 +389,8 @@ class TestAmbiguousNames:
 # ── Availability ───────────────────────────────────────────────────────────────────────────
 
 
-def _slot_row(**overrides: object) -> tuple[Cell, ...]:
-    row = dict(zip(SLOT_HEADERS, SLOT_ROW, strict=True))
+def _slot_row(**overrides: Cell) -> tuple[Cell, ...]:
+    row: dict[str, Cell] = dict(zip(SLOT_HEADERS, SLOT_ROW, strict=True))
     row.update({k.replace("_", " "): v for k, v in overrides.items()})
     return tuple(row.values())
 

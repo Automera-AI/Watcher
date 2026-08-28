@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from packages.intents.schema import default_vocabulary
+from packages.intents.schema import Vocabulary
 
 from apps.api.channels.factory import build_alerter, build_sender
 from apps.api.channels.sender import ChannelSender
@@ -55,11 +55,17 @@ def build_consumer(settings: Settings, database: Database, classifier: Classifie
     migration 004's RLS policies enforce on this consumer exactly as they do on the request path.
     """
     tenant_scope = database.tenant_session
+    # One vocabulary for the whole graph (``TENANT_VERTICAL``, demo step 5). Read once here rather
+    # than fetched by each collaborator: the alert channel, the autonomy ceilings, the slots the
+    # receptionist collects and the intents described to the model are four readings of one file,
+    # and a process where they disagree is a process that greets a patient in one vertical and
+    # books them in another.
+    vocabulary: Vocabulary = settings.vocabulary()
     sender = build_sender(settings)
     alerter = build_alerter(
         sender,
         settings.control_chat_phone_e164,
-        declared_channel=default_vocabulary().emergency.alert,
+        declared_channel=vocabulary.emergency.alert,
     )
     # The knowledge base (roadmap 2.4), now scoped per property (roadmap 2.8). A process-global
     # registry entry rather than a collaborator threaded through the Orchestrator/Receptionist call
@@ -85,6 +91,7 @@ def build_consumer(settings: Settings, database: Database, classifier: Classifie
         sender=sender,
         classifications=SqlAlchemyClassificationWriter(tenant_scope),
         alerter=alerter,
+        vocabulary=vocabulary,
     )
     consumer = MessageConsumer(SqlAlchemyMessageLoader(tenant_scope), orchestrator)
     return ConsumerGraph(consumer=consumer, sender=sender)
