@@ -59,7 +59,7 @@ from packages.intents.schema import Vocabulary, default_vocabulary
 
 from apps.api.conversations.confirmation import reads_as_no, reads_as_yes
 from apps.api.conversations.task import Task, TaskStatus
-from apps.api.conversations.tools import REGISTRY, ToolResult
+from apps.api.conversations.tools import REGISTRY, ToolResult, current_copy, fill_template
 from apps.api.core.autonomy import Autonomy, decide_autonomy
 from apps.api.core.screening import ScreeningBlock, screen
 from apps.api.schemas.envelope import InboundTurn, OutboundAction
@@ -90,7 +90,16 @@ _REFERENCE_SLOT = "booking_reference"
 #: Said when an appointment has actually been written, and only then. The reference is part of the
 #: sentence rather than an afterthought: it is the thing that makes the claim checkable, and a
 #: confirmation without one is the "All set!" bug wearing a better sentence.
-_BOOKED_TEXT = "That's booked. Your reference is"
+#:
+#: The tenant may replace it (``ConversationCopy.booking_confirmed``) and most will, because this
+#: sentence and the read-back are the only two the receptionist composes itself — every other
+#: word a patient reads already came from configuration, and until the journey was run end to end
+#: nobody had noticed that the two turns at the centre of the demo were still in English.
+_BOOKED_TEXT = "That's booked. Your reference is {booking_reference}"
+
+#: The read-back. ``{details}`` carries the labels the default reads with; ``{values}`` is the
+#: same list without them, for a template in a language those English labels do not belong in.
+_READ_BACK_TEXT = "Just to confirm: {details}?"
 
 #: Tools that produce their reply directly from ``human_summary`` and cannot fail. ``greet`` and
 #: ``close_conversation`` are the two ends of a conversation, and neither has anything to look up.
@@ -407,13 +416,15 @@ async def _read_back(
     if booking:
         await _hold_for(task, turn, conversation_id)
 
-    details = ", ".join(
-        f"{slot.replace('_', ' ')} {_readable(task, slot)}" for slot in task.unconfirmed
-    )
+    outstanding = tuple(task.unconfirmed)
+    details = ", ".join(f"{slot.replace('_', ' ')} {_readable(task, slot)}" for slot in outstanding)
+    values = "، ".join(_readable(task, slot) for slot in outstanding)
+    template = current_copy().confirm_read_back or _READ_BACK_TEXT
     return (
         OutboundAction(
             kind="confirm",
-            text=f"Just to confirm: {details}?",
+            text=fill_template(template, details=details, values=values)
+            or _READ_BACK_TEXT.format(details=details),
             quick_replies=["Yes", "No"],
         ),
         task,
@@ -520,10 +531,12 @@ async def _book(
 
     task.slots[_REFERENCE_SLOT] = str(reference)
     task.status = TaskStatus.COMPLETED
+    template = current_copy().booking_confirmed or _BOOKED_TEXT
     return (
         OutboundAction(
             kind="say",
-            text=f"{_BOOKED_TEXT} {reference}",
+            text=fill_template(template, booking_reference=str(reference))
+            or _BOOKED_TEXT.format(booking_reference=reference),
         ),
         task,
     )

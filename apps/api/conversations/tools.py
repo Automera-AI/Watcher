@@ -150,6 +150,30 @@ class ConversationCopy:
     booking_taken: str | None = None
     """The slot went while the patient was answering. ``{service}``, ``{branch}``, ``{date}``."""
 
+    confirm_read_back: str | None = None
+    """The read-back before an appointment is written. ``{details}``, ``{values}``.
+
+    Said by the receptionist rather than by a tool, which is why it took until the journey was run
+    end to end for anyone to notice it had no tenant wording at all: two of the demo's three turns
+    were composed in English inside ``receptionist.py`` while every sentence around them came from
+    configuration.
+
+    Two placeholders for the same list because the labels are the problem. ``{details}`` is what
+    the default reads — "service Facial, branch Maadi" — and those labels are English words that
+    have no business inside an Arabic sentence. ``{values}`` is the same details with the labels
+    dropped, which is what a template in another language wants: a booking read back as
+    "فاشيال، المعادي، Wednesday 02 September، 19:00" is understood by the patient answering it.
+    """
+
+    booking_confirmed: str | None = None
+    """Said when the appointment has been written. Contains ``{booking_reference}``.
+
+    Distinct from ``closing_booking_confirmed``, which is the *goodbye* afterwards. This is the
+    sentence that states the appointment exists, and like that one it may only be rendered when a
+    reference came back from the scheduling system — the receptionist has nothing else to put in
+    it, and a confirmation without one is the "All set!" bug wearing a better sentence.
+    """
+
     closing_booking_confirmed: str | None = None
     """Said only when a durable booking reference exists. Contains ``{booking_reference}``.
 
@@ -306,8 +330,12 @@ class AnswerFromKnowledge(Tool):
 HOLD_MINUTES = 10
 
 
-def _fill_all(template: str, **fields: str) -> str | None:
+def fill_template(template: str, **fields: str) -> str | None:
     """Substitute several fields, or ``None`` if the template cannot take them.
+
+    Public because ``receptionist.py`` renders the two sentences it composes itself through it.
+    A second implementation of "fill this in, and degrade rather than raise" is how the two would
+    drift, and the one that drifts is the one nobody notices until a tenant's template throws.
 
     Same contract as :func:`_fill` and for the same reason: a tenant writing ``{sessions_count}``
     where the field is ``sessions`` must degrade to plainer wording rather than raise ``KeyError``
@@ -360,7 +388,8 @@ class _ClinicTool(Tool):
             ok=False,
             error="ambiguous",
             data={"options": list(options)},
-            human_summary=_fill_all(template, options=listed) or f"Which did you mean: {listed}?",
+            human_summary=fill_template(template, options=listed)
+            or f"Which did you mean: {listed}?",
         )
 
     def _resolve(self, tenant_id: str, service: str, branch: str | None) -> ToolResult | _Resolved:
@@ -449,7 +478,7 @@ class CheckAvailability(_ClinicTool):
                 ok=False,
                 error="none_available",
                 data={"times": [], "service_category": resolved.service.category},
-                human_summary=_fill_all(
+                human_summary=fill_template(
                     template,
                     service=resolved.service.name,
                     branch=resolved.branch.name,
@@ -477,7 +506,7 @@ class CheckAvailability(_ClinicTool):
                 "service_category": resolved.service.category,
                 "branch_external_id": resolved.branch.external_id,
             },
-            human_summary=_fill_all(
+            human_summary=fill_template(
                 template,
                 times=listed,
                 service=resolved.service.name,
@@ -519,6 +548,11 @@ class QuotePrice(_ClinicTool):
             "{service}: {price} for {sessions}. Package use is subject to the clinic's "
             "written terms."
         )
+        # Two placeholders for the same fact, because a template written in Arabic cannot use an
+        # English phrase. `{sessions}` reads naturally in the default wording; `{session_count}`
+        # is the bare number, which is what a tenant needs when their own language inflects the
+        # counted noun — "6 جلسات" and "12 جلسة" differ, and no English phrase substitutes into
+        # either. A template must carry one of them: see `_check_price_template`.
         sessions = (
             "one session" if service.session_count == 1 else f"{service.session_count} sessions"
         )
@@ -531,12 +565,13 @@ class QuotePrice(_ClinicTool):
                 "currency": service.currency,
                 "session_count": service.session_count,
             },
-            human_summary=_fill_all(
+            human_summary=fill_template(
                 template,
                 service=service.name,
                 price=price,
                 currency=service.currency,
                 sessions=sessions,
+                session_count=str(service.session_count),
             )
             or f"{service.name}: {price} for {sessions}.",
         )
@@ -631,7 +666,7 @@ class ConfirmBooking(_ClinicTool):
             return ToolResult(
                 ok=False,
                 error=outcome.reason,
-                human_summary=_fill_all(template) or template,
+                human_summary=fill_template(template) or template,
             )
         return ToolResult(
             ok=True,
@@ -677,6 +712,19 @@ register(Greet())
 register(CloseConversation())
 
 
+#: The tenant's wording, for the two sentences the receptionist says itself. The tools each hold
+#: their own copy because they are constructed with one; the receptionist is a module of functions
+#: and has nowhere to hold it, so it reads this — the same process-global service-locator pattern
+#: ``REGISTRY`` already is, set by the same composition-root call, and defaulting to wording that
+#: is correct on its own.
+_COPY = ConversationCopy()
+
+
+def current_copy() -> ConversationCopy:
+    """The tenant's wording as last configured (``configure_conversation_copy``)."""
+    return _COPY
+
+
 def configure_conversation_copy(copy: ConversationCopy) -> None:
     """Swap in the tenant's own opening and closing wording (``main.py``).
 
@@ -684,6 +732,8 @@ def configure_conversation_copy(copy: ConversationCopy) -> None:
     that greets and closes correctly but names nobody, which is the same degrade-don't-crash trade
     ``_NoFacts`` makes for a tenant with no facts.
     """
+    global _COPY
+    _COPY = copy
     register(Greet(copy))
     register(CloseConversation(copy))
 

@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from packages.intents.schema import vocabulary_for
 
+from apps.api.conversations import tools
 from apps.api.conversations.receptionist import handle
 from apps.api.conversations.task import Task, TaskStatus
 from apps.api.conversations.tools import (
@@ -485,6 +486,58 @@ def test_without_the_clinic_tools_a_booking_still_hands_off_rather_than_claiming
     action, task = _say("أيوه", "thanks_closing", {}, task, turns_taken=1)
     assert action.kind == "handoff"
     assert task.status is TaskStatus.HANDED_OFF
+
+
+def test_the_read_back_and_the_confirmation_are_the_tenants_own_words(
+    directory: _FakeDirectory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The two sentences the receptionist composes itself, in the tenant's language.
+
+    Every other word a patient reads already came from configuration; these two were composed in
+    English inside this module, which meant a clinic whose whole conversation is in Arabic got
+    "Just to confirm:" and "That's booked." at the centre of its booking. Running the journey end
+    to end is what surfaced it — see ``packages/eval/journeys.py``.
+
+    ``{values}`` rather than ``{details}`` is the point of having both: the labels the default
+    reads with are English words, and a read-back in Arabic wants the values on their own.
+    """
+    copy = ConversationCopy(
+        confirm_read_back="تأكيد الحجز: {values} — صح كده؟",
+        booking_confirmed="تم الحجز ✅ رقم الحجز: {booking_reference}",
+    )
+    monkeypatch.setattr(tools, "_COPY", copy)
+
+    read_back, task = _say(
+        "عاوزة أحجز فاشيال بيسك في المعادي بكرة الساعة ٦",
+        "booking_enquiry",
+        _booked_slots(),
+    )
+    assert read_back.kind == "confirm"
+    assert (read_back.text or "").startswith("تأكيد الحجز:")
+    assert "Just to confirm" not in (read_back.text or "")
+    # The values, without the English slot labels the default reads with.
+    assert "فاشيال بيسك" in (read_back.text or "") and "service" not in (read_back.text or "")
+
+    booked, _task = _say("أيوه", "thanks_closing", {}, task, turns_taken=1)
+    assert booked.text == "تم الحجز ✅ رقم الحجز: DC-0266"
+
+
+def test_a_tenant_template_that_will_not_take_its_placeholder_degrades(
+    directory: _FakeDirectory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A typo in a template must not lose the reply that says an appointment exists.
+
+    The same degrade-don't-crash trade the rest of the copy makes: a ``KeyError`` here would drop
+    the one message the patient came for, on a booking that has already been written.
+    """
+    monkeypatch.setattr(
+        tools, "_COPY", ConversationCopy(booking_confirmed="تم الحجز {reference_number}")
+    )
+    task = _complete_task()
+    booked, _task = _say("أيوه", "thanks_closing", {}, task, turns_taken=1)
+
+    assert "DC-0266" in (booked.text or "")
+    assert len(directory.bookings) == 1
 
 
 def _booked_slots() -> dict[str, str]:

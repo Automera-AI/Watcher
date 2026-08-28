@@ -57,6 +57,8 @@ from apps.api.conversations.tools import (
     HoldSlot,
     QuotePrice,
     Tool,
+    configure_conversation_copy,
+    current_copy,
 )
 from apps.api.core.clinic import (
     AvailabilitySlot,
@@ -378,10 +380,16 @@ def _tools_for(diary: FixtureDiary, copy: ConversationCopy) -> Iterator[None]:
         ),
     ]
     previous = {tool.name: REGISTRY.get(tool.name) for tool in installed}
+    previous_copy = current_copy()
     REGISTRY.update({tool.name: tool for tool in installed})
+    # The receptionist reads its own two sentences — the read-back and the confirmation — from the
+    # process-global copy rather than from a tool, so a journey that only filled the registry
+    # would score the tenant's wording everywhere except the two turns at the centre of it.
+    configure_conversation_copy(copy)
     try:
         yield
     finally:
+        configure_conversation_copy(previous_copy)
         for name, tool in previous.items():
             if tool is None:
                 REGISTRY.pop(name, None)
