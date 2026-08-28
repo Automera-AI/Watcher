@@ -16,29 +16,73 @@ used to get the same reply — "All set! I've noted everything down." — whethe
 true. For the five intents whose ``terminal_tool`` is ``answer_from_knowledge`` that was a
 standing lie: "is there parking?" was never looked up anywhere. ``_execute`` now actually calls
 the tool the vocabulary names for that one case and hands off on a real "I don't know"
-(``defaults.on_no_knowledge``). Every other ``terminal_tool`` (``check_availability``,
-``lookup_reservation``, ``quote_price``, ``hold_slot``, ``confirm_booking``, ``create_ticket``) has
-no implementation yet — that is roadmap 3.1, not 2.4 — and keeps the old placeholder reply rather
-than being silently widened into a promise this item does not keep.
+(``defaults.on_no_knowledge``).
+
+**What demo step 6 added: the booking journey, and the two things that made it unreachable.**
+
+``check_availability``, ``quote_price``, ``hold_slot`` and ``confirm_booking`` are wired here now,
+against the imported catalogue. Where they are *not* registered — the holiday-home vertical, or a
+process that never called ``configure_clinic`` — nothing changes: the name is absent, and an
+unbuilt terminal tool is still a hand-off rather than a claim of success.
+
+Two things had to be fixed for any of it to be reachable, and neither was in the tools.
+
+*Nothing ever agreed to anything.* ``Task.confirmed`` was only ever emptied, so an intent
+declaring ``confirm_before_acting`` read a detail back and read it back again until the
+clarifying-turn limit fetched a person. ``Task.agree`` and ``conversations/confirmation.py`` close
+that loop, and the read-back now covers everything outstanding in one message rather than one
+detail per turn — three separate confirmations do not fit inside ``max_clarifying_turns: 2``.
+
+*And "تمام" ended the conversation.* Classified flat it is ``thanks_closing``, which is the right
+label most of the time and the wrong one by one word mid-booking: the task would be abandoned and
+the receptionist would say goodbye to somebody who was about to have an appointment. A short reply
+is now read against the read-back that is actually outstanding, *before* the classified intent is
+allowed to switch tasks. That is the clinic vocabulary's dialogue-state rule, in the one place the
+demo needs it.
+
+The remaining ``terminal_tool`` values (``lookup_reservation``, ``lookup_appointment``,
+``create_ticket``) still have no implementation, and still hand off.
 """
 
 from __future__ import annotations
 
+from datetime import date
+
 from packages.intents.schema import Vocabulary, default_vocabulary
 
+from apps.api.conversations.confirmation import reads_as_no, reads_as_yes
 from apps.api.conversations.task import Task, TaskStatus
-from apps.api.conversations.tools import REGISTRY
+from apps.api.conversations.tools import REGISTRY, ToolResult
 from apps.api.core.autonomy import Autonomy, decide_autonomy
 from apps.api.schemas.envelope import InboundTurn, OutboundAction
 
 HANDOFF_TEXT = "Let me connect you with someone who can help."
 
 
-#: Terminal tools this file actually runs. The rest (``check_availability``, ``quote_price``,
-#: ``hold_slot``, ``confirm_booking``, ``lookup_appointment``, ``lookup_reservation``,
-#: ``create_ticket``) are not built yet, and an intent that names one hands off rather than
-#: claiming success — see ``_UNBUILT_TEXT``.
+#: Terminal tools this file runs by name. ``lookup_reservation``, ``lookup_appointment`` and
+#: ``create_ticket`` are still unbuilt, and an intent that names one hands off rather than claiming
+#: success — see ``_UNBUILT_TEXT``.
 _KNOWLEDGE_TOOL = "answer_from_knowledge"
+_AVAILABILITY_TOOL = "check_availability"
+_QUOTE_TOOL = "quote_price"
+_HOLD_TOOL = "hold_slot"
+_BOOKING_TOOL = "confirm_booking"
+
+#: The slot a booking is offered *into* rather than asked for. When it is the only thing missing,
+#: the receptionist does not ask an open question — it calls ``check_availability`` and offers what
+#: the diary holds, which is the only way the vocabulary's "never offer a slot the scheduling
+#: system did not return" can be kept while still collecting a time.
+_TIME_SLOT = "requested_time"
+
+#: Where the durable booking reference is kept once one exists. Not a vocabulary slot — nothing
+#: extracts it from a message — but it lives with the task because that is what survives to the
+#: closing turn, which is the only place it is read (``CloseConversation``).
+_REFERENCE_SLOT = "booking_reference"
+
+#: Said when an appointment has actually been written, and only then. The reference is part of the
+#: sentence rather than an afterthought: it is the thing that makes the claim checkable, and a
+#: confirmation without one is the "All set!" bug wearing a better sentence.
+_BOOKED_TEXT = "That's booked. Your reference is"
 
 #: Tools that produce their reply directly from ``human_summary`` and cannot fail. ``greet`` and
 #: ``close_conversation`` are the two ends of a conversation, and neither has anything to look up.
@@ -80,6 +124,7 @@ async def handle(
     emergency: bool = False,
     turns_taken: int = 0,
     vocabulary: Vocabulary | None = None,
+    conversation_id: str | None = None,
 ) -> tuple[OutboundAction, Task]:
     """Process one turn and return the action to take plus the updated task state.
 
@@ -87,10 +132,36 @@ async def handle(
     """
     vocab = vocabulary or default_vocabulary()
 
+    # The dialogue-state rule, and the only place it is applied: a short reply is read against a
+    # read-back that is genuinely outstanding *before* the classified intent is allowed to start a
+    # different task. "تمام" is `thanks_closing` on its own and it is `yes, book it` here, and the
+    # difference is not in the word — it is in whether anything is waiting for an answer. Without
+    # this the reply that agrees to an appointment is the reply that abandons it.
+    answering = task is not None and task.awaiting_agreement and _is_an_answer(turn.text)
+    if answering:
+        assert task is not None
+        intent = task.intent
+
     if task is None or task.intent != intent:
         task = Task(intent=intent, vocabulary=vocab)
 
     task.absorb(extracted_slots)
+
+    if answering:
+        if reads_as_yes(turn.text or ""):
+            task.agree()
+        else:
+            # A refusal. Nothing is agreed and nothing is guessed about which detail was wrong;
+            # the customer says so in their own words on the next turn, and `absorb` drops the
+            # confirmation of anything they change. Two of these and `on_max_turns` fetches a
+            # person, which is the right end for a read-back that keeps being rejected.
+            return (
+                OutboundAction(
+                    kind="ask",
+                    text="Sorry — which detail should I change?",
+                ),
+                task,
+            )
 
     autonomy: Autonomy = decide_autonomy(
         intent,
@@ -111,8 +182,15 @@ async def handle(
     if step in ("ask", "confirm") and turns_taken >= vocab.defaults.max_clarifying_turns:
         return await _hand_off(task, vocab.defaults.on_max_turns)
 
+    intent_def = next((i for i in vocab.intents if i.name == intent), None)
+    tool_name = intent_def.terminal_tool if intent_def is not None else None
+
     if step == "ask":
         assert slot is not None
+        if slot == _TIME_SLOT and tool_name == _BOOKING_TOOL:
+            # Not an open question. The one detail still missing is *which* appointment, and the
+            # only honest way to collect it is to offer what the diary actually holds.
+            return await _offer_times(task, turn, conversation_id)
         return (
             OutboundAction(
                 kind="ask",
@@ -122,21 +200,15 @@ async def handle(
         )
 
     if step == "confirm":
-        assert slot is not None
-        value = task.slots[slot]
-        return (
-            OutboundAction(
-                kind="confirm",
-                text=f"Just to confirm: {slot.replace('_', ' ')} is {value}?",
-                quick_replies=["Yes", "No"],
-            ),
-            task,
-        )
+        return await _read_back(task, turn, conversation_id, booking=tool_name == _BOOKING_TOOL)
 
     task.status = TaskStatus.EXECUTING
 
-    intent_def = next((i for i in vocab.intents if i.name == intent), None)
-    tool_name = intent_def.terminal_tool if intent_def is not None else None
+    if tool_name in (_AVAILABILITY_TOOL, _QUOTE_TOOL):
+        return await _answer_from_catalogue(task, turn, tool_name, conversation_id, vocab)
+
+    if tool_name == _BOOKING_TOOL:
+        return await _book(task, turn, conversation_id, vocab)
 
     if tool_name == _KNOWLEDGE_TOOL:
         return await _answer_from_knowledge(task, turn, identity_verified, vocab)
@@ -211,3 +283,220 @@ async def _answer_from_knowledge(
 
     task.status = TaskStatus.COMPLETED
     return OutboundAction(kind="say", text=result.human_summary or ""), task
+
+
+def _is_an_answer(text: str | None) -> bool:
+    """Whether a message is a short yes or no rather than a new request."""
+    return reads_as_yes(text or "") or reads_as_no(text or "")
+
+
+def _readable(task: Task, slot: str) -> str:
+    """One slot's value as a person would say it back.
+
+    Only the date needs it: it is stored as ``2026-09-02`` because that is what a booking can act
+    on, and reading an ISO date back to a patient asks them to confirm a string rather than a day.
+    """
+    value = task.slots.get(slot, "")
+    if slot != "requested_date":
+        return value
+    try:
+        return date.fromisoformat(value).strftime("%A %d %B")
+    except ValueError:
+        return value
+
+
+async def _availability(
+    task: Task, turn: InboundTurn, conversation_id: str | None
+) -> ToolResult | None:
+    """Ask the scheduling system what is free for this task, or ``None`` if it is not wired."""
+    tool = REGISTRY.get(_AVAILABILITY_TOOL)
+    if tool is None:
+        return None
+    return await tool.run(
+        tenant_id=str(turn.tenant_id),
+        conversation_id=conversation_id,
+        service=task.slots.get("service"),
+        branch=task.slots.get("branch"),
+        requested_date=task.slots.get("requested_date"),
+    )
+
+
+def _slot_at(result: ToolResult, wanted_time: str) -> str | None:
+    """The slot id whose start time is ``wanted_time``, out of what was just returned.
+
+    Matched against *this* call's answer and never a remembered one. The diary moves between
+    turns, and a slot id carried across from the message before it is a promise about a state of
+    the world that has already changed — which is what ``quoting.max_age_seconds`` is about.
+    """
+    data = result.data or {}
+    times = data.get("times") or []
+    slot_ids = data.get("slot_ids") or []
+    for offered, slot_id in zip(times, slot_ids, strict=False):
+        if offered == wanted_time:
+            return str(slot_id)
+    return None
+
+
+async def _offer_times(
+    task: Task, turn: InboundTurn, conversation_id: str | None
+) -> tuple[OutboundAction, Task]:
+    """Collect the appointment time by offering the ones that exist.
+
+    A failure here is not a hand-off by default: "there is nothing free on Wednesday" is a real
+    answer to a real question, and the patient's next move is another day. Only a tool that could
+    not say anything at all — unwired, or a service name that reached nothing — fetches a person.
+    """
+    result = await _availability(task, turn, conversation_id)
+    if result is None:
+        return await _hand_off(task, "handoff_to_human")
+    if result.human_summary:
+        return OutboundAction(kind="ask", text=result.human_summary), task
+    return await _hand_off(task, "handoff_to_human")
+
+
+async def _read_back(
+    task: Task,
+    turn: InboundTurn,
+    conversation_id: str | None,
+    *,
+    booking: bool,
+) -> tuple[OutboundAction, Task]:
+    """Read every outstanding detail back at once, and hold the slot while it is being answered.
+
+    One message rather than one per detail. ``max_clarifying_turns`` is 2 and a clinic booking has
+    four confirmable details, so a confirmation per turn cannot finish — the third read-back is the
+    hand-off. Reading them back together is also simply what a receptionist does.
+
+    The hold is placed *here*, at the read-back, and deliberately not at the offer: holding
+    everything a browsing patient was shown would take an afternoon out of the diary, while holding
+    nothing means the slot somebody is in the middle of agreeing to can be given away underneath
+    them. A hold that fails is not fatal — the confirmation itself is atomic — so the patient is
+    still asked, and finds out at the last moment rather than the first.
+    """
+    if booking:
+        await _hold_for(task, turn, conversation_id)
+
+    details = ", ".join(
+        f"{slot.replace('_', ' ')} {_readable(task, slot)}" for slot in task.unconfirmed
+    )
+    return (
+        OutboundAction(
+            kind="confirm",
+            text=f"Just to confirm: {details}?",
+            quick_replies=["Yes", "No"],
+        ),
+        task,
+    )
+
+
+async def _hold_for(task: Task, turn: InboundTurn, conversation_id: str | None) -> None:
+    """Reserve the slot this task is about to read back, if it can be identified and held."""
+    hold = REGISTRY.get(_HOLD_TOOL)
+    wanted_time = task.slots.get(_TIME_SLOT)
+    if hold is None or conversation_id is None or not wanted_time:
+        return
+    result = await _availability(task, turn, conversation_id)
+    slot_id = _slot_at(result, wanted_time) if result is not None else None
+    if slot_id is None:
+        return
+    await hold.run(
+        tenant_id=str(turn.tenant_id),
+        conversation_id=conversation_id,
+        slot_external_id=slot_id,
+    )
+
+
+async def _answer_from_catalogue(
+    task: Task,
+    turn: InboundTurn,
+    tool_name: str,
+    conversation_id: str | None,
+    vocab: Vocabulary,
+) -> tuple[OutboundAction, Task]:
+    """Run ``check_availability`` or ``quote_price`` and say what came back.
+
+    An unresolved or ambiguous service is not a failure to be hidden: the tool composes the
+    question ("Which did you mean: Basic Facial / Facial?") and it is asked, because picking one
+    would quote a real price for a treatment nobody asked about. A tool that came back with
+    nothing to say at all falls through to ``on_tool_failure``, which fetches a person — the
+    vocabulary's own answer, and the only safe one when a quote cannot be sourced.
+    """
+    tool = REGISTRY.get(tool_name)
+    if tool is None:
+        return await _unbuilt(task)
+
+    result = await tool.run(
+        tenant_id=str(turn.tenant_id),
+        conversation_id=conversation_id,
+        service=task.slots.get("service"),
+        branch=task.slots.get("branch"),
+        requested_date=task.slots.get("requested_date"),
+        requested_time=task.slots.get(_TIME_SLOT),
+    )
+    if result.human_summary:
+        task.status = TaskStatus.COMPLETED if result.ok else TaskStatus.COLLECTING
+        return OutboundAction(kind="say" if result.ok else "ask", text=result.human_summary), task
+    return await _hand_off(task, vocab.defaults.on_tool_failure)
+
+
+async def _book(
+    task: Task, turn: InboundTurn, conversation_id: str | None, vocab: Vocabulary
+) -> tuple[OutboundAction, Task]:
+    """Create the appointment the patient has just agreed to, and give them its reference.
+
+    **The reference goes into the task**, which is the whole reason ``closing_booking_confirmed``
+    exists and has never been reachable: the confirmed-booking closing renders only when a durable
+    reference is there to put in it, and this is the one line in the system that puts one there.
+    Everything before this point is a conversation; this is the first moment an appointment exists
+    anywhere.
+
+    The slot is looked up again rather than remembered. It was held at the read-back, and a hold is
+    visible to the conversation that placed it, so the slot the patient agreed to is the slot they
+    get — while anything that changed underneath in the meantime is seen now rather than assumed
+    away.
+    """
+    tool = REGISTRY.get(_BOOKING_TOOL)
+    wanted_time = task.slots.get(_TIME_SLOT)
+    if tool is None or conversation_id is None or not wanted_time:
+        return await _unbuilt(task)
+
+    availability = await _availability(task, turn, conversation_id)
+    slot_id = _slot_at(availability, wanted_time) if availability is not None else None
+    if slot_id is None:
+        # The time is no longer on offer. Say what is, rather than booking something else.
+        task.slots.pop(_TIME_SLOT, None)
+        task.confirmed.discard(_TIME_SLOT)
+        return await _offer_times(task, turn, conversation_id)
+
+    result = await tool.run(
+        tenant_id=str(turn.tenant_id),
+        conversation_id=conversation_id,
+        slot_external_id=slot_id,
+        customer_name=task.slots.get("customer_name"),
+        phone=task.slots.get("phone"),
+    )
+    reference = (result.data or {}).get("booking_reference") if result.ok else None
+    if not result.ok or not reference:
+        if result.human_summary:
+            task.status = TaskStatus.COLLECTING
+            return OutboundAction(kind="say", text=result.human_summary), task
+        return await _hand_off(task, vocab.defaults.on_tool_failure)
+
+    task.slots[_REFERENCE_SLOT] = str(reference)
+    task.status = TaskStatus.COMPLETED
+    return (
+        OutboundAction(
+            kind="say",
+            text=f"{_BOOKED_TEXT} {reference}",
+        ),
+        task,
+    )
+
+
+async def _unbuilt(task: Task) -> tuple[OutboundAction, Task]:
+    """Record the message and fetch a person. Never a success reply — see ``_UNBUILT_TEXT``."""
+    take_message = REGISTRY.get("take_message")
+    if take_message is not None:
+        await take_message.run()
+    task.status = TaskStatus.HANDED_OFF
+    return OutboundAction(kind="handoff", text=_UNBUILT_TEXT), task

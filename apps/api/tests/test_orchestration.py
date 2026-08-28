@@ -666,9 +666,10 @@ def _clinic_message(text: str, at: datetime) -> MessageEnvelope:
 def test_what_the_model_extracted_reaches_the_task() -> None:
     """The gap ``worker.py`` carried as ``{}`` since the receptionist was wired.
 
-    Every required slot of ``booking_enquiry`` arrives in one message, so the task has nothing
-    left to ask for — which is the difference between a booking journey and three clarifying
-    questions ending in a hand-off.
+    Three of ``booking_enquiry``'s four required slots arrive in one message and all three are
+    kept — the difference between a booking journey and three clarifying questions ending in a
+    hand-off. The fourth, the time, is not asked for here: the receptionist offers the times the
+    diary actually holds (step 6), so it is still outstanding at this point by design.
     """
     orch, _audit, _inbox, store = _conversing(
         "booking_enquiry",
@@ -692,7 +693,7 @@ def test_what_the_model_extracted_reaches_the_task() -> None:
     assert store.task.slots["branch"] == "الشيخ زايد"
     # Resolved against the tenant's clock, not the model's sense of the date.
     assert store.task.slots["requested_date"] == "2026-09-01"
-    assert store.task.missing == []
+    assert store.task.missing == ["requested_time"]
 
 
 def test_a_slot_the_intent_never_declares_does_not_reach_the_task() -> None:

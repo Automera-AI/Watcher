@@ -12,12 +12,18 @@ database at all, and an import must never reopen a slot that a patient has been 
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
 from apps.api.clinic.importer import CataloguePlan, ImportIssue, ImportReport
-from apps.api.core.clinic import AvailabilitySlot, Booking, Branch, Service
+from apps.api.core.clinic import (
+    AvailabilitySlot,
+    Booking,
+    BookingOutcome,
+    Branch,
+    Service,
+)
 from apps.api.db.clinic_repo import CatalogueImportRefused, SqlAlchemyClinicRepository
 from apps.api.db.engine import Database
 from apps.api.db.models import ClinicAvailabilitySlot, ClinicBooking
@@ -275,3 +281,287 @@ class TestBookings:
     ) -> None:
         outcome = repository.import_catalogue(TENANT, _plan(), import_version="demo-v1")
         assert "wrote 1 branches, 1 services, 1 slots, 0 bookings" in outcome.summary()
+
+
+# ── The booking journey (demo step 6) ──────────────────────────────────────────────────────
+
+CAIRO = "Africa/Cairo"
+#: 2 September 2026, 14:00 Cairo. Written in UTC because that is what the column holds.
+AFTERNOON = datetime(2026, 9, 2, 11, 0, tzinfo=UTC)
+CONVERSATION = str(uuid.uuid4())
+OTHER_CONVERSATION = str(uuid.uuid4())
+
+
+def _diary(*starts: datetime) -> CataloguePlan:
+    return _plan(slots=tuple(_slot(f"S{i:05d}", start=at) for i, at in enumerate(starts, start=1)))
+
+
+class TestAvailability:
+    def test_open_slots_come_back_for_the_local_day_they_fall_on(
+        self, repository: SqlAlchemyClinicRepository
+    ) -> None:
+        """The day is the *patient's*. 21:30 UTC is the next morning in Cairo and must not appear
+        under today, which is exactly how a demo offers an appointment on the wrong date."""
+        repository.import_catalogue(
+            TENANT,
+            _diary(AFTERNOON, datetime(2026, 9, 2, 21, 30, tzinfo=UTC)),
+            import_version="v1",
+        )
+        found = repository.available_slots(
+            TENANT,
+            service_code="DT001",
+            branch_external_id="B01",
+            on_date=date(2026, 9, 2),
+            timezone=CAIRO,
+        )
+        assert [slot.external_id for slot in found] == ["S00001"]
+
+    def test_a_slot_held_by_somebody_else_is_not_offered(
+        self, repository: SqlAlchemyClinicRepository
+    ) -> None:
+        repository.import_catalogue(TENANT, _diary(AFTERNOON), import_version="v1")
+        assert repository.hold_slot(
+            TENANT,
+            slot_external_id="S00001",
+            conversation_id=OTHER_CONVERSATION,
+            until=AFTERNOON + timedelta(minutes=10),
+            now=AFTERNOON,
+        )
+        assert (
+            repository.available_slots(
+                TENANT,
+                service_code="DT001",
+                branch_external_id="B01",
+                on_date=date(2026, 9, 2),
+                timezone=CAIRO,
+                now=AFTERNOON,
+                conversation_id=CONVERSATION,
+            )
+            == []
+        )
+
+    def test_a_slot_this_conversation_holds_is_still_offered_to_it(
+        self, repository: SqlAlchemyClinicRepository
+    ) -> None:
+        """Otherwise the hold placed to keep a slot for a patient is what takes it from them."""
+        repository.import_catalogue(TENANT, _diary(AFTERNOON), import_version="v1")
+        repository.hold_slot(
+            TENANT,
+            slot_external_id="S00001",
+            conversation_id=CONVERSATION,
+            until=AFTERNOON + timedelta(minutes=10),
+            now=AFTERNOON,
+        )
+        found = repository.available_slots(
+            TENANT,
+            service_code="DT001",
+            branch_external_id="B01",
+            on_date=date(2026, 9, 2),
+            timezone=CAIRO,
+            now=AFTERNOON,
+            conversation_id=CONVERSATION,
+        )
+        assert [slot.external_id for slot in found] == ["S00001"]
+
+    def test_an_expired_hold_is_available_to_anybody(
+        self, repository: SqlAlchemyClinicRepository
+    ) -> None:
+        """Nothing sweeps holds, so the expiry has to be read rather than enforced by a job."""
+        repository.import_catalogue(TENANT, _diary(AFTERNOON), import_version="v1")
+        repository.hold_slot(
+            TENANT,
+            slot_external_id="S00001",
+            conversation_id=OTHER_CONVERSATION,
+            until=AFTERNOON,
+            now=AFTERNOON - timedelta(minutes=10),
+        )
+        found = repository.available_slots(
+            TENANT,
+            service_code="DT001",
+            branch_external_id="B01",
+            on_date=date(2026, 9, 2),
+            timezone=CAIRO,
+            now=AFTERNOON + timedelta(minutes=1),
+            conversation_id=CONVERSATION,
+        )
+        assert [slot.external_id for slot in found] == ["S00001"]
+
+
+class TestHold:
+    def test_two_conversations_cannot_both_hold_one_slot(
+        self, repository: SqlAlchemyClinicRepository
+    ) -> None:
+        repository.import_catalogue(TENANT, _diary(AFTERNOON), import_version="v1")
+        until = AFTERNOON + timedelta(minutes=10)
+        assert repository.hold_slot(
+            TENANT,
+            slot_external_id="S00001",
+            conversation_id=CONVERSATION,
+            until=until,
+            now=AFTERNOON,
+        )
+        assert not repository.hold_slot(
+            TENANT,
+            slot_external_id="S00001",
+            conversation_id=OTHER_CONVERSATION,
+            until=until,
+            now=AFTERNOON,
+        )
+
+    def test_re_holding_your_own_slot_extends_it(
+        self, repository: SqlAlchemyClinicRepository
+    ) -> None:
+        """A hold that expires while the patient is typing their name is the worse failure."""
+        repository.import_catalogue(TENANT, _diary(AFTERNOON), import_version="v1")
+        assert repository.hold_slot(
+            TENANT,
+            slot_external_id="S00001",
+            conversation_id=CONVERSATION,
+            until=AFTERNOON + timedelta(minutes=5),
+            now=AFTERNOON,
+        )
+        assert repository.hold_slot(
+            TENANT,
+            slot_external_id="S00001",
+            conversation_id=CONVERSATION,
+            until=AFTERNOON + timedelta(minutes=15),
+            now=AFTERNOON + timedelta(minutes=4),
+        )
+
+
+class TestConfirm:
+    def _booked(
+        self, repository: SqlAlchemyClinicRepository, *, conversation: str = CONVERSATION
+    ) -> BookingOutcome:
+        return repository.confirm_booking(
+            TENANT,
+            slot_external_id="S00001",
+            conversation_id=conversation,
+            reference_prefix="DC",
+            patient_name="Rana",
+            now=AFTERNOON,
+        )
+
+    def test_confirming_writes_an_appointment_and_issues_a_reference(
+        self, repository: SqlAlchemyClinicRepository
+    ) -> None:
+        repository.import_catalogue(TENANT, _diary(AFTERNOON), import_version="v1")
+        outcome = self._booked(repository)
+
+        assert outcome.reason == "confirmed"
+        assert outcome.booking is not None
+        assert outcome.booking.reference == "DC-0001"
+        assert outcome.booking.source == "bot"
+        assert repository.list_slots(TENANT, status="booked")[0].external_id == "S00001"
+
+    def test_a_reference_never_collides_with_one_the_clinic_already_gave_out(
+        self, repository: SqlAlchemyClinicRepository
+    ) -> None:
+        """The workbook brought in 265 references that patients are already holding."""
+        plan = _plan(
+            slots=(_slot("S00001"), _slot("S00002", status="booked")),
+            bookings=(Booking(reference="DC-0265", slot_external_id="S00002", source="workbook"),),
+        )
+        repository.import_catalogue(TENANT, plan, import_version="v1")
+        outcome = self._booked(repository)
+        assert outcome.booking is not None
+        assert outcome.booking.reference == "DC-0266"
+
+    def test_the_same_conversation_confirming_twice_gets_one_appointment(
+        self, repository: SqlAlchemyClinicRepository
+    ) -> None:
+        """A duplicate webhook, or a patient tapping send again. One row, one reference."""
+        repository.import_catalogue(TENANT, _diary(AFTERNOON), import_version="v1")
+        first = self._booked(repository)
+        second = self._booked(repository)
+
+        assert second.reason == "already_confirmed"
+        assert first.booking is not None and second.booking is not None
+        assert second.booking.reference == first.booking.reference
+        assert len(repository.list_bookings(TENANT)) == 1
+
+    def test_a_slot_somebody_else_booked_is_refused_rather_than_double_booked(
+        self, repository: SqlAlchemyClinicRepository
+    ) -> None:
+        repository.import_catalogue(TENANT, _diary(AFTERNOON), import_version="v1")
+        self._booked(repository)
+        second = self._booked(repository, conversation=OTHER_CONVERSATION)
+
+        assert second.reason == "slot_taken"
+        assert second.booking is None
+        assert len(repository.list_bookings(TENANT)) == 1
+
+    def test_a_slot_another_conversation_is_holding_is_refused(
+        self, repository: SqlAlchemyClinicRepository
+    ) -> None:
+        repository.import_catalogue(TENANT, _diary(AFTERNOON), import_version="v1")
+        repository.hold_slot(
+            TENANT,
+            slot_external_id="S00001",
+            conversation_id=OTHER_CONVERSATION,
+            until=AFTERNOON + timedelta(minutes=10),
+            now=AFTERNOON,
+        )
+        assert self._booked(repository).reason == "held_by_another"
+
+    def test_an_unknown_slot_is_an_outcome_not_an_exception(
+        self, repository: SqlAlchemyClinicRepository
+    ) -> None:
+        repository.import_catalogue(TENANT, _diary(AFTERNOON), import_version="v1")
+        outcome = repository.confirm_booking(
+            TENANT,
+            slot_external_id="S99999",
+            conversation_id=CONVERSATION,
+            reference_prefix="DC",
+        )
+        assert outcome.reason == "slot_unknown"
+
+    def test_the_buffer_stops_us_stacking_our_own_bookings_back_to_back(
+        self, repository: SqlAlchemyClinicRepository
+    ) -> None:
+        repository.import_catalogue(
+            TENANT, _diary(AFTERNOON, AFTERNOON + timedelta(minutes=45)), import_version="v1"
+        )
+        assert self._booked(repository).reason == "confirmed"
+        adjacent = repository.confirm_booking(
+            TENANT,
+            slot_external_id="S00002",
+            conversation_id=OTHER_CONVERSATION,
+            reference_prefix="DC",
+            now=AFTERNOON,
+        )
+        assert adjacent.reason == "too_close"
+
+    def test_the_buffer_is_not_applied_to_the_clinics_own_imported_diary(
+        self, repository: SqlAlchemyClinicRepository
+    ) -> None:
+        """Decision 3: the workbook is authoritative, 62 back-to-back pairs included.
+
+        Checked against the imported rows as well, the buffer would refuse most of the 407 open
+        slots — in an hourly grid nearly every one of them is adjacent to a booked one — and the
+        clinic would be told its own diary is invalid.
+        """
+        plan = _plan(
+            slots=(
+                _slot("S00001", start=AFTERNOON),
+                _slot("S00002", start=AFTERNOON + timedelta(minutes=45), status="booked"),
+            ),
+            bookings=(Booking(reference="DC-0100", slot_external_id="S00002", source="workbook"),),
+        )
+        repository.import_catalogue(TENANT, plan, import_version="v1")
+        assert self._booked(repository).reason == "confirmed"
+
+    def test_another_tenants_diary_is_invisible(
+        self, repository: SqlAlchemyClinicRepository
+    ) -> None:
+        repository.import_catalogue(TENANT, _diary(AFTERNOON), import_version="v1")
+        assert (
+            repository.available_slots(
+                OTHER_TENANT,
+                service_code="DT001",
+                branch_external_id="B01",
+                on_date=date(2026, 9, 2),
+                timezone=CAIRO,
+            )
+            == []
+        )

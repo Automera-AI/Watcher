@@ -145,6 +145,26 @@ class Settings(ChannelCredentials):
     tenant_closing: str | None = None
     tenant_closing_booking_confirmed: str | None = None
 
+    # The booking journey's wording (demo step 6). Every one of these is said while quoting or
+    # offering something real, so the neutral English defaults are correct on their own and a
+    # tenant sets them to say the same thing in its own voice. `tenant_price_quote` is the one
+    # with a rule attached rather than a preference: the vocabulary's `quoting.always_state`
+    # requires the currency, the session count and the package scope, and a template that drops
+    # `{sessions}` turns "15,000 EGP for six" into a number meaning a fifth as much treatment.
+    tenant_availability_offer: str | None = None
+    tenant_availability_none: str | None = None
+    tenant_price_quote: str | None = None
+    tenant_choose_one: str | None = None
+    tenant_booking_taken: str | None = None
+
+    # ── The clinic's booking reference prefix (demo step 6) ───────────────────────────────
+    #
+    # The letters before the serial in `DC-0042`. The clinic's own initials, so it belongs with
+    # the tenant's configuration and never in shared code — a default here would quote one
+    # client's identifier at the next. The 265 references already in the imported diary use it,
+    # and `confirm_booking` issues after the highest serial it finds under this prefix.
+    tenant_booking_reference_prefix: str = "WB"
+
     # ── Classifier tiering (addendum §8 / D8-a) ────────────────────────────────────────────
     anthropic_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
@@ -270,6 +290,11 @@ class Settings(ChannelCredentials):
             opening_named=self.tenant_greeting_opening_named,
             closing=self.tenant_closing,
             closing_booking_confirmed=self.tenant_closing_booking_confirmed,
+            availability_offer=self.tenant_availability_offer,
+            availability_none=self.tenant_availability_none,
+            price_quote=self.tenant_price_quote,
+            choose_one=self.tenant_choose_one,
+            booking_taken=self.tenant_booking_taken,
         )
 
     def database_dsn(self) -> str:

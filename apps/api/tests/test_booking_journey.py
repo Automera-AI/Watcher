@@ -1,0 +1,501 @@
+"""The booking journey, turn by turn (demo step 6).
+
+This is the demo's transactional core and the thing that did not exist: greet, close, answer from
+the knowledge base and hand off all worked, and *nothing* could check availability, quote a price,
+hold a slot or write an appointment. The tests here are written as conversations rather than as
+unit calls because every failure this step is about happens between turns — a detail agreed on one
+message and forgotten by the next, a slot offered and then given away, a "تمام" that ends the
+conversation instead of finishing it.
+
+The directory is a fake with a diary in memory. What is under test is the receptionist's decisions;
+what the *database* does under two conversations racing for one slot is ``test_clinic_repo.py``'s.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import uuid
+from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+import pytest
+from packages.intents.schema import vocabulary_for
+
+from apps.api.conversations.receptionist import handle
+from apps.api.conversations.task import Task, TaskStatus
+from apps.api.conversations.tools import (
+    REGISTRY,
+    CheckAvailability,
+    CloseConversation,
+    ConfirmBooking,
+    ConversationCopy,
+    HoldSlot,
+    QuotePrice,
+)
+from apps.api.core.clinic import (
+    AvailabilitySlot,
+    Booking,
+    BookingOutcome,
+    Branch,
+    Service,
+    booking_idempotency_key,
+)
+from apps.api.schemas.envelope import InboundTurn, OutboundAction
+
+CLINICS = vocabulary_for("clinics")
+TENANT_ID = uuid.uuid4()
+CONVERSATION = str(uuid.uuid4())
+OTHER_CONVERSATION = str(uuid.uuid4())
+CAIRO = "Africa/Cairo"
+
+#: Wednesday 2 September 2026 — the demo's own day, the one the script is written around.
+WEDNESDAY = date(2026, 9, 2)
+#: Noon Cairo on the Tuesday before it, as the classifier would see the message arrive.
+NOW = datetime(2026, 9, 1, 9, 0, tzinfo=UTC)
+
+BRANCHES = (
+    Branch(external_id="DC01", name="Maadi", area="Maadi, Cairo", aliases=("المعادي",)),
+    Branch(external_id="DC02", name="New Cairo", area="Fifth Settlement"),
+)
+SERVICES = (
+    Service(
+        code="DT001",
+        name="Basic Facial",
+        price_minor=75_000,
+        duration_minutes=45,
+        aliases=("فاشيال بيسك",),
+    ),
+    Service(code="DT002", name="Facial", price_minor=75_000, duration_minutes=45),
+    # Two of the three 12-session laser packages that all cost 16,350 in the real catalogue.
+    Service(
+        code="DT020",
+        name="Laser Full Body 12 Sessions",
+        price_minor=1_635_000,
+        duration_minutes=60,
+        session_count=12,
+    ),
+    Service(
+        code="DT021",
+        name="Laser Legs 12 Sessions",
+        price_minor=1_635_000,
+        duration_minutes=60,
+        session_count=12,
+    ),
+    Service(
+        code="DT029",
+        name="Primelase 6-Sessions",
+        price_minor=1_500_000,
+        duration_minutes=60,
+        session_count=6,
+        aliases=("برايم ليز 6 جلسات",),
+    ),
+)
+
+
+def _zone(name: str) -> ZoneInfo:
+    return ZoneInfo(name)
+
+
+def _cairo(hour: int, minute: int = 0) -> datetime:
+    """A wall-clock time on the demo's Wednesday, as an absolute moment."""
+    return datetime(2026, 9, 2, hour, minute, tzinfo=_zone(CAIRO))
+
+
+class _FakeDirectory:
+    """A clinic diary in memory, with the same three failure modes the real one has."""
+
+    def __init__(self, slots: list[AvailabilitySlot] | None = None) -> None:
+        self.slots = slots if slots is not None else _default_diary()
+        self.bookings: list[Booking] = []
+        self.holds: dict[str, tuple[str, datetime]] = {}
+        self.next_serial = 266  # the workbook's highest is DC-0265
+
+    def list_branches(self, tenant_id: str, *, active_only: bool = True) -> list[Branch]:
+        return list(BRANCHES)
+
+    def list_services(self, tenant_id: str, *, active_only: bool = True) -> list[Service]:
+        return list(SERVICES)
+
+    def available_slots(
+        self,
+        tenant_id: str,
+        *,
+        service_code: str,
+        branch_external_id: str,
+        on_date: date,
+        timezone: str,
+        now: datetime | None = None,
+        conversation_id: str | None = None,
+    ) -> list[AvailabilitySlot]:
+        at = now or NOW
+        found = []
+        for slot in self.slots:
+            if slot.service_code != service_code or slot.branch_external_id != branch_external_id:
+                continue
+            if slot.starts_at.astimezone(_zone(timezone)).date() != on_date:
+                continue
+            if slot.status == "booked":
+                continue
+            holder, until = self.holds.get(slot.external_id, (None, at))
+            if holder is not None and holder != conversation_id and until > at:
+                continue
+            found.append(slot)
+        return sorted(found, key=lambda s: s.starts_at)
+
+    def hold_slot(
+        self,
+        tenant_id: str,
+        *,
+        slot_external_id: str,
+        conversation_id: str,
+        until: datetime,
+        now: datetime | None = None,
+    ) -> bool:
+        at = now or NOW
+        holder, held_until = self.holds.get(slot_external_id, (None, at))
+        if holder is not None and holder != conversation_id and held_until > at:
+            return False
+        self.holds[slot_external_id] = (conversation_id, until)
+        return True
+
+    def confirm_booking(
+        self,
+        tenant_id: str,
+        *,
+        slot_external_id: str,
+        conversation_id: str,
+        reference_prefix: str,
+        patient_name: str | None = None,
+        patient_phone: str | None = None,
+        now: datetime | None = None,
+        buffer_minutes: int = 15,
+    ) -> BookingOutcome:
+        key = booking_idempotency_key(tenant_id, conversation_id, slot_external_id)
+        for booking in self.bookings:
+            if booking.idempotency_key == key:
+                return BookingOutcome("already_confirmed", booking)
+        slot = next((s for s in self.slots if s.external_id == slot_external_id), None)
+        if slot is None:
+            return BookingOutcome("slot_unknown")
+        if slot.status == "booked":
+            return BookingOutcome("slot_taken")
+
+        booking = Booking(
+            reference=f"{reference_prefix}-{self.next_serial:04d}",
+            slot_external_id=slot_external_id,
+            source="bot",
+            patient_name=patient_name,
+            patient_phone=patient_phone,
+            conversation_id=conversation_id,
+            idempotency_key=key,
+        )
+        self.next_serial += 1
+        self.bookings.append(booking)
+        self.take(slot_external_id)
+        return BookingOutcome("confirmed", booking)
+
+    def take(self, slot_external_id: str) -> None:
+        """Mark a slot booked behind the receptionist's back — somebody else got there first."""
+        self.slots = [
+            AvailabilitySlot(
+                external_id=s.external_id,
+                branch_external_id=s.branch_external_id,
+                service_code=s.service_code,
+                starts_at=s.starts_at,
+                ends_at=s.ends_at,
+                status="booked" if s.external_id == slot_external_id else s.status,
+            )
+            for s in self.slots
+        ]
+
+
+def _default_diary() -> list[AvailabilitySlot]:
+    return [
+        AvailabilitySlot(
+            external_id=f"S{index:05d}",
+            branch_external_id="DC01",
+            service_code="DT001",
+            starts_at=start,
+            ends_at=start + timedelta(minutes=45),
+        )
+        for index, start in enumerate((_cairo(11), _cairo(16), _cairo(18)), start=1)
+    ]
+
+
+@pytest.fixture
+def directory(monkeypatch: pytest.MonkeyPatch) -> _FakeDirectory:
+    """The four booking tools, wired to an in-memory diary for the duration of one test."""
+    fake = _FakeDirectory()
+    copy = ConversationCopy(closing_booking_confirmed="Booked ✅ ref {booking_reference}.")
+    for tool in (
+        CloseConversation(copy),
+        CheckAvailability(fake, timezone=CAIRO, copy=copy, clock=lambda: NOW),
+        QuotePrice(fake, timezone=CAIRO, copy=copy, clock=lambda: NOW),
+        HoldSlot(fake, timezone=CAIRO, copy=copy, clock=lambda: NOW),
+        ConfirmBooking(fake, timezone=CAIRO, reference_prefix="DC", copy=copy, clock=lambda: NOW),
+    ):
+        monkeypatch.setitem(REGISTRY, tool.name, tool)
+    return fake
+
+
+def _turn(text: str) -> InboundTurn:
+    return InboundTurn(
+        tenant_id=TENANT_ID,
+        channel="whatsapp",
+        channel_thread_id="thread-1",
+        channel_identity="+201000000000",
+        modality="text",
+        text=text,
+        received_at=NOW,
+        idempotency_key=f"key-{text}",
+    )
+
+
+def _say(
+    text: str,
+    intent: str,
+    slots: dict[str, str] | None = None,
+    task: Task | None = None,
+    turns_taken: int = 0,
+) -> tuple[OutboundAction, Task]:
+    return asyncio.run(
+        handle(
+            _turn(text),
+            intent,
+            0.95,
+            slots or {},
+            task,
+            vocabulary=CLINICS,
+            conversation_id=CONVERSATION,
+            turns_taken=turns_taken,
+        )
+    )
+
+
+# ── The journey ────────────────────────────────────────────────────────────────────────────
+
+
+def test_a_booking_runs_from_first_message_to_a_durable_reference(
+    directory: _FakeDirectory,
+) -> None:
+    """The whole point of step 6, in four turns.
+
+    Nothing in this sequence was possible before it: the times offered come from the diary, the
+    read-back is answered rather than repeated, and the last turn writes an appointment and says
+    the reference it was given.
+    """
+    offer, task = _say(
+        "عاوزة أحجز فاشيال بيسك في المعادي بكرة",
+        "booking_enquiry",
+        {"service": "فاشيال بيسك", "branch": "المعادي", "requested_date": "2026-09-02"},
+    )
+    assert offer.kind == "ask"
+    assert "11:00" in (offer.text or "") and "18:00" in (offer.text or "")
+
+    read_back, task = _say("الساعة ٦", "booking_enquiry", {"requested_time": "18:00"}, task)
+    assert read_back.kind == "confirm"
+    assert "Wednesday 02 September" in (read_back.text or "")
+    assert "18:00" in (read_back.text or "")
+    # Held while the patient answers, so it cannot be given away underneath them.
+    assert directory.holds["S00003"][0] == CONVERSATION
+
+    booked, task = _say("أيوه", "thanks_closing", {}, task, turns_taken=1)
+    assert booked.kind == "say"
+    assert "DC-0266" in (booked.text or "")
+    assert task.status is TaskStatus.COMPLETED
+    assert task.slots["booking_reference"] == "DC-0266"
+
+    assert [b.reference for b in directory.bookings] == ["DC-0266"]
+    assert directory.bookings[0].slot_external_id == "S00003"
+
+
+def test_the_confirmed_booking_closing_is_reachable_at_last(directory: _FakeDirectory) -> None:
+    """``closing_booking_confirmed`` has never been renderable: nothing supplied a reference.
+
+    It is the one piece of tenant copy that can lie — it states an appointment exists — so this
+    is also the test that the precondition is real rather than decorative.
+    """
+    task = Task(intent="thanks_closing", slots={"booking_reference": "DC-0266"}, vocabulary=CLINICS)
+    action, _task = _say("شكراً", "thanks_closing", {}, task)
+    assert action.text == "Booked ✅ ref DC-0266."
+
+
+def test_tamam_finishes_the_booking_instead_of_ending_the_conversation(
+    directory: _FakeDirectory,
+) -> None:
+    """The failure the handoff calls the most likely one on demo day.
+
+    "تمام" classifies as ``thanks_closing`` — correctly, most of the time. Mid-read-back it means
+    *yes, go ahead*, and before the dialogue-state rule the receptionist abandoned the booking and
+    said goodbye to somebody one word from an appointment.
+    """
+    task = _complete_task()
+    action, task = _say("تمام", "thanks_closing", {}, task, turns_taken=1)
+
+    assert task.intent == "booking_enquiry"
+    assert action.kind == "say"
+    assert "DC-0266" in (action.text or "")
+
+
+def test_a_thank_you_after_the_booking_still_closes_the_conversation(
+    directory: _FakeDirectory,
+) -> None:
+    """The rule is narrow on purpose: away from a pending read-back, "تمام" still says goodbye."""
+    done = Task(
+        intent="booking_enquiry",
+        slots=_booked_slots(),
+        confirmed=set(_booked_slots()),
+        vocabulary=CLINICS,
+    )
+    action, task = _say("تمام شكراً", "thanks_closing", {}, done)
+    assert task.intent == "thanks_closing"
+    assert action.kind == "say"
+
+
+def test_saying_no_to_the_read_back_changes_nothing_and_asks(directory: _FakeDirectory) -> None:
+    """A refusal agrees to nothing and guesses nothing about which detail was wrong."""
+    task = _complete_task()
+    action, task = _say("لا", "thanks_closing", {}, task, turns_taken=1)
+
+    assert action.kind == "ask"
+    assert task.confirmed == set()
+    assert directory.bookings == []
+
+
+def test_changing_a_detail_withdraws_the_agreement_to_it(directory: _FakeDirectory) -> None:
+    """``absorb`` already dropped a confirmation when a value changed; now there is one to drop."""
+    task = _complete_task()
+    task.agree()
+    assert task.unconfirmed == []
+
+    task.absorb({"requested_time": "16:00"})
+    assert "requested_time" in task.unconfirmed
+
+
+def test_a_slot_taken_between_the_read_back_and_the_yes_is_not_booked_anyway(
+    directory: _FakeDirectory,
+) -> None:
+    """The race the whole hold-and-confirm sequence exists for.
+
+    The patient agreed to 18:00 and 18:00 has gone. What must not happen is an appointment at
+    some other time, confirmed as though it were the one they chose.
+    """
+    task = _complete_task()
+    directory.take("S00003")
+
+    action, task = _say("أيوه", "thanks_closing", {}, task, turns_taken=1)
+
+    assert directory.bookings == []
+    assert action.kind == "ask"
+    assert "11:00" in (action.text or "")
+    assert "requested_time" not in task.slots
+
+
+def test_a_day_with_nothing_free_is_answered_rather_than_handed_off(
+    directory: _FakeDirectory,
+) -> None:
+    """ "There is nothing on Thursday" is a real answer to a real question."""
+    action, _task = _say(
+        "احجزيلي فاشيال بيسك في المعادي الخميس",
+        "booking_enquiry",
+        {"service": "فاشيال بيسك", "branch": "المعادي", "requested_date": "2026-09-03"},
+    )
+    assert action.kind == "ask"
+    assert "nothing free" in (action.text or "")
+
+
+def test_two_services_a_patient_cannot_tell_apart_are_asked_about_never_chosen(
+    directory: _FakeDirectory,
+) -> None:
+    """ "Basic Facial" and "Facial" are both 750 for 45 minutes.
+
+    Picking one quotes a real price for a treatment nobody asked about, and the matching price is
+    what makes it invisible.
+    """
+    action, _task = _say("الليزر ١٢ جلسة بكام؟", "price_enquiry", {"service": "laser 12"})
+    assert action.kind == "ask"
+    assert "Laser Full Body 12 Sessions" in (action.text or "")
+    assert "Laser Legs 12 Sessions" in (action.text or "")
+
+
+def test_a_quote_states_the_currency_and_the_session_count(directory: _FakeDirectory) -> None:
+    """``quoting.always_state``. One Primelase session is 3,100 and six are 15,000.
+
+    Both are true prices for "Primelase", so a quote that omits which one it is is not imprecise —
+    it is wrong by a factor of five, and the patient finds out at the counter.
+    """
+    action, _task = _say(
+        "الباكدج الست جلسات بكام؟", "price_enquiry", {"service": "برايم ليز 6 جلسات"}
+    )
+    assert action.kind == "say"
+    assert "15,000 EGP" in (action.text or "")
+    assert "6 sessions" in (action.text or "")
+
+
+def test_availability_is_answered_with_times_the_diary_actually_holds(
+    directory: _FakeDirectory,
+) -> None:
+    action, _task = _say(
+        "في مواعيد فاضية للفاشيال في المعادي بكرة؟",
+        "availability_check",
+        {"service": "فاشيال بيسك", "branch": "المعادي", "requested_date": "2026-09-02"},
+    )
+    assert action.kind == "say"
+    for offered in ("11:00", "16:00", "18:00"):
+        assert offered in (action.text or "")
+
+
+def test_confirming_twice_gives_the_same_appointment_back(directory: _FakeDirectory) -> None:
+    """A duplicate delivery must not produce a second appointment or a second reference.
+
+    Asserted on the tool rather than on a replayed conversation, because that is where the
+    guarantee lives: the key is (tenant, conversation, slot), and the database holds it as a unique
+    constraint (``test_clinic_repo.py``). The receptionist never gets that far on a replay — the
+    slot is booked by then, and it re-offers what is left rather than confirming anything twice.
+    """
+    tool = REGISTRY["confirm_booking"]
+    first = asyncio.run(
+        tool.run(
+            tenant_id=str(TENANT_ID),
+            conversation_id=CONVERSATION,
+            slot_external_id="S00003",
+        )
+    )
+    second = asyncio.run(
+        tool.run(
+            tenant_id=str(TENANT_ID),
+            conversation_id=CONVERSATION,
+            slot_external_id="S00003",
+        )
+    )
+
+    assert len(directory.bookings) == 1
+    assert first.data is not None and second.data is not None
+    assert second.data["booking_reference"] == first.data["booking_reference"] == "DC-0266"
+    assert second.data["already_confirmed"] is True
+
+
+def test_without_the_clinic_tools_a_booking_still_hands_off_rather_than_claiming_success() -> None:
+    """A holiday-home deploy, or a worker process that never called ``configure_clinic``.
+
+    The names are simply absent from the registry, and an unbuilt terminal tool is a hand-off —
+    the step 0 behaviour, unchanged.
+    """
+    task = _complete_task()
+    action, task = _say("أيوه", "thanks_closing", {}, task, turns_taken=1)
+    assert action.kind == "handoff"
+    assert task.status is TaskStatus.HANDED_OFF
+
+
+def _booked_slots() -> dict[str, str]:
+    return {
+        "service": "فاشيال بيسك",
+        "branch": "المعادي",
+        "requested_date": "2026-09-02",
+        "requested_time": "18:00",
+    }
+
+
+def _complete_task() -> Task:
+    """A booking task with everything collected and the read-back outstanding."""
+    return Task(intent="booking_enquiry", slots=_booked_slots(), vocabulary=CLINICS)

@@ -1,4 +1,4 @@
-"""Persistence for the clinic catalogue and diary (demo steps 3–4).
+"""Persistence for the clinic catalogue and diary (demo steps 3–6).
 
 The write side is one method — :meth:`SqlAlchemyClinicRepository.import_catalogue` — and it is the
 only thing that turns a validated :class:`~apps.api.clinic.importer.CataloguePlan` into rows. Three
@@ -20,6 +20,14 @@ where the workbook is *not* authoritative, and it is deliberate: decision 2 make
 source of truth for the clinic's hours and its own diary, not for appointments made after it was
 exported.
 
+**Step 6 adds the write side of a conversation**, and it obeys one rule the import does not: it
+never decides anything it can lose a race on. :meth:`SqlAlchemyClinicRepository.hold_slot` is a
+conditional ``UPDATE`` and reads its own row count; :meth:`confirm_booking` inserts against the
+``(tenant, slot)`` and ``(tenant, idempotency_key)`` constraints and treats the integrity error as
+an answer rather than a failure. Two patients messaging about the last 18:00 at the same moment is
+not a hypothetical on a demo where one number is handed round a room, and "check then write" would
+tell both of them they have it.
+
 Rows the plan does not mention are never deleted. Branches and services absent from it are
 deactivated (``active=False``), which is what the read paths already filter on; slots absent from
 it are left alone and counted, because deleting a slot silently deletes any booking argument about
@@ -31,19 +39,26 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
+from sqlalchemy.engine import CursorResult
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from apps.api.clinic.importer import CataloguePlan
 from apps.api.core.clinic import (
+    BOOKING_BUFFER_MINUTES,
     AvailabilitySlot,
     Booking,
+    BookingOutcome,
+    BookingReference,
     BookingSource,
     Branch,
     Service,
     SlotStatus,
+    booking_idempotency_key,
 )
 from apps.api.db.engine import TenantScope
 from apps.api.db.models import (
@@ -174,6 +189,7 @@ class SqlAlchemyClinicRepository:
             row.address = branch.address
             row.phone = branch.phone
             row.timezone = branch.timezone
+            row.aliases = list(branch.aliases)
             row.placeholder = branch.placeholder
             row.active = branch.active
             row.import_version = import_version
@@ -257,8 +273,12 @@ class SqlAlchemyClinicRepository:
                 session.add(row)
             row.branch_id = branch_ids[slot.branch_external_id]
             row.service_id = service_ids[slot.service_code]
-            row.starts_at = slot.starts_at
-            row.ends_at = slot.ends_at
+            # Stored in UTC, always. The importer builds these in the clinic's own zone, and a
+            # backend that keeps the offset it was handed (Postgres) and one that compares the
+            # wall clock as text (SQLite) disagree about which day a 00:30 Cairo slot falls on —
+            # so the disagreement is removed here rather than tested around.
+            row.starts_at = slot.starts_at.astimezone(UTC)
+            row.ends_at = slot.ends_at.astimezone(UTC)
             row.status = slot.status
             row.import_version = import_version
             row.imported_at = stamped_at
@@ -356,6 +376,7 @@ class SqlAlchemyClinicRepository:
                     address=row.address,
                     phone=row.phone,
                     timezone=row.timezone,
+                    aliases=tuple(row.aliases),
                     placeholder=row.placeholder,
                     active=row.active,
                 )
@@ -436,6 +457,292 @@ class SqlAlchemyClinicRepository:
                 for row, slot_key in session.execute(statement)
             ]
 
+    # ── the booking journey (demo step 6) ──────────────────────────────────────────────────
+
+    def available_slots(
+        self,
+        tenant_id: str,
+        *,
+        service_code: str,
+        branch_external_id: str,
+        on_date: date,
+        timezone: str,
+        now: datetime | None = None,
+        conversation_id: str | None = None,
+    ) -> list[AvailabilitySlot]:
+        """Open slots for one service at one branch on one local day, earliest first.
+
+        ``on_date`` is a *local* calendar day and the stored times are absolute, so the day is
+        turned into an interval in the tenant's zone before it touches the query. Doing it the
+        other way round — comparing a stored UTC timestamp's date against a local date — is how a
+        20:00 appointment in Cairo is offered as tomorrow's.
+
+        A slot **held by this conversation is still available to it**. Otherwise a patient who is
+        offered 18:00, is asked to confirm, and says yes is told the slot they were just offered is
+        gone, by the hold that was placed to keep it for them. An expired hold is available to
+        anybody: nothing sweeps them, so the expiry is read rather than enforced by a job that
+        might not be running.
+        """
+        zone = ZoneInfo(timezone)
+        # The local day, expressed in UTC — the same representation the rows are stored in. See
+        # ``_write_slots``: comparing a stored UTC value against a Cairo-offset bound is a text
+        # comparison on SQLite and an instant comparison on Postgres, and only one of them puts a
+        # 00:30 Cairo slot on the right day.
+        day_start = datetime.combine(on_date, time.min, tzinfo=zone).astimezone(UTC)
+        day_end = day_start + timedelta(days=1)
+        at = now or datetime.now(UTC)
+        held_by_me = uuid.UUID(conversation_id) if conversation_id else None
+
+        tenant = uuid.UUID(tenant_id)
+        with self._scope(tenant_id) as session:
+            statement = (
+                select(ClinicAvailabilitySlot, ClinicBranch.external_id, ClinicService.code)
+                .join(ClinicBranch, ClinicBranch.id == ClinicAvailabilitySlot.branch_id)
+                .join(ClinicService, ClinicService.id == ClinicAvailabilitySlot.service_id)
+                .where(
+                    ClinicAvailabilitySlot.tenant_id == tenant,
+                    ClinicBranch.external_id == branch_external_id,
+                    ClinicService.code == service_code,
+                    ClinicAvailabilitySlot.starts_at >= day_start,
+                    ClinicAvailabilitySlot.starts_at < day_end,
+                    ClinicAvailabilitySlot.status != "booked",
+                    or_(
+                        ClinicAvailabilitySlot.status == "open",
+                        ClinicAvailabilitySlot.held_until.is_(None),
+                        ClinicAvailabilitySlot.held_until <= at,
+                        ClinicAvailabilitySlot.held_by_conversation_id == held_by_me,
+                    ),
+                )
+                .order_by(ClinicAvailabilitySlot.starts_at, ClinicAvailabilitySlot.external_id)
+            )
+            return [
+                AvailabilitySlot(
+                    external_id=row.external_id,
+                    branch_external_id=branch_key,
+                    service_code=service_code_read,
+                    starts_at=_aware(row.starts_at),
+                    ends_at=_aware(row.ends_at),
+                    status=_slot_status(row.status),
+                )
+                for row, branch_key, service_code_read in session.execute(statement)
+            ]
+
+    def hold_slot(
+        self,
+        tenant_id: str,
+        *,
+        slot_external_id: str,
+        conversation_id: str,
+        until: datetime,
+        now: datetime | None = None,
+    ) -> bool:
+        """Reserve a slot for one conversation until ``until``. ``False`` if somebody else has it.
+
+        One conditional ``UPDATE`` whose ``WHERE`` clause *is* the check, and the row count is the
+        answer. Reading the slot and then writing it would leave a window between the two in which
+        the other conversation's hold lands, and both patients get offered the same 18:00.
+
+        Re-holding a slot this conversation already holds extends the hold rather than failing —
+        the patient is still in the same conversation about the same appointment, and a hold that
+        expires while they are typing their name is a worse outcome than one that lasts a little
+        longer than intended.
+        """
+        at = now or datetime.now(UTC)
+        conversation = uuid.UUID(conversation_id)
+        with self._scope(tenant_id) as session:
+            result = session.execute(
+                update(ClinicAvailabilitySlot)
+                .where(
+                    ClinicAvailabilitySlot.tenant_id == uuid.UUID(tenant_id),
+                    ClinicAvailabilitySlot.external_id == slot_external_id,
+                    ClinicAvailabilitySlot.status != "booked",
+                    or_(
+                        ClinicAvailabilitySlot.status == "open",
+                        ClinicAvailabilitySlot.held_until.is_(None),
+                        ClinicAvailabilitySlot.held_until <= at,
+                        ClinicAvailabilitySlot.held_by_conversation_id == conversation,
+                    ),
+                )
+                .values(status="held", held_until=until, held_by_conversation_id=conversation)
+            )
+            session.commit()
+            # `Session.execute` is typed as returning `Result`, which has no row count; a DML
+            # statement always returns a `CursorResult`, which does. Narrowed rather than ignored
+            # so the assumption is written down where it is made.
+            assert isinstance(result, CursorResult)
+            return bool(result.rowcount)
+
+    def confirm_booking(
+        self,
+        tenant_id: str,
+        *,
+        slot_external_id: str,
+        conversation_id: str,
+        reference_prefix: str,
+        patient_name: str | None = None,
+        patient_phone: str | None = None,
+        now: datetime | None = None,
+        buffer_minutes: int = BOOKING_BUFFER_MINUTES,
+    ) -> BookingOutcome:
+        """Turn a held slot into an appointment, once, whatever happens twice.
+
+        The order of the checks is the order in which they can be wrong. Idempotency first, so a
+        retry never reaches the rest of this at all. Then the slot's own state, then the buffer,
+        and only then a write — which is still guarded, because everything above this line is a
+        read and the row can change underneath it. ``IntegrityError`` on the unique constraints is
+        the real answer, not a failure: whoever else got there is holding the appointment.
+        """
+        at = now or datetime.now(UTC)
+        tenant = uuid.UUID(tenant_id)
+        key = booking_idempotency_key(tenant_id, conversation_id, slot_external_id)
+
+        with self._scope(tenant_id) as session:
+            existing = self._booking_by_key(session, tenant, key)
+            if existing is not None:
+                return BookingOutcome("already_confirmed", existing)
+
+            slot = session.execute(
+                select(ClinicAvailabilitySlot).where(
+                    ClinicAvailabilitySlot.tenant_id == tenant,
+                    ClinicAvailabilitySlot.external_id == slot_external_id,
+                )
+            ).scalar_one_or_none()
+            if slot is None:
+                return BookingOutcome("slot_unknown")
+            if slot.status == "booked":
+                return BookingOutcome("slot_taken")
+            if (
+                slot.held_by_conversation_id is not None
+                and slot.held_by_conversation_id != uuid.UUID(conversation_id)
+                and slot.held_until is not None
+                and _aware(slot.held_until) > at
+            ):
+                return BookingOutcome("held_by_another")
+            if self._too_close_to_another_booking(session, tenant, slot, buffer_minutes):
+                return BookingOutcome("too_close")
+
+            row = ClinicBooking(
+                tenant_id=tenant,
+                reference=str(self._next_reference(session, tenant, reference_prefix)),
+                slot_id=slot.id,
+                patient_name=patient_name,
+                patient_phone=patient_phone,
+                status="confirmed",
+                source="bot",
+                conversation_id=uuid.UUID(conversation_id),
+                idempotency_key=key,
+            )
+            session.add(row)
+            slot.status = "booked"
+            slot.held_until = None
+            slot.held_by_conversation_id = None
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                # Somebody committed between the reads above and this write. Whichever constraint
+                # caught it, the honest answer is the state that is now in the table.
+                already = self._booking_by_key(session, tenant, key)
+                if already is not None:
+                    return BookingOutcome("already_confirmed", already)
+                return BookingOutcome("slot_taken")
+
+            return BookingOutcome(
+                "confirmed",
+                Booking(
+                    reference=row.reference,
+                    slot_external_id=slot_external_id,
+                    source="bot",
+                    patient_name=patient_name,
+                    patient_phone=patient_phone,
+                    conversation_id=conversation_id,
+                    idempotency_key=key,
+                ),
+            )
+
+    @staticmethod
+    def _booking_by_key(session: Session, tenant: uuid.UUID, key: str) -> Booking | None:
+        found = session.execute(
+            select(ClinicBooking, ClinicAvailabilitySlot.external_id)
+            .join(ClinicAvailabilitySlot, ClinicAvailabilitySlot.id == ClinicBooking.slot_id)
+            .where(ClinicBooking.tenant_id == tenant, ClinicBooking.idempotency_key == key)
+        ).first()
+        if found is None:
+            return None
+        row, slot_key = found
+        return Booking(
+            reference=row.reference,
+            slot_external_id=slot_key,
+            source=_booking_source(row.source),
+            patient_name=row.patient_name,
+            patient_phone=row.patient_phone,
+            status="cancelled" if row.status == "cancelled" else "confirmed",
+            conversation_id=str(row.conversation_id) if row.conversation_id else None,
+            idempotency_key=row.idempotency_key,
+            notes=row.notes,
+        )
+
+    @staticmethod
+    def _too_close_to_another_booking(
+        session: Session,
+        tenant: uuid.UUID,
+        slot: ClinicAvailabilitySlot,
+        buffer_minutes: int,
+    ) -> bool:
+        """Whether ``slot`` leaves less than the buffer clear of an appointment *this system made*.
+
+        **The buffer is checked against our own bookings, never against the imported diary**, and
+        that is the only reading of the two client decisions that leaves the demo bookable.
+        Decision 3 makes the workbook authoritative for what is already in the diary, 62
+        back-to-back pairs included — every 60-minute service in an hourly grid. The buffer
+        constrains *new* bookings. Applied against the imported rows as well, it would refuse most
+        of the 407 open slots, because in an hourly grid nearly every one of them is adjacent to a
+        booked one; the clinic would be told its own diary is invalid.
+
+        So: the clinic's exported diary stands exactly as exported, and what this system adds to it
+        does not stack back-to-back against what this system already added. **The client has not
+        been asked to confirm this reading** — it is recorded in the handoff as a decision to put
+        to them.
+        """
+        if buffer_minutes <= 0:
+            return False
+        gap = timedelta(minutes=buffer_minutes)
+        window_start = _aware(slot.starts_at) - gap
+        window_end = _aware(slot.ends_at) + gap
+        neighbours = session.execute(
+            select(ClinicAvailabilitySlot)
+            .join(ClinicBooking, ClinicBooking.slot_id == ClinicAvailabilitySlot.id)
+            .where(
+                ClinicAvailabilitySlot.tenant_id == tenant,
+                ClinicAvailabilitySlot.branch_id == slot.branch_id,
+                ClinicAvailabilitySlot.id != slot.id,
+                ClinicBooking.source != "workbook",
+                ClinicBooking.status == "confirmed",
+            )
+        ).scalars()
+        return any(
+            _aware(other.starts_at) < window_end and window_start < _aware(other.ends_at)
+            for other in neighbours
+        )
+
+    @staticmethod
+    def _next_reference(session: Session, tenant: uuid.UUID, prefix: str) -> BookingReference:
+        """The reference after the highest one this tenant has issued under ``prefix``.
+
+        Read from the table rather than a counter, because the 265 references the workbook brought
+        in are references this clinic has already given to patients — issuing ``DC-0001`` again
+        would hand a new patient a number somebody else is holding.
+        """
+        taken = session.execute(
+            select(ClinicBooking.reference).where(ClinicBooking.tenant_id == tenant)
+        ).scalars()
+        highest = 0
+        for reference in taken:
+            parsed = BookingReference.match(reference)
+            if parsed is not None and parsed.prefix == prefix.upper():
+                highest = max(highest, parsed.serial)
+        return BookingReference(prefix=prefix.upper(), serial=highest + 1)
+
 
 def _slot_status(value: str) -> SlotStatus:
     """Narrow a stored status to the domain's. Anything unrecognised reads as booked.
@@ -452,3 +759,14 @@ def _booking_source(value: str) -> BookingSource:
     row rather than overwrite it — the safe way to be wrong about where a booking came from.
     """
     return "workbook" if value == "workbook" else "staff" if value == "staff" else "bot"
+
+
+def _aware(value: datetime) -> datetime:
+    """A stored timestamp as an absolute time.
+
+    SQLite gives back what it was given, without the zone; Postgres gives back an aware value. The
+    columns are ``DateTime(timezone=True)`` and everything written to them is UTC, so reading a
+    naive value as UTC is reading it as what it is — and it keeps the comparisons in this module
+    from raising on one backend and passing on the other.
+    """
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)

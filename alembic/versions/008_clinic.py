@@ -15,6 +15,13 @@ Foreign keys are declared inline in ``create_table`` rather than added afterward
 lets them exist on SQLite too — 006 had to make its FK Postgres-only only because it was altering
 an existing table, and SQLite has no ``ALTER`` for constraints.
 
+``clinic_branches.aliases`` is step 6's, added here rather than in a 009 for the same reason
+``held_until`` is here: 008 is not applied anywhere yet (007 is the deployed head), and a second
+migration adding one column to a table no deployment has is a deploy for nothing. It is what lets
+a patient say "المعادي" and reach the branch the workbook calls "Maadi" — the catalogue and the
+branch list are written in English and the demo's patients are not, so the Arabic each one answers
+to is data the clinic writes down rather than a dictionary in this repository.
+
 The three uniqueness constraints on ``clinic_bookings`` are load-bearing and are described where
 they are declared in ``apps/api/db/models.py``. The short version: one appointment per slot, one
 reference per tenant, and one row per (tenant, conversation, slot) idempotency key so a retried
@@ -60,6 +67,7 @@ def upgrade() -> None:
         sa.Column("address", sa.Text(), nullable=True),
         sa.Column("phone", sa.String(length=32), nullable=True),
         sa.Column("timezone", sa.String(length=64), nullable=True),
+        sa.Column("aliases", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
         sa.Column("placeholder", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("import_version", sa.String(length=64), nullable=True),

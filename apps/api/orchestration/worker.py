@@ -90,6 +90,7 @@ class Receptionist(Protocol):
         emergency: bool,
         turns_taken: int,
         vocabulary: Vocabulary | None,
+        conversation_id: str | None,
     ) -> tuple[OutboundAction, Task]: ...
 
 
@@ -445,6 +446,7 @@ class Orchestrator:
             emergency=False,
             turns_taken=state.replies_sent,
             vocabulary=self._vocabulary,
+            conversation_id=state.conversation_id,
         )
 
         # Recorded before it is sent, deliberately. A reply we sent but did not record makes us

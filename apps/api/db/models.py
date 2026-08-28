@@ -429,6 +429,7 @@ class ClinicBranch(TimestampedTenantBase):
     address: Mapped[str | None] = mapped_column(Text, default=None)
     phone: Mapped[str | None] = mapped_column(String(32), default=None)
     timezone: Mapped[str | None] = mapped_column(String(64), default=None)
+    aliases: Mapped[list[str]] = mapped_column(JSON, default=list)
     placeholder: Mapped[bool] = mapped_column(Boolean, default=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     import_version: Mapped[str | None] = mapped_column(String(64), default=None)

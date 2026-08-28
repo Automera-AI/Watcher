@@ -27,8 +27,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Literal, Self
+from datetime import date, datetime
+from typing import Literal, Protocol, Self
 
 from apps.api.core.emergency import normalise
 
@@ -132,8 +132,20 @@ class Branch:
     address: str | None = None
     phone: str | None = None
     timezone: str | None = None
+    aliases: tuple[str, ...] = ()
     placeholder: bool = False
     active: bool = True
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        """Every name this branch answers to, canonical first — the same shape ``Service`` has.
+
+        The workbook writes branch names in English ("Maadi") and the demo's patients write
+        Egyptian Arabic ("المعادي"). Neither is more correct, and translating one into the other in
+        code would put a guess about a place name in shared source. The aliases come from the
+        clinic's own file, so the Arabic a branch answers to is something the client wrote.
+        """
+        return (self.name, *self.aliases)
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,6 +238,89 @@ class Booking:
     #: Kept out of equality: two bookings of the same slot by the same conversation are the same
     #: booking whatever the notes say.
     notes: str | None = field(default=None, compare=False)
+
+
+#: Why a confirmation did or did not produce an appointment. Every one of these is a sentence the
+#: receptionist has to be able to say, which is why they are named outcomes rather than exceptions:
+#: "someone else just took it" is ordinary, expected, and not an error anybody should be paged for.
+BookingRefusal = Literal[
+    "confirmed",
+    "already_confirmed",
+    "slot_unknown",
+    "slot_taken",
+    "held_by_another",
+    "too_close",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class BookingOutcome:
+    """What one confirmation did, and the appointment if there is one.
+
+    ``already_confirmed`` carries a booking too, and that is the point of the idempotency key: the
+    same conversation confirming the same slot twice — a duplicate webhook, a patient tapping send
+    again — is told about the appointment it already has, with the reference it was already given,
+    rather than being given a second one.
+    """
+
+    reason: BookingRefusal
+    booking: Booking | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.booking is not None
+
+
+class ClinicDirectory(Protocol):
+    """What the booking tools need from persistence, and nothing more.
+
+    The same seam ``KnowledgeLookup`` is for the facts table: ``conversations/tools.py`` is where a
+    receptionist's capabilities live and it has no business importing SQLAlchemy, and a test of
+    "what does Nada say when the last 18:00 goes" should not need a database to answer it.
+
+    Every method is tenant-scoped by its first argument, because the adapter behind this opens a
+    session per call under the tenant's RLS role (B2) rather than holding one open across a
+    conversation.
+    """
+
+    def list_branches(self, tenant_id: str, *, active_only: bool = True) -> list[Branch]: ...
+
+    def list_services(self, tenant_id: str, *, active_only: bool = True) -> list[Service]: ...
+
+    def available_slots(
+        self,
+        tenant_id: str,
+        *,
+        service_code: str,
+        branch_external_id: str,
+        on_date: date,
+        timezone: str,
+        now: datetime | None = None,
+        conversation_id: str | None = None,
+    ) -> list[AvailabilitySlot]: ...
+
+    def hold_slot(
+        self,
+        tenant_id: str,
+        *,
+        slot_external_id: str,
+        conversation_id: str,
+        until: datetime,
+        now: datetime | None = None,
+    ) -> bool: ...
+
+    def confirm_booking(
+        self,
+        tenant_id: str,
+        *,
+        slot_external_id: str,
+        conversation_id: str,
+        reference_prefix: str,
+        patient_name: str | None = None,
+        patient_phone: str | None = None,
+        now: datetime | None = None,
+        buffer_minutes: int = BOOKING_BUFFER_MINUTES,
+    ) -> BookingOutcome: ...
 
 
 def booking_idempotency_key(tenant_id: str, conversation_id: str, slot_external_id: str) -> str:

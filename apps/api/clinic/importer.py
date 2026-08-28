@@ -196,6 +196,11 @@ BRANCH_COLUMNS: ColumnMap = {
     "address": ("address", "location"),
     "phone": ("phone", "telephone", "mobile", "contact", "branch phone"),
     "timezone": ("timezone", "time zone", "tz"),
+    # The other names this branch answers to, semicolon- or comma-separated, exactly as
+    # ``SERVICE_COLUMNS`` takes them for a service. This is where the Arabic a patient actually
+    # types lives: the sheet writes "Maadi" and a patient writes "المعادي", and the mapping
+    # between them is the clinic's to write down rather than this repository's to guess.
+    "aliases": ("aliases", "alias", "also known as", "other names", "arabic"),
     "placeholder": ("placeholder", "is placeholder", "tbc", "provisional"),
     # The workbook records provenance per branch — "real example", "given", "placeholder" — and
     # that column, not a heuristic over missing fields, is what sets ``Branch.placeholder``.
@@ -530,6 +535,7 @@ def _plan_branches(rows: Sequence[Row], issues: list[ImportIssue]) -> dict[str, 
             address=_text(row, "address"),
             phone=_text(row, "phone"),
             timezone=_text(row, "timezone"),
+            aliases=_split_aliases(_text(row, "aliases")),
             placeholder=_is_placeholder(row, source),
             active=_flag(row, "active", default=True),
         )

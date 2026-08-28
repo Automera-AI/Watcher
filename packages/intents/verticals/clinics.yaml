@@ -36,7 +36,7 @@
 # precedence, answers all safe read-only parts, and continues one mutating flow at a time. This is
 # not represented as a catch-all multi-intent label because doing so would lose the terminal tools.
 
-version: "2.1.0"
+version: "2.2.0"
 vertical: clinics
 markets: [EG]
 # Retain the shared schema's existing external-user enum. In this vertical, "guest" means a
@@ -367,8 +367,12 @@ intents:
       without identifying a particular practitioner. Opening hours are not proof that an appointment
       is available. General practitioner coverage uses practitioner_availability; an explicitly
       identified practitioner uses named_practitioner_request and goes to a person.
-    required_slots: [service, branch]
-    optional_slots: [requested_date, requested_time, customer_name]
+    # The day is required, not optional: the scheduling system is asked for one branch, one
+    # service and one date, and "do you have anything for laser" with no day names 672 slots
+    # across a week. Asking which day is a good turn; guessing today is the one day the demo has
+    # nothing to offer (decision 1, same-day dropped).
+    required_slots: [service, branch, requested_date]
+    optional_slots: [requested_time, customer_name]
     terminal_tool: check_availability
     max_autonomy: act
     needs_verified_identity: false
@@ -476,8 +480,12 @@ intents:
       consultation remains booking, unless the message also asks for assessment or advice or has
       an urgent or emergency sign. The flow ends only after explicit patient confirmation and a
       durable reference.
-    required_slots: [service, branch, requested_date]
-    optional_slots: [requested_time, customer_name, phone, treatment_area]
+    # The time joins the other three as required, because there is no such thing as booking a
+    # patient into a day. It is collected by *offering* what the diary actually holds rather than
+    # by asking an open question — see ``conversations/receptionist.py`` — which is also how the
+    # first ``never`` below is kept: a slot the patient chooses is one the system returned.
+    required_slots: [service, branch, requested_date, requested_time]
+    optional_slots: [customer_name, phone, treatment_area]
     confirm_before_acting: [service, branch, requested_date, requested_time, phone]
     terminal_tool: confirm_booking
     max_autonomy: act
