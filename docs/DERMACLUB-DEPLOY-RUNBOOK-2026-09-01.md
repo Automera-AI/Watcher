@@ -5,12 +5,17 @@ Render, the demo database, the WhatsApp number — so it is written to be execut
 has them, in order, with the check that proves each step landed.
 
 Every command was run locally against the committed workbook and a throwaway database before it was
-written down. What has **not** been done, and cannot be from a repository session, is anything that
-touches Render or the live number: §2, §3, §4 and §6 are unexecuted.
+written down.
+
+> **§1–§4 were executed on 28 August 2026** from a session holding Render and Supabase access —
+> see §8 for what was done, what it cost, and the two things it found. **§6, the rehearsal on the
+> live number, is still unexecuted**: it needs a phone, and nothing in a repository session has one.
 
 ---
 
 ## 0. What is already true
+
+*As this document was first written, 28 August. §8 records what changed.*
 
 | | |
 |---|---|
@@ -289,3 +294,92 @@ Nada re-offers what is free — but it costs a turn in front of the client.
 
 **Rollback** is the previous Render deploy. The migrations do not need reverting — 007 and 008 only
 add tables and columns nothing older reads.
+
+---
+
+## 8. Execution record — 28 August 2026
+
+§1–§4 were worked in order from a session holding Render and Supabase access. §5.1 was re-run
+afterwards. **§6 was not done and cannot be from here** — it needs a phone.
+
+| § | Done | Check that proved it |
+|---|---|---|
+| 1 | Already merged as `a9fb58e` (PR #37); both services were live on it | `watcher-api` and `watcher-worker` both report the same commit |
+| 2 | 007 then 008 applied | `alembic_version` → `008_clinic`; all four clinic tables RLS **enabled and forced**, one `tenant_isolation` policy each, `anon` revoked |
+| 3 | All 14 variables set on **both** services | Both services boot: `Application startup complete.` and `Starting worker for 1 functions: consume_message` |
+| 4 | Workbook imported for tenant `11111111-1111-4111-8111-111111111111` | 14 branches, 35 services, 672 slots, 265 bookings; open=407; highest reference `DC-0265` — the §4 figures exactly |
+| 5.1 | Re-run | 965 passed / 2 skipped; ruff and mypy clean; journeys **9/9, 17/17** on both label sources, one declared gap; aliases **23 resolved / 1 asks / 0 reach nothing** |
+
+Two details of *how*, because they are not what §2 and §4 describe and the next operator should not
+be surprised:
+
+* **There is no Render Postgres.** The database is the Supabase project `watcher-prod`
+  (`qjpjxspycuafqqgudsiv`), and it takes no connection from outside — direct 5432 is IPv6-only and
+  the poolers are unreachable from a sandbox. So neither `alembic upgrade head` nor
+  `import_clinic_workbook.py --apply` could be pointed at it.
+* **Both were therefore run offline and their output replayed.** The migration SQL is
+  `alembic upgrade 006_properties:head --sql` verbatim; the catalogue is what the real importer
+  wrote to a local Postgres built by the same migrations. Both were checked rather than trusted —
+  the applied schema hashes identically to a clean `alembic upgrade head` (101 signature lines
+  covering columns, constraints, indexes, RLS and policies), and the 986 imported rows hash
+  identically to the importer's own output. Neither is a re-implementation; both are a transfer.
+
+### 8.1 What it found
+
+1. **`TENANT_URGENT_CONTACT` was not in Render.** §3.1 and §6 of the 27 August handoff both say the
+   full value was already there. It was not set on either service, and because
+   `TENANT_EMERGENCY_REPLY` contains `{contact}`, `tenant_policy()` refuses to build without it —
+   so setting `TENANT_VERTICAL=clinics` took *both* services down until the number was supplied.
+   It is now set on both. **If this deployment is ever rebuilt, that variable is not optional and
+   is not recoverable from this repository.**
+2. **`unclaimed_deliveries` was readable by Supabase's `anon` role.** Migration 007 creates it with
+   no RLS and no `REVOKE`, unlike 004, 005, 006 and 008 — and on Supabase, `ALTER DEFAULT
+   PRIVILEGES` grants `anon` SELECT on new `public` tables, which PostgREST exposes to anyone
+   holding the publishable key. That table holds the full inbound webhook payload for any delivery
+   whose endpoint could not be resolved. It was the only such table in the database. Closed by hand
+   with `REVOKE ALL ON unclaimed_deliveries FROM anon, authenticated;` — which leaves `watcher_app`
+   untouched. **The migration still needs the same statement**, or a rebuild reopens it.
+
+### 8.2 One thing to watch on the day, which §6 will expose first
+
+`channel_configs` holds a single row, and its `external_id` is `1268634279670686` with its own
+config saying `"placeholder; replace external_id with the Meta phone_number_id"`. If that is not
+the real `phone_number_id` for the demo number, `ChannelConfigTenantResolver` raises
+`UnknownEndpoint`, and `ingestion/router.py` **acknowledges the delivery and files it in
+`unclaimed_deliveries`** — deliberately, so a missing row cannot get the webhook subscription
+disabled. From the phone it looks like Nada simply never replies.
+
+So the first message of §6 is also the test of this. If nothing comes back:
+
+```sql
+select received_at, endpoint_id, reason from unclaimed_deliveries order by received_at desc limit 5;
+```
+
+A row there names the `phone_number_id` Meta actually sent. The fix is one statement:
+
+```sql
+update channel_configs set external_id = '<the id from that row>'
+where tenant_id = '11111111-1111-4111-8111-111111111111';
+```
+
+No redeploy — the resolver reads the table per request.
+
+### 8.3 The §9.1 table, confirmed against the imported data
+
+Read back out of the database rather than the workbook, in `Africa/Cairo`:
+
+| Branch | Open on Wed 2 September |
+|---|---|
+| Maadi | 11:00 Primelase single · 13:00 Primelase 12 · 16:00 Body Shaping · 18:00 Basic Facial · **19:00 Facial (DT002)** |
+| New Cairo | 12:00 Peeling · 16:00 Botox · 17:00 Botox + Lip Booster · 18:00 Filler · 19:00 Filler 1 Syringe |
+| Nasr City | 12:00 Cool Shaping · 13:00 CoolShape · 16:00 Basic Facial · **17:00 Facial (DT002)** · 18:00 Medical Facial + Dermapen · 19:00 Peeling |
+
+`فاشيال` at Maadi is **19:00**, so the patient's second line is `الساعة ٧`. Unchanged from §6.1 —
+now confirmed against what is actually in the database rather than against the spreadsheet.
+
+### 8.4 Still unverified
+
+* **The LLM API key on both services.** Render's API does not read environment variables back, and
+  nothing proves a key is present until a message is answered. §7's "worker silent, API healthy"
+  row is the symptom; §6's first message is the test.
+* **Everything in §6.** No message has been sent to the live number.
