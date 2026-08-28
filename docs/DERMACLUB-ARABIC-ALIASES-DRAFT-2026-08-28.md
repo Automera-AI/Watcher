@@ -204,6 +204,10 @@ patients?
 
 ## 8. What this does not cover
 
+* **These names are for understanding, not for speaking.** An alias lets a patient's Arabic *reach*
+  the right treatment; the reply still names the treatment and the branch as the workbook writes
+  them, in English, and the date is formatted in English too. Making the reply fully Arabic is a
+  display-name column and a date setting — worth doing, and separate from this.
 * **Nothing clinical.** These are names, not indications. The screening category list and the
   disclosure triggers remain an unsigned clinical draft, unchanged by this.
 * **No new intents, no code change.** The importer already reads an `Aliases` column on both

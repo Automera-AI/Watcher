@@ -29,16 +29,26 @@ The whole journey, in the four turns the demo runs:
 
 ```
 patient   عايزة أحجز فاشيال في المعادي بكرة
-Nada      I can offer 11:00 / 16:00 / 18:00           ← read out of the diary, on this turn
-patient   الساعة ٦
-Nada      Just to confirm: … Wednesday 02 September, 18:00?   ← the slot is held while they answer
+Nada      متاح عندنا 19:00 لـ Facial في فرع Maadi يوم Wednesday 02 September.  ← from the diary, now
+patient   الساعة ٧
+Nada      تأكيد الحجز: فاشيال، المعادي، Wednesday 02 September، 19:00 — صح كده؟  ← the slot is held
 patient   تمام
-Nada      That's booked. Your reference is DC-0266.   ← the appointment now exists
+Nada      تم الحجز ✅ رقم الحجز: DC-0266. مستنينك في الفرع.        ← the appointment now exists
 ```
+
+That is the real transcript, produced by running the conversation against the imported workbook.
+**One open time, not three.** The diary holds exactly one slot per treatment, branch and day, so
+availability offers the one that is free or says there is none — a facial at Maadi on Wednesday is
+19:00, and at Nasr City it is 17:00.
+
+The treatment name, the branch name and the date are still in English inside those Arabic
+sentences, because they are what the workbook holds and how dates are formatted today. Arabic names
+for the treatments make a patient's words *resolve*; they do not translate the reply. Both are
+fixable after the demo — a display-name column and a date locale — and neither is a bug.
 
 Two details in that sequence are worth pointing at on the day:
 
-* **The 18:00 is held from the moment it is read back**, so it cannot be given away to someone else
+* **The slot is held from the moment it is read back**, so it cannot be given away to someone else
   in the room while the patient is typing "تمام". If two people race for the last slot, exactly one
   of them gets it and the other is told the truth immediately.
 * **"تمام" finishes the booking rather than ending the conversation.** On its own that word closes a
@@ -130,6 +140,11 @@ Named here so nothing on the day is a surprise.
   that follows a signature.
 * **No photos, no diagnosis, ever.** Photo intake is post-demo work, and it will never include an
   automated opinion about a patient's skin.
+* **Treatment names, branch names and dates read in English**, inside otherwise Arabic sentences.
+  See §1.
+* **The unlimited laser package quotes as one session.** Its count is only in its name, so DT026
+  reads as a single session at 18,700 EGP. Conservative and wrong; a catalogue fix, not a code one.
+  Best not probed on the day.
 
 ---
 
@@ -137,8 +152,17 @@ Named here so nothing on the day is a surprise.
 
 ### 6.1 The script
 
-Run the four-turn journey in §1 against **Wednesday 2 September**. It is the day the diary has open
-slots at 11:00, 16:00 and 18:00 in Maadi, and it avoids the same-day rule.
+Run the journey in §1 against **Wednesday 2 September**, which avoids the same-day rule. What is
+open that day:
+
+| Branch | Open |
+|---|---|
+| Maadi | 11:00 Primelase single · 13:00 Primelase 12 · 16:00 Body Shaping · 18:00 Basic Facial · **19:00 Facial** |
+| New Cairo | 12:00 Peeling · 16:00 Botox · 17:00 Botox + Lip Booster · 18:00 Filler · 19:00 Filler 1 Syringe |
+| Nasr City | 12:00 Cool Shaping · 13:00 CoolShape · 16:00 Basic Facial · **17:00 Facial** · 18:00 Medical Facial + Dermapen · 19:00 Peeling |
+
+So `فاشيال` at Maadi is 19:00 and the reply is `الساعة ٧`. Asking for a different hour is not a
+failure — Nada re-offers what is free — but it costs a turn in front of the client.
 
 Worth demonstrating after it, in this order:
 
