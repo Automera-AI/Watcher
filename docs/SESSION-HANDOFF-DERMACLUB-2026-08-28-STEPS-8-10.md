@@ -57,28 +57,26 @@ the review document; `DermaClub_Aliases_DRAFT_2026-08-28.xlsx` is the two column
 into the client's own workbook. **Nothing is imported and the client's file is untouched** —
 decision 12 puts this data in their workbook, not in this repository.
 
-134 aliases over 49 rows. Measured with `scripts/check_alias_resolution.py` over the demo's own
+132 aliases over 48 rows. Measured with `scripts/check_alias_resolution.py` over the demo's own
 phrases:
 
 ```
 today                    23 phrases: 2 resolved, 0 ask, 21 reach nothing
-with the reviewed list   23 phrases: 20 resolved, 3 ask, 0 reach nothing
+with the reviewed list   23 phrases: 22 resolved, 1 asks, 0 reach nothing
 ```
 
-The three that ask are the right ones: a bare `ليزر`, which reaches ten packages, and the two
-phrasings for a 12-session half-body package that do not say which of the two they mean.
+The one that asks is a bare `ليزر`, which reaches nine packages. That is the right answer there.
 
 ### 2.1 The clinic's review, 28 August
 
 Five comment threads on the review page, all on services that were blocked or flagged. All applied.
 
-* **DT020 / DT023** (Q1, the two 12-session half-body packages at 17,800 and 14,300) — named, and
-  the names confirm rather than resolve the ambiguity: both sets say the same thing, and one phrase,
-  `ليزر 12 جلسة نص الجسم`, was given to **both**. An identical alias on two rows is refused at
-  import, so each carries it in the form the clinic wrote for that one. The effect is the honest
-  one — `هاف بودي` and the 12-session phrasing both reach the pair and Nada asks which — and both
-  packages are now reachable in Arabic, which neither was before. Answering one of them outright
-  needs one distinguishing word, which is a catalogue decision.
+* **DT020 / DT023** (Q1, the two 12-session half-body packages at 17,800 and 14,300). The names the
+  clinic gave say the same thing for both, and one phrase — `ليزر 12 جلسة نص الجسم` — was given to
+  each of them, which an import refuses. **The client settled it by dropping DT020: it carries no
+  Arabic name at all**, and its row stays in the list so the decision is visible rather than
+  reading as an omission. Every Arabic half-body phrasing now reaches DT023 outright, with no
+  clarifying question; DT020 still answers to its English catalogue name and stays bookable.
 * **DT024 / DT027** (Q2, the two 4-session maintenance packages) — answered cleanly. Every name the
   clinic gave DT027 says full body; none of DT024's do. Both resolve outright.
 * **DT006 Skin Boosters** (Q3a) — `حقن ترطيب ونضارة البشرة` and `معززات البشرة`, kept alongside the

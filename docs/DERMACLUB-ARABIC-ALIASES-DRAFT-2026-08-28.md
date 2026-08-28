@@ -1,7 +1,8 @@
 # Arabic aliases — draft for client review
 
-**Status: reviewed by the clinic, 28 August.** Four of the five services that were blocked now have
-the clinic's own names, and Skin Boosters has the words its patients use. **Still not imported** —
+**Status: reviewed by the clinic, 28 August.** Three of the five services that were blocked now have
+the clinic's own names, Skin Boosters has the words its patients use, and **DT020 is deliberately
+left unwired** — it keeps its row and carries no Arabic name at all. **Still not imported** —
 these are values for two new columns in the clinic's own workbook, and they go in when the clinic
 puts them there.
 
@@ -31,11 +32,10 @@ Measured against the committed workbook, today:
 The two that resolve are the two written in English. With this list laid over the same file:
 
 ```
-23 phrases: 20 resolved, 3 ask a clarifying question, 0 reach nothing
+23 phrases: 22 resolved, 1 ask a clarifying question, 0 reach nothing
 ```
 
-The three that ask are the right ones: a bare `ليزر`, which reaches ten packages, and the two
-phrasings that name a 12-session half-body package without saying which of the two it is.
+The one that asks is a bare `ليزر`, which reaches nine packages. That is the right answer there.
 
 Both numbers come from `scripts/check_alias_resolution.py` against
 `docs/DermaClub_Availability_DEMO_2026-08-26_1.xlsx`; re-run it on whatever the clinic sends back.
@@ -158,10 +158,11 @@ ID with an alias map behind it, which is what deviation 3 asked for.
 | DT017 | Full Body Laser — 3 Sessions | `ليزر فل بودي 3 جلسات\|ليزر فل بودي ٣ جلسات\|ليزر جسم كامل 3 جلسات` | drafted |
 | DT018 | Full Body Laser — 6 Sessions | `ليزر فل بودي 6 جلسات\|ليزر فل بودي ٦ جلسات\|ليزر جسم كامل 6 جلسات` | drafted |
 | DT019 | Full Body Laser — 12 Sessions | `ليزر فل بودي 12 جلسة\|ليزر فل بودي ١٢ جلسة\|ليزر جسم كامل 12 جلسة` | drafted |
-| DT020 | Annual Half Body (12 Sessions) | `ليزر سنوي 12 جلسة هاف بودي\|ليزر نص الجسم 12 جلسة سنوي` | **clinic's own** |
+| DT020 | Annual Half Body (12 Sessions) | *(none — deliberately)* | **left unwired** |
 | DT021 | Laser Annual 12 Sessions | `الباقة السنوية\|ليزر سنوي 12 جلسة\|ليزر سنوي ١٢ جلسة` | drafted |
 | DT022 | Laser GenZ 3 Sessions | `جين زد\|ليزر جين زد\|باقة جين زد` | drafted |
 | DT023 | Laser Half Body Annual 12 Sessions | `ليزر سنوي هاف بودي 12 جلسة\|باقة هاف بودي نص سنوي\|باقة ليزر نصف الجسم هاف بودي\|ليزر نص الجسم 12 جلسة` | **clinic's own** |
+| | | *the only half-body package with Arabic names* | |
 | DT024 | Laser Maintenance 4 Sessions | `باقة متابعة الليزر 4 جلسات\|باقة 4 جلسات متابعة ازالة شعر` | **clinic's own** |
 | DT025 | Laser Semi-Annual 6 Sessions | `ليزر نصف سنوي\|نص سنوي 6 جلسات\|نص سنوي ٦ جلسات` | drafted |
 | DT026 | Laser Super Annual Unlimited | `سوبر انيوال\|جلسات غير محدودة\|باقة غير محدودة` | drafted |
@@ -187,17 +188,15 @@ Two deliberate omissions here too:
 
 ## 7. Where the answers landed
 
-**Q1 — DT020 vs DT023, the two 12-session half-body packages. Answered, and the answer is that they
-are not distinguishable by name.** Both sets of words the clinic gave say the same thing: a
-12-session annual half-body laser package. One phrase — `ليزر 12 جلسة نص الجسم` — was given to
-*both*, and one string cannot name two rows: the import refuses a file where it does, precisely
-because that is how a patient is booked into the treatment they did not ask for. So it sits on each
-in the form the clinic wrote for that one, and the effect is the honest one: a patient who says
-either "هاف بودي" or "12 جلسة نص الجسم" reaches both and is asked which. Both are now reachable in
-Arabic, which they were not before.
+**Q1 — the two 12-session half-body packages. Settled by dropping one of them.** Both sets of names
+the clinic gave say the same thing, and one phrase — `ليزر 12 جلسة نص الجسم` — was given to both.
+The clinic's instruction settles it: **DT020 carries no Arabic name at all.** Its row stays in the
+list so the decision is visible rather than looking like an omission.
 
-> If the clinic would rather one of them answered outright, it needs one word the other does not
-> have — a tier, a device name, anything. That is a catalogue decision, not a translation.
+The effect is clean. Every Arabic half-body phrasing — `هاف بودي`, `ليزر 12 جلسة نص الجسم`,
+`باقة هاف بودي نص سنوي` — now reaches DT023 outright, with no clarifying question. DT020 still
+answers to its English catalogue name, so it remains bookable; it simply cannot be reached by an
+Arabic phrase until somebody gives it one distinguishing word.
 
 **Q2 — the four maintenance and body-shaping look-alikes. Answered cleanly for the pair that
 mattered.** Every name the clinic gave DT027 says full body (`جسم كامل`, `فل بودي`) and none of

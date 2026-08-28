@@ -32,10 +32,10 @@ Services,DT016,Bikini & Underarm Laser Hair Removal - 6 Sessions,ليزر بيك
 Services,DT017,Full Body Laser Hair Removal - 3 Sessions,ليزر فل بودي 3 جلسات|ليزر فل بودي ٣ جلسات|ليزر جسم كامل 3 جلسات,drafted,
 Services,DT018,Full Body Laser Hair Removal - 6 Sessions,ليزر فل بودي 6 جلسات|ليزر فل بودي ٦ جلسات|ليزر جسم كامل 6 جلسات,drafted,
 Services,DT019,Full Body Laser Hair Removal - 12 Sessions,ليزر فل بودي 12 جلسة|ليزر فل بودي ١٢ جلسة|ليزر جسم كامل 12 جلسة,drafted,
-Services,DT020,Annual Half Body (12 Sessions),ليزر سنوي 12 جلسة هاف بودي|ليزر نص الجسم 12 جلسة سنوي,client-approved,"Q1, answered. The clinic gave ليزر 12 جلسة نص الجسم to this package and to DT023; one string cannot name two rows, so it sits here in the clinic's own longer form and on DT023 in theirs. A patient using the shorter phrase reaches both and is asked which."
+Services,DT020,Annual Half Body (12 Sessions),,not-wired,"Deliberately left unwired at the clinic's instruction. The row stays in the list so the decision is visible rather than looking like an omission: DT020 answers to its English catalogue name and to nothing in Arabic, and every Arabic half-body phrase now reaches DT023 alone."
 Services,DT021,Laser Hair Removal Annual 12 Sessions,الباقة السنوية|ليزر سنوي 12 جلسة|ليزر سنوي ١٢ جلسة,drafted,
 Services,DT022,Laser Hair Removal GenZ 3 Sessions,جين زد|ليزر جين زد|باقة جين زد,drafted,
-Services,DT023,Laser Hair Removal Half Body Annual 12 Sessions,ليزر سنوي هاف بودي 12 جلسة|باقة هاف بودي نص سنوي|باقة ليزر نصف الجسم هاف بودي|ليزر نص الجسم 12 جلسة,client-approved,"Q1, answered. See DT020 for the one phrase the clinic gave to both."
+Services,DT023,Laser Hair Removal Half Body Annual 12 Sessions,ليزر سنوي هاف بودي 12 جلسة|باقة هاف بودي نص سنوي|باقة ليزر نصف الجسم هاف بودي|ليزر نص الجسم 12 جلسة,client-approved,"Q1, answered. The only half-body package with Arabic names: DT020 is deliberately unwired, so every Arabic phrasing lands here."
 Services,DT024,Laser Hair Removal Maintenance 4 Sessions,باقة متابعة الليزر 4 جلسات|باقة 4 جلسات متابعة ازالة شعر,client-approved,"Q2, answered. Distinguished from DT027 by what the clinic left out of it: no جسم كامل, no فل بودي."
 Services,DT025,Laser Hair Removal Semi-Annual 6 Sessions,ليزر نصف سنوي|نص سنوي 6 جلسات|نص سنوي ٦ جلسات,drafted,
 Services,DT026,Laser Hair Removal Super Annual Unlimited Sessions,سوبر انيوال|جلسات غير محدودة|باقة غير محدودة,drafted,"The only package with no countable session number — the price quote says so rather than quoting a count."
