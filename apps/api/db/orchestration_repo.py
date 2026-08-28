@@ -25,6 +25,7 @@ import uuid
 from collections.abc import Sequence
 from enum import Enum
 
+from packages.intents.schema import Vocabulary, default_vocabulary
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -267,8 +268,9 @@ class SqlAlchemyConversationStore:
     and used from a worker thread per message.
     """
 
-    def __init__(self, scope: TenantScope) -> None:
+    def __init__(self, scope: TenantScope, *, vocabulary: Vocabulary | None = None) -> None:
         self._scope = scope
+        self._vocabulary = vocabulary or default_vocabulary()
 
     def begin(self, turn: InboundTurn) -> ConversationState:
         with self._scope(str(turn.tenant_id)) as session:
@@ -282,7 +284,7 @@ class SqlAlchemyConversationStore:
             row = repo.get_active_task(conversation.id)
             return ConversationState(
                 conversation_id=str(conversation.id),
-                task=task_from_row(row) if row is not None else None,
+                task=(task_from_row(row, vocabulary=self._vocabulary) if row is not None else None),
                 # Only replies sent in service of the job now in flight count against its
                 # clarifying-turn budget; see `count_outbound_turns`.
                 replies_sent=repo.count_outbound_turns(

@@ -88,6 +88,29 @@ def test_defaults_match_the_locked_decisions(_settings: SettingsFactory) -> None
     assert settings.asr_provider == "whisper-api"
 
 
+def test_default_tenant_vertical_preserves_holiday_home_behavior(
+    _settings: SettingsFactory,
+) -> None:
+    settings = _settings()
+
+    assert settings.tenant_vertical == "holiday_homes"
+    assert settings.vocabulary().vertical == "holiday_homes"
+
+
+def test_clinic_tenant_vertical_resolves_the_shipped_clinic_vocabulary(
+    _settings: SettingsFactory,
+) -> None:
+    settings = _settings(TENANT_VERTICAL="clinics")
+
+    assert settings.vocabulary().vertical == "clinics"
+    assert "greeting" in {intent.name for intent in settings.vocabulary().intents}
+
+
+def test_unknown_tenant_vertical_fails_at_startup(_settings: SettingsFactory) -> None:
+    with pytest.raises(ValidationError, match="TENANT_VERTICAL.*unknown_vertical"):
+        _settings(TENANT_VERTICAL="unknown_vertical")
+
+
 def test_the_tenant_timezone_reaches_the_policy(_settings: SettingsFactory) -> None:
     """G3's one knob: the window on the night-time trigger is read in the guest's local time."""
     assert _settings().tenant_policy().timezone == "Asia/Dubai"

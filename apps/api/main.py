@@ -47,6 +47,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import FastAPI
+from packages.intents.schema import Vocabulary
 
 from apps.api.app import create_app
 from apps.api.classifier.factory import build_classifier
@@ -76,10 +77,22 @@ def create_application(settings: Settings | None = None) -> FastAPI:
     checks requirements per subsystem rather than at import.
     """
     resolved = settings if settings is not None else get_settings()
-    return assemble(resolved, build_database(resolved), build_classifier(resolved))
+    vocabulary = resolved.vocabulary()
+    return assemble(
+        resolved,
+        build_database(resolved),
+        build_classifier(resolved, vocabulary=vocabulary),
+        vocabulary=vocabulary,
+    )
 
 
-def assemble(settings: Settings, database: Database, classifier: Classifier) -> FastAPI:
+def assemble(
+    settings: Settings,
+    database: Database,
+    classifier: Classifier,
+    *,
+    vocabulary: Vocabulary | None = None,
+) -> FastAPI:
     """Wire the object graph over an already-built database and classifier.
 
     Separate from :func:`create_application` so the wiring itself can be exercised against SQLite
@@ -117,7 +130,9 @@ def assemble(settings: Settings, database: Database, classifier: Classifier) -> 
         async def _close_queue() -> None:
             await redis_queue.aclose()
     else:
-        graph = build_consumer(settings, database, classifier)
+        graph = build_consumer(
+            settings, database, classifier, vocabulary=vocabulary or settings.vocabulary()
+        )
         pool_queue = ThreadPoolClassificationQueue(graph.consumer)
         queue = pool_queue
         sender = graph.sender

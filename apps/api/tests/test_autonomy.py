@@ -23,6 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from packages.intents.schema import shipped_vocabularies
 
 from apps.api.core.autonomy import decide_autonomy
 
@@ -85,6 +86,14 @@ def test_an_emergency_outranks_everything() -> None:
 
 def test_an_undeclared_intent_is_not_a_licence_to_improvise() -> None:
     assert decide_autonomy("arrange_airport_pickup", 0.99, identity_verified=True) == "hand_off"
+
+
+def test_clinic_autonomy_uses_the_selected_vocabulary_and_safety_ceiling() -> None:
+    clinics = shipped_vocabularies()["clinics"]
+
+    assert decide_autonomy("greeting", 0.99, vocabulary=clinics) == "act"
+    assert decide_autonomy("clinical_question", 0.99, vocabulary=clinics) == "hand_off"
+    assert decide_autonomy("clinical_urgent", 0.99, vocabulary=clinics) == "hand_off"
 
 
 # ── trap #3: the thing that does not exist yet ────────────────────────────────

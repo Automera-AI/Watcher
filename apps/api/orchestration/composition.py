@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from packages.intents.schema import default_vocabulary
+from packages.intents.schema import Vocabulary
 
 from apps.api.channels.factory import build_alerter, build_sender
 from apps.api.channels.sender import ChannelSender
@@ -48,18 +48,25 @@ class ConsumerGraph:
     sender: ChannelSender | None
 
 
-def build_consumer(settings: Settings, database: Database, classifier: Classifier) -> ConsumerGraph:
+def build_consumer(
+    settings: Settings,
+    database: Database,
+    classifier: Classifier,
+    *,
+    vocabulary: Vocabulary | None = None,
+) -> ConsumerGraph:
     """Wire one `MessageConsumer` — the orchestrator, its senders, alerter, and DB repos.
 
     Tenant-scoped throughout (B2): every repository below takes `database.tenant_session`, so
     migration 004's RLS policies enforce on this consumer exactly as they do on the request path.
     """
+    selected = vocabulary or settings.vocabulary()
     tenant_scope = database.tenant_session
     sender = build_sender(settings)
     alerter = build_alerter(
         sender,
         settings.control_chat_phone_e164,
-        declared_channel=default_vocabulary().emergency.alert,
+        declared_channel=selected.emergency.alert,
     )
     # The knowledge base (roadmap 2.4), now scoped per property (roadmap 2.8). A process-global
     # registry entry rather than a collaborator threaded through the Orchestrator/Receptionist call
@@ -81,10 +88,11 @@ def build_consumer(settings: Settings, database: Database, classifier: Classifie
         SqlAlchemyCrmLookup(tenant_scope),
         policy=settings.tenant_policy(),
         receptionist=handle,
-        conversations=SqlAlchemyConversationStore(tenant_scope),
+        conversations=SqlAlchemyConversationStore(tenant_scope, vocabulary=selected),
         sender=sender,
         classifications=SqlAlchemyClassificationWriter(tenant_scope),
         alerter=alerter,
+        vocabulary=selected,
     )
     consumer = MessageConsumer(SqlAlchemyMessageLoader(tenant_scope), orchestrator)
     return ConsumerGraph(consumer=consumer, sender=sender)

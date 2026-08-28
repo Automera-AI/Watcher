@@ -25,6 +25,7 @@ from apps.api.classifier.openai import OpenAIProvider
 from apps.api.classifier.prompt import (
     CLASSIFICATION_TOOL_NAME,
     SYSTEM_PROMPT,
+    build_system_prompt,
     render_user_prompt,
 )
 from apps.api.classifier.provider import ProviderError
@@ -119,7 +120,12 @@ def _openai_body(arguments: str | None, **usage: Any) -> dict[str, Any]:
 
 def _provider(recorder: _Recorder, **kwargs: Any) -> AnthropicProvider:
     return AnthropicProvider(
-        "claude-haiku-4-5", "sk-ant", recorder.client(), max_retries=0, **kwargs
+        "claude-haiku-4-5",
+        "sk-ant",
+        recorder.client(),
+        max_retries=0,
+        system_prompt=SYSTEM_PROMPT,
+        **kwargs,
     )
 
 
@@ -291,7 +297,13 @@ def test_connection_failure_raises_provider_error() -> None:
         raise httpx.ConnectTimeout("timed out", request=request)
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    provider = AnthropicProvider("claude-haiku-4-5", "sk-ant", client, max_retries=0)
+    provider = AnthropicProvider(
+        "claude-haiku-4-5",
+        "sk-ant",
+        client,
+        max_retries=0,
+        system_prompt=SYSTEM_PROMPT,
+    )
 
     with pytest.raises(ProviderError, match="ConnectTimeout"):
         provider.complete_json(_INPUT)
@@ -302,7 +314,13 @@ def test_connection_failure_raises_provider_error() -> None:
 
 def test_openai_decodes_the_function_arguments() -> None:
     recorder = _Recorder(httpx.Response(200, json=_openai_body(json.dumps(_RESULT))))
-    provider = OpenAIProvider("gpt-4o-mini", "sk-oai", recorder.client(), max_retries=0)
+    provider = OpenAIProvider(
+        "gpt-4o-mini",
+        "sk-oai",
+        recorder.client(),
+        max_retries=0,
+        system_prompt=SYSTEM_PROMPT,
+    )
 
     assert provider.complete_json(_INPUT) == _RESULT
 
@@ -314,14 +332,26 @@ def test_openai_decodes_the_function_arguments() -> None:
 
 def test_openai_unparseable_arguments_are_invalid_output_not_an_error() -> None:
     recorder = _Recorder(httpx.Response(200, json=_openai_body('{"intent": "availab')))
-    provider = OpenAIProvider("gpt-4o-mini", "sk-oai", recorder.client(), max_retries=0)
+    provider = OpenAIProvider(
+        "gpt-4o-mini",
+        "sk-oai",
+        recorder.client(),
+        max_retries=0,
+        system_prompt=SYSTEM_PROMPT,
+    )
 
     assert provider.complete_json(_INPUT) == {}
 
 
 def test_openai_missing_tool_call_is_invalid_output() -> None:
     recorder = _Recorder(httpx.Response(200, json=_openai_body(None)))
-    provider = OpenAIProvider("gpt-4o-mini", "sk-oai", recorder.client(), max_retries=0)
+    provider = OpenAIProvider(
+        "gpt-4o-mini",
+        "sk-oai",
+        recorder.client(),
+        max_retries=0,
+        system_prompt=SYSTEM_PROMPT,
+    )
 
     assert provider.complete_json(_INPUT) == {}
 
@@ -334,7 +364,13 @@ def test_openai_usage_separates_cached_tokens_from_fresh_ones() -> None:
             json=_openai_body(json.dumps(_RESULT), prompt_tokens_details={"cached_tokens": 5000}),
         )
     )
-    provider = OpenAIProvider("gpt-4o-mini", "sk-oai", recorder.client(), max_retries=0)
+    provider = OpenAIProvider(
+        "gpt-4o-mini",
+        "sk-oai",
+        recorder.client(),
+        max_retries=0,
+        system_prompt=SYSTEM_PROMPT,
+    )
     provider.complete_json(_INPUT)
 
     assert provider.last_usage is not None
@@ -350,6 +386,7 @@ def test_self_hosted_server_is_called_without_an_authorization_header() -> None:
         recorder.client(),
         base_url="http://vllm.internal:8000/v1",
         max_retries=0,
+        system_prompt=SYSTEM_PROMPT,
     )
     provider.complete_json(_INPUT)
 
@@ -427,6 +464,20 @@ def test_factory_builds_a_classifier_that_classifies() -> None:
     assert outcome.result.intent == "availability_check"
     assert outcome.model_used == "claude-haiku-4-5"  # D8-a's pinned cheap tier
     assert outcome.escalated is False
+
+
+def test_factory_supplies_the_selected_clinic_prompt_to_the_provider() -> None:
+    clinic_result = dict(_RESULT, intent="greeting", summary_one_line="Patient says hello")
+    recorder = _Recorder(httpx.Response(200, json=_anthropic_body(clinic_result)))
+    settings = _settings(anthropic_api_key="sk-ant", tenant_vertical="clinics")
+
+    outcome = build_classifier(settings, recorder.client()).classify(
+        ClassificationInput(text="hi", modality=MessageType.TEXT)
+    )
+
+    assert outcome.result is not None and outcome.result.intent == "greeting"
+    assert recorder.payload()["system"][0]["text"] == build_system_prompt(settings.vocabulary())
+    assert "holiday-home short stays" not in recorder.payload()["system"][0]["text"]
 
 
 def test_factory_escalation_threshold_comes_from_configuration() -> None:

@@ -18,10 +18,12 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
+from packages.intents.schema import Vocabulary
 
 from apps.api.channels import ConfigError
 from apps.api.classifier.anthropic import DEFAULT_MAX_OUTPUT_TOKENS, AnthropicProvider
 from apps.api.classifier.openai import OpenAIProvider
+from apps.api.classifier.prompt import build_system_prompt
 from apps.api.classifier.provider import LLMProvider
 from apps.api.classifier.service import Classifier
 from apps.api.core.config import Settings
@@ -63,11 +65,18 @@ def _thinking_policy(model_id: str) -> tuple[dict[str, Any] | None, int]:
 
 
 def build_provider(
-    settings: Settings, model_id: str, client: httpx.Client | None = None
+    settings: Settings,
+    model_id: str,
+    client: httpx.Client | None = None,
+    *,
+    system_prompt: str | None = None,
 ) -> LLMProvider:
     """Concrete provider for one pinned model. Raises ``ConfigError`` if its key is missing."""
     credentials = settings.llm_credentials(model_id)
     http = client if client is not None else _default_client()
+    prompt = (
+        system_prompt if system_prompt is not None else build_system_prompt(settings.vocabulary())
+    )
 
     if model_id.startswith("claude"):
         api_key = credentials.api_key
@@ -83,6 +92,7 @@ def build_provider(
             max_retries=credentials.max_retries,
             thinking=thinking,
             max_output_tokens=max_output_tokens,
+            system_prompt=prompt,
         )
 
     return OpenAIProvider(
@@ -92,10 +102,16 @@ def build_provider(
         base_url=credentials.base_url,
         timeout_seconds=credentials.timeout_seconds,
         max_retries=credentials.max_retries,
+        system_prompt=prompt,
     )
 
 
-def build_classifier(settings: Settings, client: httpx.Client | None = None) -> Classifier:
+def build_classifier(
+    settings: Settings,
+    client: httpx.Client | None = None,
+    *,
+    vocabulary: Vocabulary | None = None,
+) -> Classifier:
     """The two-tier classifier described by ``CLASSIFIER_MODEL_*`` (D8-a).
 
     Both tiers share one ``httpx.Client`` so they share its connection pool: the escalation call
@@ -103,9 +119,10 @@ def build_classifier(settings: Settings, client: httpx.Client | None = None) -> 
     it would add more latency than the escalation itself costs.
     """
     http = client if client is not None else _default_client()
+    prompt = build_system_prompt(vocabulary or settings.vocabulary())
     return Classifier(
-        build_provider(settings, settings.classifier_model_first_pass, http),
-        build_provider(settings, settings.classifier_model_escalation, http),
+        build_provider(settings, settings.classifier_model_first_pass, http, system_prompt=prompt),
+        build_provider(settings, settings.classifier_model_escalation, http, system_prompt=prompt),
         escalation_threshold=settings.classifier_confidence_escalation_threshold,
     )
 

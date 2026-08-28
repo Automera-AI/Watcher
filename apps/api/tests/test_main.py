@@ -19,11 +19,13 @@ import threading
 import uuid
 from typing import Any
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from apps.api.channels import ConfigError
+from apps.api.classifier.factory import build_classifier
 from apps.api.classifier.prompt import PROMPT_VERSION
 from apps.api.classifier.service import Classifier
 from apps.api.classifier.types import ClassificationInput
@@ -163,7 +165,7 @@ def _post(client: TestClient, body: bytes) -> int:
     response = client.post(
         "/webhook", content=body, headers={SIGNATURE_HEADER: expected_signature(APP_SECRET, body)}
     )
-    return response.status_code
+    return int(response.status_code)
 
 
 def _drain(app: FastAPI) -> None:
@@ -241,6 +243,69 @@ def test_a_signed_message_is_persisted_classified_and_answered(
         assert task.conversation_id == conversation.id
 
     assert [call.text for call in provider.calls] == ["Any rooms free in June?"]
+
+
+def test_clinic_greeting_uses_the_real_factory_and_composition_path(
+    seeded: Database,
+) -> None:
+    """The provider sees the clinic prompt and the receptionist greets instead of escalating."""
+    requests: list[httpx.Request] = []
+
+    def classify(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "name": "record_classification",
+                        "input": {
+                            "intent": "greeting",
+                            "summary_one_line": "Patient says hello",
+                            "language": "en",
+                            "confidence_overall": 0.99,
+                            "confidence_intent": 0.99,
+                            "confidence_person": 0.5,
+                            "confidence_company": 0.1,
+                        },
+                    }
+                ],
+                "stop_reason": "tool_use",
+                "usage": {"input_tokens": 100, "output_tokens": 50},
+            },
+        )
+
+    settings = Settings(
+        _env_file=None,
+        meta_app_secret=APP_SECRET,
+        meta_webhook_verify_token=VERIFY_TOKEN,
+        anthropic_api_key="sk-ant",
+        tenant_vertical="clinics",
+        tenant_greeting_opening="Welcome to the clinic.",
+    )
+    vocabulary = settings.vocabulary()
+    classifier = build_classifier(
+        settings,
+        httpx.Client(transport=httpx.MockTransport(classify)),
+        vocabulary=vocabulary,
+    )
+    app = assemble(settings, seeded, classifier, vocabulary=vocabulary)
+
+    assert _post(TestClient(app), _payload("wamid.clinic", "hi")) == 200
+    _drain(app)
+
+    assert len(requests) == 1
+    provider_payload = json.loads(requests[0].content)
+    clinic_prompt = provider_payload["system"][0]["text"]
+    assert "### greeting" in clinic_prompt
+    assert "holiday-home short stays" not in clinic_prompt
+
+    with seeded.session() as session:
+        audit = session.query(AuditLogRow).one()
+        assert audit.action == "receptionist_reply"
+        outbound = session.query(Turn).filter(Turn.direction == "outbound").one()
+        assert outbound.body_text == "Welcome to the clinic."
 
 
 def test_an_emergency_message_is_answered_and_filed_without_a_model(

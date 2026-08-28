@@ -44,6 +44,8 @@ from enum import StrEnum
 from typing import Protocol
 from uuid import UUID
 
+from packages.intents.schema import Vocabulary, default_vocabulary
+
 from apps.api.audit.log import AuditEntry, AuditLog
 from apps.api.channels.sender import ChannelSender
 from apps.api.classifier.service import Classifier
@@ -84,6 +86,7 @@ class Receptionist(Protocol):
         identity_verified: bool,
         emergency: bool,
         turns_taken: int,
+        vocabulary: Vocabulary,
     ) -> tuple[OutboundAction, Task]: ...
 
 
@@ -136,6 +139,7 @@ class Orchestrator:
         sender: ChannelSender | None = None,
         classifications: ClassificationWriter | None = None,
         alerter: OperatorAlerter | None = None,
+        vocabulary: Vocabulary | None = None,
         logger: logging.Logger = _logger,
     ) -> None:
         if (receptionist is None) != (conversations is None):
@@ -155,6 +159,7 @@ class Orchestrator:
         self._sender = sender
         self._classifications = classifications
         self._alerter = alerter
+        self._vocabulary = vocabulary or default_vocabulary()
         self._logger = logger
 
     async def process(
@@ -184,6 +189,7 @@ class Orchestrator:
             message.classifiable_text,
             at=message.received_at,
             timezone=self._policy.timezone,
+            vocabulary=self._vocabulary,
         )
         if emergency is not None:
             return await self._emergency(tenant_id, message_id, message, emergency)
@@ -417,6 +423,7 @@ class Orchestrator:
             identity_verified=identity_verified,
             emergency=False,
             turns_taken=state.replies_sent,
+            vocabulary=self._vocabulary,
         )
 
         # Recorded before it is sent, deliberately. A reply we sent but did not record makes us
@@ -429,7 +436,12 @@ class Orchestrator:
         autonomy: Autonomy = (
             "hand_off"
             if handed_off
-            else decide_autonomy(result_intent, confidence, identity_verified=identity_verified)
+            else decide_autonomy(
+                result_intent,
+                confidence,
+                identity_verified=identity_verified,
+                vocabulary=self._vocabulary,
+            )
         )
 
         return self._finish(

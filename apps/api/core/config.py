@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
 
+from packages.intents.schema import Vocabulary, shipped_vocabularies
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import SettingsConfigDict
 
@@ -93,6 +94,13 @@ class Settings(ChannelCredentials):
     # guest and still files the item — but the only alert is a log line. `build_alerter` says so
     # loudly at startup.
     control_chat_phone_e164: PhoneE164 | None = None
+
+    # ── Demo deployment vertical ───────────────────────────────────────────────────────────
+    #
+    # One process serves one fixed vertical for its lifetime. This is deliberately not tenant
+    # database state: the DermaClub demo runs its API and worker with `clinics`, while an existing
+    # deployment that does not set the variable keeps the holiday-home behavior.
+    tenant_vertical: str = "holiday_homes"
 
     # ── Where the properties are (roadmap G3) ─────────────────────────────────────────────
     #
@@ -204,6 +212,16 @@ class Settings(ChannelCredentials):
             )
         return value
 
+    @field_validator("tenant_vertical")
+    @classmethod
+    def _shipped_vertical(cls, value: str) -> str:
+        known = shipped_vocabularies()
+        if value not in known:
+            raise ValueError(
+                f"TENANT_VERTICAL={value!r} is not a shipped vocabulary. Known: {sorted(known)}"
+            )
+        return value
+
     # ── Per-subsystem accessors: this is where "required" is decided ───────────────────────
 
     def tenant_policy(self) -> TenantPolicy:
@@ -225,6 +243,10 @@ class Settings(ChannelCredentials):
             urgent_contact=self.tenant_urgent_contact,
             emergency_reply=self.tenant_emergency_reply,
         )
+
+    def vocabulary(self) -> Vocabulary:
+        """The one shipped vocabulary selected for this process lifetime."""
+        return shipped_vocabularies()[self.tenant_vertical]
 
     def conversation_copy(self) -> ConversationCopy:
         """The tenant's opening and closing wording, as the tools take it."""

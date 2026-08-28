@@ -32,6 +32,23 @@ test instead of the eval runner.
 > case the model labelled property_question at 0.78, below the escalation threshold. Use
 > `scripts/record_fixtures.py` to re-record when the prompt or model legitimately changes.
 
+## DermaClub demo golden set
+
+`golden/clinics_golden_set.jsonl` contains 18 synthetic clinic cases covering greetings, closings,
+ordinary clinic questions, clinical handoffs, urgent reactions, and decoys in English, Arabic,
+Franco-Arabic, and mixed messages. It deliberately has no recorded predictions yet: prompt v4 must
+be evaluated with a live model rather than relabelling historical holiday-home fixtures.
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... python scripts/record_fixtures.py \
+  --golden packages/eval/golden/clinics_golden_set.jsonl \
+  --out packages/eval/fixtures/recorded_clinics_haiku.jsonl \
+  --tenant-vertical clinics
+```
+
+The recorder writes `recorded_clinics_haiku.meta.json` beside the fixtures with the model, selected
+vertical, prompt version, actual rendered-prompt fingerprint, and golden-set size.
+
 ## Runner (`packages/eval`, §13)
 Run from the **repo root** (the harness imports the locked Pydantic schemas from `apps/api`):
 
