@@ -400,3 +400,157 @@ class UsageEvent(Base):
     unit_cost: Mapped[float | None] = mapped_column(Float, default=None)
     ref_id: Mapped[str | None] = mapped_column(String(128), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class ClinicBranch(TimestampedTenantBase):
+    """One location of a clinic tenant (demo step 3; domain object ``core/clinic.py``'s ``Branch``).
+
+    The clinic tables are named ``clinic_*`` rather than ``branches``/``services``: this schema is
+    shared by every vertical, and a table called ``services`` in it would read as the product's own
+    services. The ORM classes carry the same prefix, which is also what keeps them from colliding
+    with the domain dataclasses the way ``FactRow`` does with ``Fact``.
+
+    ``external_id`` is the branch's identifier in the client's own records — the join key the
+    workbook's availability rows name, and the one Salesforce will name later. It is the natural
+    key an import upserts on, so it is unique per tenant and not null.
+
+    ``placeholder`` marks a branch whose real details have not been supplied (five of the client's
+    fourteen). Recorded, not hidden: decision 5 puts all fourteen in the demo.
+    """
+
+    __tablename__ = "clinic_branches"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "external_id", name="uq_clinic_branches_tenant_extid"),
+    )
+
+    external_id: Mapped[str] = mapped_column(String(64))
+    name: Mapped[str] = mapped_column(String(255))
+    area: Mapped[str | None] = mapped_column(String(255), default=None)
+    address: Mapped[str | None] = mapped_column(Text, default=None)
+    phone: Mapped[str | None] = mapped_column(String(32), default=None)
+    timezone: Mapped[str | None] = mapped_column(String(64), default=None)
+    placeholder: Mapped[bool] = mapped_column(Boolean, default=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    import_version: Mapped[str | None] = mapped_column(String(64), default=None)
+    imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class ClinicService(TimestampedTenantBase):
+    """One treatment or package in a clinic's catalogue (``core/clinic.py``'s ``Service``).
+
+    ``price_minor`` is an integer in the currency's minor unit (piastres for EGP). A price that is
+    quoted to a patient is not a float: the vocabulary's ``quoting`` block forbids inventing or
+    drifting an amount, and binary rounding is drift nobody authored.
+
+    ``session_count`` is the package quantity — one Primelase session and a six-session package are
+    two rows of the same modality at different quantities, and every quote has to say which.
+
+    ``aliases`` holds the other names the same service is called by; the importer resolves an
+    availability row's free-text service name through them. Without it the ambiguous names in the
+    source workbook ("Basic Facial" and "Facial" at the same price and duration) have no canonical
+    id behind them, and the assistant burns its two clarifying turns on a distinction the
+    catalogue does not actually make.
+
+    ``import_version``/``imported_at`` are the provenance the clinic vocabulary's
+    ``imported_catalogue`` system promises: "every returned item retains its source identifier,
+    import version and fetched time". The source identifier is ``code``.
+    """
+
+    __tablename__ = "clinic_services"
+    __table_args__ = (UniqueConstraint("tenant_id", "code", name="uq_clinic_services_tenant_code"),)
+
+    code: Mapped[str] = mapped_column(String(32))
+    name: Mapped[str] = mapped_column(String(255))
+    category: Mapped[str | None] = mapped_column(String(64), default=None)
+    price_minor: Mapped[int] = mapped_column(BigInteger)
+    currency: Mapped[str] = mapped_column(String(3), default="EGP")
+    duration_minutes: Mapped[int] = mapped_column(Integer)
+    session_count: Mapped[int] = mapped_column(Integer, default=1)
+    aliases: Mapped[list[str]] = mapped_column(JSON, default=list)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    import_version: Mapped[str | None] = mapped_column(String(64), default=None)
+    imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class ClinicAvailabilitySlot(TimestampedTenantBase):
+    """One bookable interval, in one branch, for one service (``AvailabilitySlot``).
+
+    ``starts_at``/``ends_at`` are stored timezone-aware. The workbook holds a wall clock and a date
+    and names no zone, so the zone is an explicit argument to the import and is never defaulted —
+    ``TENANT_TIMEZONE`` still ships defaulting to ``Asia/Dubai``, one hour off the demo's Cairo.
+
+    ``held_until``/``held_by_conversation_id`` are step 6's (``hold_slot``) and are untouched by
+    the import. They are in migration 008 rather than a later one because the booking journey is
+    the next thing built and a second migration to add two columns to a table nothing has read yet
+    is a deploy for no reason. Nothing reads them today.
+
+    A slot's ``status`` is the workbook's own: 407 Open, 265 Booked at the last import. Adjacent
+    slots with no gap between them are accepted as-is (decision 3); the 15-minute buffer applies to
+    new bookings, not to what is already in the diary.
+    """
+
+    __tablename__ = "clinic_availability_slots"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "external_id", name="uq_clinic_slots_tenant_extid"),
+    )
+
+    external_id: Mapped[str] = mapped_column(String(64))
+    branch_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("clinic_branches.id"), index=True)
+    service_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("clinic_services.id"), index=True
+    )
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), default="open")
+    held_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    held_by_conversation_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, default=None)
+    import_version: Mapped[str | None] = mapped_column(String(64), default=None)
+    imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class ClinicBooking(TimestampedTenantBase):
+    """An appointment against one slot (``core/clinic.py``'s ``Booking``).
+
+    Two uniqueness constraints, and they defend against different mistakes.
+
+    ``(tenant_id, slot_id)`` is the one that matters clinically: a slot holds one appointment, so
+    two conversations racing for the last 18:00 cannot both be told they have it. Note what it
+    also means — a cancelled booking still occupies its slot. Cancellation is a hand-off in the
+    shipped vocabulary (there is no cancel tool), so nothing in the demo path needs to rebook a
+    released slot, and a constraint that is simple to reason about is worth more here than one that
+    anticipates a flow that does not exist.
+
+    ``(tenant_id, idempotency_key)`` is what makes step 6's confirm retry-safe: the key is built
+    from tenant, conversation and slot (``core/clinic.booking_idempotency_key``), so the same
+    conversation confirming the same slot twice writes one row. Imported bookings carry no key —
+    they have no conversation — and NULLs do not collide in a unique index, which is the intended
+    behaviour and the reason the constraint is not a substitute for the one above.
+
+    ``branch`` and ``service`` are deliberately absent: they belong to the slot, and a copy here is
+    a second answer to the same question waiting to disagree with the first.
+    """
+
+    __tablename__ = "clinic_bookings"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "reference", name="uq_clinic_bookings_tenant_reference"),
+        UniqueConstraint("tenant_id", "slot_id", name="uq_clinic_bookings_tenant_slot"),
+        UniqueConstraint(
+            "tenant_id", "idempotency_key", name="uq_clinic_bookings_tenant_idempotency"
+        ),
+    )
+
+    reference: Mapped[str] = mapped_column(String(32))
+    slot_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("clinic_availability_slots.id"), index=True
+    )
+    patient_name: Mapped[str | None] = mapped_column(String(255), default=None)
+    patient_phone: Mapped[str | None] = mapped_column(String(20), default=None)
+    status: Mapped[str] = mapped_column(String(16), default="confirmed")
+    source: Mapped[str] = mapped_column(String(16), default="workbook")
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("conversations.id"), default=None, index=True
+    )
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), default=None)
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    import_version: Mapped[str | None] = mapped_column(String(64), default=None)
+    imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

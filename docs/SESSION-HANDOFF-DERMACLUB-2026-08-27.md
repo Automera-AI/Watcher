@@ -12,7 +12,7 @@
 >
 > **This is demo-scope work, not a product.** Everything in this branch exists to get one scripted WhatsApp conversation working in front of one client on 1 September. It is deliberately narrow.
 >
-> **The booking journey does not exist yet.** Nada can greet, close, answer from the knowledge base and route clinical questions to a person. She *cannot* check availability, quote a price from the catalogue, hold a slot, or create an appointment. Steps 3–6 below are the whole transactional core and none of it is built.
+> **The booking journey does not exist yet.** Nada can greet, close, answer from the knowledge base and route clinical questions to a person. She *cannot* check availability, quote a price from the catalogue, hold a slot, or create an appointment. Steps 3–6 below are the whole transactional core; as of 28 August the catalogue and diary are in the database (steps 3–4, §12) and nothing in a conversation reads them yet.
 >
 > **Substantial work follows the demo**, whether or not the client signs — see §9. Nothing here should be read as production-ready for a live clinic: the clinical block lists are an unsigned draft, voice notes are unbuilt, Salesforce is not connected, and human-ownership states are specified but not implemented.
 
@@ -28,16 +28,17 @@ Steps 0–2 of the ten-step demo plan, plus the safety work the client review su
 | 1 | Clinic taxonomy (36 intents) | ✅ **done** — client-reviewed |
 | 2 | Greeting + closing tools | ✅ **done** |
 | — | Tenant copy drafted and verified | ✅ **done** — clinical sign-off pending (§7) |
-| 3 | Clinic schemas + migration 008 | ⬜ **not started** — next |
-| 4 | Workbook importer | ⬜ **not started** |
-| 5 | Slot extraction | ⬜ **not started** — blocks everything multi-turn |
+| 3 | Clinic schemas + migration 008 | ✅ **done** — 28 Aug, see §12 |
+| 4 | Workbook importer | ✅ **done** — 28 Aug, see §12 |
+| 5 | Slot extraction | ⬜ **not started** — next; blocks everything multi-turn |
 | 6 | Booking tools + atomic confirm | ⬜ **not started** — the demo's core |
 | 7 | Clinical screening gate | ⬜ **not started** |
 | 8 | Client pack | ⬜ **not started** |
 | 9 | Journey evals | ⬜ **not started** |
 | 10 | Deploy + rehearse | ⬜ **not started** |
 
-**3 of 10 steps complete.** The remaining seven include all transactional behaviour.
+**5 of 10 steps complete.** Steps 5 and 6 are the remaining transactional behaviour: nothing yet
+reads the imported catalogue in a conversation.
 
 ### Commits
 
@@ -77,7 +78,7 @@ unbuilt tool    → handoff, never "All set"
 | 1 | Same-day booking dropped for the demo |
 | 2 | Workbook is the source of truth for hours (11:00–20:00, not 12:00–19:00) |
 | 3 | Workbook authoritative on the 15-min buffer; the 62 back-to-back pairs stand |
-| 4 | DT029 Primelase 6-Sessions → **15,000 EGP** (file still reads 1,500; forced on import) |
+| 4 | DT029 Primelase 6-Sessions → **15,000 EGP** (forced on import; the 26 Aug workbook now reads 15,000 itself — see §12) |
 | 5 | All 14 branches in the demo, including the 5 placeholders |
 | 6 | Retail removed from the catalogue; 35 treatment services, IDs DT001–DT035 |
 | 7 | Voice notes cut from the demo (`Transcriber` is an empty Protocol — unbuilt, not unverified) |
@@ -145,7 +146,7 @@ A copy typo degrades rather than raising: `str.format` on a mistyped placeholder
 
 Deviations to apply on import:
 
-1. **DT029 Primelase 6-Sessions reads 1,500 EGP; force 15,000.** Single session is 3,100 and the 12-session is 16,350.
+1. **DT029 Primelase 6-Sessions reads 1,500 EGP; force 15,000.** Single session is 3,100 and the 12-session is 16,350. *Update, 28 Aug: the workbook now holds 15,000 itself. The importer's correction is conditional and reports that it had nothing to do rather than re-forcing (§12).*
 2. **62 adjacent slot pairs have a 0-minute gap** — every 60-minute service in an hourly grid. Workbook is authoritative; enforce the 15-min buffer only on *new* bookings.
 3. **Ambiguous service names** need a canonical ID + alias map or Nada will loop against the 2-turn limit: "Basic Facial" and "Facial" are both 750/45min; three different 12-session laser packages all cost 16,350; "Body Shaping" (400) and "PowerShape 4 Sessions" (4,000) are the same modality in the suitability PDF.
 4. Read Me still says "Services (Treatment and Retail)" though retail is gone. Cosmetic.
@@ -212,8 +213,8 @@ Nothing here is blocked on the client. Every item is engineering work.
 
 ### Before the demo — required
 
-1. **Migration 007 is unapplied** (006 is the deployed head). Apply before 008 goes near anything. Render access is granted.
-2. **Steps 3–6** — clinic schemas, migration 008, workbook importer, slot extraction, booking tools with an idempotency key on (tenant, conversation, slot). **This is the demo's entire transactional core and none of it exists.**
+1. **Migration 007 is unapplied** (006 is the deployed head). Apply it, then 008 (written, §12). Render access is granted.
+2. **Steps 5–6** — slot extraction, then booking tools reading the catalogue steps 3–4 now persist. The idempotency key on (tenant, conversation, slot) has its column and its uniqueness constraint already (§12); what does not exist is anything that writes one. **This is what is left of the demo's transactional core.**
 3. **`worker.py:410` still passes `{}`** for extracted slots. Nothing multi-turn works until Step 5.
 4. **Set the environment variables in §6** on both Render services.
 5. **Steps 7–10** — screening gate, client pack, journey evals, rehearsal on the live number.
@@ -285,3 +286,86 @@ The project requires Python 3.13; the container default is 3.11.
 > Do not re-litigate the decisions in §3, in particular decision 11: the emergency reply must never direct a patient to public emergency services.
 >
 > Continue at Step 3: clinic domain schemas (Branch, Service, AvailabilitySlot, Booking, BookingReference), tenant-scoped with RLS, as migration 008 chained after 007. Verify the deployed alembic head on Render first and apply 007 — it is unapplied. Then Step 4, the workbook importer, applying the three deviations in §5. Steps 5 and 6 are the schedule risk; get to them early.
+
+
+---
+
+## 12. Steps 3 and 4 — implemented 28 August
+
+Branch `claude/review-handoff-gug2om`. Nothing in §3's decisions was reopened.
+
+### Step 3 — schemas and migration 008
+
+`clinic_branches`, `clinic_services`, `clinic_availability_slots`, `clinic_bookings`, tenant-scoped
+with RLS enabled, forced and policied exactly as 004/005/006 do it, chained after 007. Domain
+objects in `apps/api/core/clinic.py`; ORM rows in `apps/api/db/models.py`.
+
+Three schema decisions worth knowing before step 6 builds on them:
+
+- **`clinic_bookings` carries three uniqueness constraints.** One appointment per `(tenant, slot)`;
+  one `(tenant, reference)`; one `(tenant, idempotency_key)`, the key built from tenant,
+  conversation and slot by `core.clinic.booking_idempotency_key`. Imported rows carry no key —
+  NULLs do not collide — which is why the per-slot constraint is the one that actually prevents a
+  double booking.
+- **`held_until` / `held_by_conversation_id` are in 008 already**, unwritten, so step 6's
+  `hold_slot` does not need a migration of its own.
+- **`BookingReference` is a value object, not a table.** The prefix is a parameter: it is the
+  clinic's initials and belongs with tenant configuration. Imported references are kept verbatim as
+  the clinic wrote them; the import reports the highest serial already taken (`DC-0265`) so step 6
+  issues after it.
+
+Migration 008 was applied and rolled back on SQLite and rendered for Postgres (`--sql`, four
+policies). Note that `alembic upgrade head` cannot run end-to-end on SQLite — migration 002 drops a
+constraint, which SQLite has no ALTER for. That is pre-existing.
+
+### Step 4 — the importer
+
+Validation and every decision live in `apps/api/clinic/importer.py` (pure, tested);
+`scripts/import_clinic_workbook.py` only reads the `.xlsx` with `openpyxl`, which stays an
+operator's dependency, not the application's. `apps/api/db/clinic_repo.py` persists a plan.
+
+The three deviations of §5, as implemented:
+
+1. **The DT029 correction is conditional.** It fires only if the cell still reads the value the
+   client confirmed was wrong; if the file already holds 15,000 it says so and changes nothing;
+   if it holds some third value the import *fails* rather than overwriting a number nobody has
+   looked at. The 26 August workbook is in the second state.
+2. **The 15-minute buffer is not an import rule.** Back-to-back pairs are counted and reported,
+   never rejected. The buffer is step 6's, for new bookings only.
+3. **Ambiguous names.** A name reaching two service codes is an error the import refuses on; two
+   services a patient cannot tell apart (same price, duration and quantity) are a warning naming
+   both, because that fix is a catalogue decision.
+
+Overlapping slots in one branch are an error, with `--allow-overlaps` if the clinic ever says it
+runs two rooms at once. A re-import upserts on the clinic's own keys, deactivates (never deletes)
+branches and services the workbook has dropped, and **never reopens a slot held by a booking this
+system made** — the workbook is authoritative for the clinic's diary, not for appointments made
+after it was exported.
+
+### The 26 August workbook, through the real code path
+
+    14 branches, 35 services, 672 slots, 265 bookings; 0 retail rows skipped;
+    62 back-to-back pairs; 0 errors, 6 warnings
+    slots by date: 31 Aug–3 Sep, 5–6 Sep, 112 each (Fri 4 Sep absent)
+    slots by status: booked=265, open=407
+    highest booking reference already taken: DC-0265
+
+Every number in §5 reproduces. The six warnings are the look-alike service groups (three at
+750/45min, three 12-session packages at 16,350, and three pairs) plus DT026, whose name states
+unlimited sessions and so has no countable quantity to quote. Branch provenance reads 5 real
+example, 4 given, 5 placeholder — the Read Me's "nine are placeholders" folds the four given in;
+the flag follows the column's literal value and §3 decision 5.
+
+The workbook itself is not committed on this branch (it arrives via PR #34, into `docs/`). The
+tests use invented data and pin the client file's real header row.
+
+### Verification
+
+    727 passed, 2 skipped. Ruff clean. mypy clean apart from the pre-existing `test_main.py:166`.
+    Coverage 96.4% (gate 95%).
+
+### Still not done, and unchanged by this
+
+Steps 5–10, the environment variables in §6, applying 007 and 008 on Render, and everything in §9.
+No conversation path reads any of these tables yet: `check_availability`, `quote_price`,
+`hold_slot` and `confirm_booking` remain unbuilt, and an unbuilt tool still hands off.
