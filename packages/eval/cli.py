@@ -33,19 +33,15 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from packages.eval.cases import load_fixtures, load_golden
-from packages.eval.journeys import (
-    FixtureDiary,
-    JourneyReport,
-    TurnLabel,
-    load_journeys,
-    run_journeys,
-)
 from packages.eval.metrics import EvalReport, evaluate_report
 from packages.eval.predictors import RecordedPredictor, run_eval
 from packages.eval.report import write_html, write_json
-from packages.intents.schema import vocabulary_for
+
+if TYPE_CHECKING:  # imported for types only — see `_run_journey_eval` for why not at runtime
+    from packages.eval.journeys import JourneyReport, TurnLabel
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -131,6 +127,15 @@ def _print_journeys(report: JourneyReport) -> None:
 
 
 def _run_journey_eval(args: argparse.Namespace) -> int:
+    # Imported here rather than at module scope, and the reason is the CI job next door: the
+    # classifier gate runs on pydantic alone (D13-a — deterministic, no live key, minimal install),
+    # while a journey drives the real receptionist and therefore the whole application. A
+    # module-level import would make the classifier gate depend on rapidfuzz, PyYAML and
+    # SQLAlchemy to replay a JSONL file it could always read on its own.
+
+    from packages.eval.journeys import FixtureDiary, TurnLabel, load_journeys, run_journeys
+    from packages.intents.schema import vocabulary_for
+
     if args.diary is None:
         raise SystemExit("--journeys needs --diary: a journey has to run against a real diary")
     labels: dict[str, TurnLabel] | None = None
