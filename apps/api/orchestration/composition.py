@@ -15,6 +15,8 @@ genuine miss gets, silently, because the tool would simply not be registered in 
 
 from __future__ import annotations
 
+import logging
+import os
 from dataclasses import dataclass
 
 from packages.intents.schema import Vocabulary
@@ -24,6 +26,7 @@ from apps.api.channels.sender import ChannelSender
 from apps.api.classifier.service import Classifier
 from apps.api.conversations.receptionist import handle
 from apps.api.conversations.tools import (
+    REGISTRY,
     configure_clinic,
     configure_conversation_copy,
     configure_knowledge,
@@ -44,9 +47,29 @@ from apps.api.db.property_repo import SqlAlchemyPropertyRepository
 from apps.api.orchestration.queue import MessageConsumer
 from apps.api.orchestration.worker import Orchestrator
 
+_logger = logging.getLogger(__name__)
+
 #: The tools a vertical must declare before its clinic catalogue is wired up. All four, not any:
 #: a vocabulary that books but cannot check availability is not a vertical this supports.
 _CLINIC_TOOLS = frozenset({"check_availability", "quote_price", "hold_slot", "confirm_booking"})
+
+#: Environment variables a platform may expose the deployed commit under, best-effort and in
+#: order of preference. Render sets ``RENDER_GIT_COMMIT``; the others are common fallbacks.
+_GIT_SHA_ENV = ("RENDER_GIT_COMMIT", "GIT_COMMIT", "GIT_SHA", "SOURCE_VERSION", "COMMIT_SHA")
+
+
+def _deployed_sha() -> str:
+    """The deployed commit, read best-effort from the environment, or ``"unknown"``.
+
+    Never raises and never opens anything: the diagnostic below must not be able to fail a boot.
+    A process that cannot name its own commit still says which vertical and tools it wired, which
+    is the fact that actually explains a receptionist stuck on the unbuilt-tool hand-off.
+    """
+    for name in _GIT_SHA_ENV:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return "unknown"
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,4 +146,23 @@ def build_consumer(
         vocabulary=selected,
     )
     consumer = MessageConsumer(SqlAlchemyMessageLoader(tenant_scope), orchestrator)
+
+    # Startup diagnostic (demo step 0). The repeated unbuilt-tool hand-off a patient sees when
+    # availability or booking is asked for is the signature of the clinic tools being absent from
+    # *this* process's registry — which happens when the process loaded a vertical other than the
+    # one whose tools it was meant to register (``TENANT_VERTICAL``), or is running code from
+    # before they existed. One line, on both the API and the worker because both call this, saying
+    # which commit, which vertical, and which tools this process actually wired — no secrets, no
+    # message content, and no database round-trip (row counts need a tenant and belong to an
+    # operator command, not the boot path).
+    missing_clinic_tools = sorted(_CLINIC_TOOLS - set(REGISTRY))
+    _logger.info(
+        "consumer wired: git_sha=%s vertical=%s clinic_tools_registered=%s "
+        "missing_clinic_tools=%s registered_tools=%s",
+        _deployed_sha(),
+        selected.vertical,
+        not missing_clinic_tools,
+        missing_clinic_tools,
+        sorted(REGISTRY),
+    )
     return ConsumerGraph(consumer=consumer, sender=sender)
