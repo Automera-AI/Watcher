@@ -25,7 +25,7 @@ Services,DT009,Filler,فيلر|الفيلر,drafted,
 Services,DT010,Filler 1 Syringe,فيلر سرنجة|فيلر سرنجة واحدة|سرنجة فيلر,drafted,
 Services,DT011,Filler 2 Syringes + 1 Free,فيلر سرنجتين|فيلر 2 سرنجة|فيلر ٢ سرنجة,drafted,
 Services,DT012,Apriline Dermal Filler - Buy 2 Get 1 FREE,أبريلين|فيلر أبريلين,drafted,"DT011 and DT012 are both 10,000 EGP for 30 minutes; the alias for each is its own distinguishing word, so neither is reachable by a generic فيلر phrase."
-Services,DT013,Biostimulator,بيوستيميوليتور|بيو ستيميوليتور,drafted,"Transliteration only. Many patients call this محفزات الكولاجين — needs the clinic's word before it goes in (open question 3)."
+Services,DT013,Biostimulator,محفزات الكولاجين|محفز الكولاجين|بيوستيميوليتور|بيو ستيميوليتور,client-approved,"Q3, answered by the clinic. Their words first, the transliterations kept behind them: patients type both."
 Services,DT014,Sculpting Injection (حقن تكميم) 4 Sessions,حقن تكميم|إبر التكميم|حقن التكميم,drafted,
 Services,DT015,Sculpting Alternative Injection (حقن بديل التكميم),حقن بديل التكميم|بديل التكميم|بديل تكميم,drafted,
 Services,DT016,Bikini & Underarm Laser Hair Removal - 6 Sessions,ليزر بيكيني|ليزر بيكيني وتحت الإبط|بيكيني وتحت الإبط,drafted,

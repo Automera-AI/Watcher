@@ -57,12 +57,12 @@ the review document; `DermaClub_Aliases_DRAFT_2026-08-28.xlsx` is the two column
 into the client's own workbook. **Nothing is imported and the client's file is untouched** —
 decision 12 puts this data in their workbook, not in this repository.
 
-132 aliases over 48 rows. Measured with `scripts/check_alias_resolution.py` over the demo's own
+134 aliases over 48 rows. Measured with `scripts/check_alias_resolution.py` over the demo's own
 phrases:
 
 ```
-today                    23 phrases: 2 resolved, 0 ask, 21 reach nothing
-with the reviewed list   23 phrases: 22 resolved, 1 asks, 0 reach nothing
+today                    24 phrases: 2 resolved, 0 ask, 22 reach nothing
+with the reviewed list   24 phrases: 23 resolved, 1 asks, 0 reach nothing
 ```
 
 The one that asks is a bare `ليزر`, which reaches nine packages. That is the right answer there.
@@ -79,12 +79,12 @@ Five comment threads on the review page, all on services that were blocked or fl
   clarifying question; DT020 still answers to its English catalogue name and stays bookable.
 * **DT024 / DT027** (Q2, the two 4-session maintenance packages) — answered cleanly. Every name the
   clinic gave DT027 says full body; none of DT024's do. Both resolve outright.
-* **DT006 Skin Boosters** (Q3a) — `حقن ترطيب ونضارة البشرة` and `معززات البشرة`, kept alongside the
-  transliterations because patients type both.
+* **DT006 Skin Boosters and DT013 Biostimulator** (Q3) — `حقن ترطيب ونضارة البشرة` / `معززات البشرة`
+  and `محفزات الكولاجين` / `محفز الكولاجين`, each kept alongside the transliterations because
+  patients type both forms.
 
-**Still open: DT013, the Biostimulator.** It carries a transliteration and nothing else, so a
-patient using the clinic's word for it reaches nothing. The two body-shaping pairs (DT032/DT035,
-DT033/DT034) drew no comment and keep the draft's one-distinguishing-word approach.
+**Nothing is outstanding on the alias list.** The two body-shaping pairs (DT032/DT035, DT033/DT034)
+drew no comment and keep the draft's one-distinguishing-word approach.
 
 `scripts/check_alias_resolution.py` is the tool to run on whatever the client sends back. It
 answers the question the importer does not: a catalogue can import perfectly and still leave a
@@ -215,9 +215,9 @@ catalogue's.
 ### Before the demo — required
 
 1. **Step 10 itself.** Migrations 007 and 008, the environment, the import, the rehearsal.
-2. **The aliases into the client's workbook.** The list is reviewed (§2.1); it still has to go into
-   their file and be re-imported. Nothing Arabic resolves until then; the English names still work.
-   One question is open — what they call a Biostimulator (DT013).
+2. **The aliases into the client's workbook.** The list is reviewed and complete (§2.1); it still
+   has to go into their file and be re-imported. Nothing Arabic resolves until then; the English
+   names still work.
 3. **The medical lead's approval** of the screening categories, the eleven disclosures and the
    emergency wording. Unchanged, and still unsigned.
 4. **Re-script the demo around 19:00** (or Nasr City's 17:00). See the warning at the top.

@@ -66,6 +66,7 @@ DEMO_PHRASES: tuple[tuple[str, str], ...] = (
     ("service", "باقة متابعة الليزر 4 جلسات"),
     ("service", "متابعة 4 جلسات فل بودي"),
     ("service", "ليزر 12 جلسة نص الجسم"),
+    ("service", "محفزات الكولاجين"),
     ("service", "هاف بودي"),
     ("service", "Basic Facial"),
     ("branch", "المعادي"),

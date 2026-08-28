@@ -120,7 +120,7 @@ Three things the file settled, all confirmed with the clinic:
 
 | | What | Why it matters |
 |---|---|---|
-| 1 | **The Arabic names into the workbook.** Reviewed on 28 August and one question is left: what you call a Biostimulator | Until they are in the workbook, "عايزة أحجز فاشيال في المعادي" reaches no treatment and no branch, and Nada asks a question that cannot be answered |
+| 1 | **The Arabic names into the workbook.** Reviewed and complete — two columns to paste, then send the file back | Until they are in the workbook, "عايزة أحجز فاشيال في المعادي" reaches no treatment and no branch, and Nada asks a question that cannot be answered |
 | 2 | **Your medical lead's approval** of the screening categories, the eleven disclosures and the emergency wording | These are engineering drafts. Nothing goes live to a real patient without a clinician's name on them |
 | 3 | **The real details for five branches** | Five of the fourteen are placeholders |
 | 4 | **The doctor's number** to replace the demo number in the emergency reply | The emergency path is only as good as the number it rings |

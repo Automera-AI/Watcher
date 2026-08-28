@@ -1,13 +1,10 @@
 # Arabic aliases — draft for client review
 
-**Status: reviewed by the clinic, 28 August.** Three of the five services that were blocked now have
-the clinic's own names, Skin Boosters has the words its patients use, and **DT020 is deliberately
-left unwired** — it keeps its row and carries no Arabic name at all. **Still not imported** —
-these are values for two new columns in the clinic's own workbook, and they go in when the clinic
-puts them there.
-
-**One question is still open:** what the clinic calls a Biostimulator (DT013). It carries a
-transliteration and nothing else.
+**Status: review complete, 28 August. Nothing is outstanding.** Three of the five blocked services
+carry the clinic's own names, both terms in question 3 are answered, and **DT020 is deliberately
+left unwired** — it keeps its row and carries no Arabic name at all. **Still not imported** — these
+are values for two new columns in the clinic's own workbook, and they go in when the clinic puts
+them there.
 
 **Date:** 28 August 2026 · **For:** the DermaClub demo, Tuesday 1 September
 **Data:** `docs/dermaclub-aliases-draft.csv` (the same table, machine-readable)
@@ -26,13 +23,13 @@ data the clinic owns, in the file decision 2 already makes the source of truth.
 Measured against the committed workbook, today:
 
 ```
-23 phrases: 2 resolved, 0 ask a clarifying question, 21 reach nothing
+24 phrases: 2 resolved, 0 ask a clarifying question, 22 reach nothing
 ```
 
 The two that resolve are the two written in English. With this list laid over the same file:
 
 ```
-23 phrases: 22 resolved, 1 ask a clarifying question, 0 reach nothing
+24 phrases: 23 resolved, 1 ask a clarifying question, 0 reach nothing
 ```
 
 The one that asks is a bare `ليزر`, which reaches nine packages. That is the right answer there.
@@ -44,8 +41,8 @@ Both numbers come from `scripts/check_alias_resolution.py` against
 
 ## 2. What to do with this
 
-1. Read §5 and §6 and correct anything that is not what the clinic's own patients say.
-2. Answer the one question still open in §7 — DT013, the Biostimulator.
+1. Read §5 and §6 and correct anything that is not what the clinic's own patients say. Nothing is
+   outstanding — this is a last read rather than a blocker.
 3. Add one column headed **`Aliases`** to the **Branches** sheet and one to the **Services** sheet,
    and paste the corrected values in. Separate alternatives with `|`.
 4. Send the workbook back. It is re-imported, and `check_alias_resolution.py` is run against it
@@ -151,7 +148,7 @@ ID with an alias map behind it, which is what deviation 3 asked for.
 | DT010 | Filler 1 Syringe | `فيلر سرنجة\|فيلر سرنجة واحدة\|سرنجة فيلر` | drafted |
 | DT011 | Filler 2 Syringes + 1 Free | `فيلر سرنجتين\|فيلر 2 سرنجة\|فيلر ٢ سرنجة` | drafted |
 | DT012 | Apriline Dermal Filler | `أبريلين\|فيلر أبريلين` | drafted |
-| DT013 | Biostimulator | `بيوستيميوليتور\|بيو ستيميوليتور` | **still open — Q3** |
+| DT013 | Biostimulator | `محفزات الكولاجين\|محفز الكولاجين\|بيوستيميوليتور\|بيو ستيميوليتور` | **clinic's own** |
 | DT014 | Sculpting Injection 4 Sessions | `حقن تكميم\|إبر التكميم\|حقن التكميم` | drafted |
 | DT015 | Sculpting Alternative Injection | `حقن بديل التكميم\|بديل التكميم\|بديل تكميم` | drafted |
 | DT016 | Bikini & Underarm Laser — 6 Sessions | `ليزر بيكيني\|ليزر بيكيني وتحت الإبط\|بيكيني وتحت الإبط` | drafted |
@@ -205,10 +202,10 @@ DT024's do, which is exactly the distinguishing word that was missing. Both now 
 The two body-shaping pairs the clinic did not comment on — DT032 vs DT035, and DT033 vs DT034 —
 keep the draft's approach of one distinguishing word each. Worth a look, not blocking.
 
-**Q3 — two terms an engineer should not choose. Half answered.** Skin Boosters are
-`حقن ترطيب ونضارة البشرة` and `معززات البشرة`, both now on DT006 alongside the transliterations,
-because patients type both. **DT013, the Biostimulator, is still open** — it carries a
-transliteration and nothing else, so a patient who calls it anything else reaches nothing.
+**Q3 — two terms an engineer should not choose. Both answered.** Skin Boosters are
+`حقن ترطيب ونضارة البشرة` and `معززات البشرة`; the Biostimulator is `محفزات الكولاجين`, with the
+singular `محفز الكولاجين` beside it because patients write either. The transliterations stay behind
+both — they are also what people type.
 
 ## 8. What this does not cover
 
