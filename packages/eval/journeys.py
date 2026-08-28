@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any
 
 from apps.api.conversations.receptionist import handle
+from apps.api.conversations.slots import normalise_slots
 from apps.api.conversations.task import Task, TaskStatus
 from apps.api.conversations.tools import (
     REGISTRY,
@@ -547,16 +548,29 @@ def run_journey(
                     break
                 label = labels[turn.message]
 
+            # The same step the worker takes between the classifier and the receptionist: keep
+            # only the slots this intent declares, drop the values that are not values, and
+            # resolve "بكرة" against the tenant's calendar. Written labels are already in that
+            # form and pass through unchanged; a recorded one is the model's raw output and is
+            # not, so a journey run on recordings without this would be scoring a pipeline that
+            # does not exist.
+            slots = normalise_slots(
+                label.intent,
+                label.slots,
+                vocabulary=vocabulary,
+                today=diary.now.astimezone(_zone(diary.timezone)).date(),
+            )
             action, task = asyncio.run(
                 handle(
                     _inbound(tenant_id, turn.message, diary.now, index),
                     label.intent,
                     label.confidence,
-                    dict(label.slots),
+                    slots,
                     continuity.task,
                     vocabulary=vocabulary,
                     conversation_id=conversation_id,
                     turns_taken=continuity.replies_sent,
+                    today=diary.now.astimezone(_zone(diary.timezone)).date(),
                 )
             )
             continuity.record(task, action)

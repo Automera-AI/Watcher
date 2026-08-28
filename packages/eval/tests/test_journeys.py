@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 from apps.api.schemas.classification import ClassificationResult
 
+from packages.eval.cases import load_fixtures
 from packages.eval.cli import main
 from packages.eval.journeys import (
     FixtureDiary,
@@ -37,6 +38,7 @@ from packages.intents.schema import vocabulary_for
 ROOT = Path(__file__).resolve().parents[1]
 JOURNEYS = ROOT / "golden/clinics_journeys.jsonl"
 DIARY = ROOT / "fixtures/clinic_diary.json"
+LIVE_LABELS = ROOT / "fixtures/recorded_clinics_journey_haiku.jsonl"
 
 CLINICS = vocabulary_for("clinics")
 
@@ -68,6 +70,32 @@ def test_every_journey_in_the_set_passes_against_the_clients_own_diary(
         if not outcome.ok and not outcome.case.known_gap
     ]
     assert not failed, f"journeys broke: {failed}"
+    assert report.turn_accuracy == 1.0
+
+
+def test_every_journey_survives_what_the_model_actually_says(diary: FixtureDiary) -> None:
+    """The same set, on recorded classifications rather than the labels we wrote for it.
+
+    This is the run that matters, and the first time it was made it scored 5 of 9. The written
+    labels say `booking_enquiry` for "الساعة ٧"; the model says `unclear`, at 0.25 on the cheap
+    tier and 0.3 after escalating, because out of context two words naming an hour are not a
+    booking request. That switched tasks and fetched a person one turn after the patient had been
+    offered a time — the demo's own second turn.
+
+    Two fixes came out of it and both are load-bearing here: an `unclear` turn is offered to the
+    slot the task is waiting on, and an intent the conversation supplied is not gated by how sure
+    the model was about a label it did not choose. If this test fails and the written-label one
+    passes, the difference is the classifier, not the conversation.
+    """
+    labels = {
+        message: TurnLabel.from_result(result)
+        for message, result in load_fixtures(LIVE_LABELS).items()
+        if result is not None
+    }
+    report = run_journeys(load_journeys(JOURNEYS), diary, vocabulary=CLINICS, labels=labels)
+
+    broken = [outcome.case.id for outcome in report.gated if not outcome.ok]
+    assert not broken, f"journeys broke on the model's own labels: {broken}"
     assert report.turn_accuracy == 1.0
 
 

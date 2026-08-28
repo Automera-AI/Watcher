@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 from packages.intents.schema import Vocabulary, default_vocabulary
 
-from apps.api.clinic.catalogue import resolve_branch, resolve_service
+from apps.api.clinic.catalogue import ServiceMatch, resolve_branch, resolve_service
 from apps.api.core.clinic import Branch, ClinicDirectory, Service
 from apps.api.core.knowledge import Fact, KnowledgeLookup, best_match
 from apps.api.core.property import PropertyResolver
@@ -392,12 +392,21 @@ class _ClinicTool(Tool):
             or f"Which did you mean: {listed}?",
         )
 
-    def _resolve(self, tenant_id: str, service: str, branch: str | None) -> ToolResult | _Resolved:
+    def _resolve(
+        self,
+        tenant_id: str,
+        service: str,
+        branch: str | None,
+        session_count: str | None = None,
+    ) -> ToolResult | _Resolved:
         """The service and branch a patient named, or the ``ToolResult`` that has to be said."""
         services = self._directory.list_services(tenant_id)
         found_service = resolve_service(service, services)
         if found_service.ambiguous:
-            return self._choose([s.name for s in found_service.candidates])
+            narrowed = _by_session_count(found_service.candidates, session_count)
+            if narrowed is None:
+                return self._choose([s.name for s in found_service.candidates])
+            found_service = narrowed
         if found_service.found is None:
             return ToolResult(ok=False, error="unknown_service")
 
@@ -413,6 +422,30 @@ class _ClinicTool(Tool):
 
     def _local(self, moment: datetime) -> datetime:
         return moment.astimezone(self._zone)
+
+
+def _by_session_count(
+    candidates: Sequence[Service], session_count: str | None
+) -> ServiceMatch | None:
+    """The one candidate with this many sessions, or ``None`` to keep asking.
+
+    The patient said "برايم ليز 6 جلسات" and the model, correctly, split that into a service and a
+    quantity — which left the catalogue lookup holding "برايم ليز", three packages that differ only
+    by how many sessions they are, and a clarifying question whose answer the patient had already
+    given. The count they said is the thing that tells those three apart, so it is used.
+
+    It narrows and never picks: a count matching two rows, or none, still asks. Found by running
+    the journeys against real classifications — with the labels written by hand the service name
+    arrived whole and this never came up.
+    """
+    if not session_count:
+        return None
+    try:
+        wanted = int(session_count)
+    except ValueError:
+        return None
+    matched = [s for s in candidates if s.session_count == wanted]
+    return ServiceMatch(found=matched[0]) if len(matched) == 1 else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -454,7 +487,7 @@ class CheckAvailability(_ClinicTool):
         except ValueError:
             return ToolResult(ok=False, error="unreadable_date")
 
-        resolved = self._resolve(tenant_id, service_text, branch_text)
+        resolved = self._resolve(tenant_id, service_text, branch_text, kwargs.get("session_count"))
         if isinstance(resolved, ToolResult):
             return resolved
         assert resolved.branch is not None
@@ -539,7 +572,7 @@ class QuotePrice(_ClinicTool):
         if not service_text:
             return ToolResult(ok=False, error="incomplete")
 
-        resolved = self._resolve(tenant_id, service_text, None)
+        resolved = self._resolve(tenant_id, service_text, None, kwargs.get("session_count"))
         if isinstance(resolved, ToolResult):
             return resolved
         service = resolved.service

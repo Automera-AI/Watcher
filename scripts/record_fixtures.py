@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -53,7 +54,11 @@ from packages.eval.cases import load_golden  # noqa: E402
 
 
 def _record_one(
-    classifier: Classifier, message: str, phone: str | None, name: str | None
+    classifier: Classifier,
+    message: str,
+    phone: str | None,
+    name: str | None,
+    now: datetime | None,
 ) -> dict[str, Any]:
     outcome = classifier.classify(
         ClassificationInput(
@@ -61,6 +66,7 @@ def _record_one(
             modality=MessageType.TEXT,
             sender_display_name=name,
             sender_phone=phone,
+            local_now=now,
         )
     )
     predicted = outcome.result.model_dump(mode="json") if outcome.result is not None else None
@@ -76,7 +82,23 @@ def main(argv: list[str] | None = None) -> int:
         default="holiday_homes",
         help="Shipped vocabulary used to build the provider prompt (default: holiday_homes).",
     )
+    parser.add_argument(
+        "--now",
+        default=None,
+        help="The tenant's local clock as an ISO timestamp, e.g. 2026-09-01T12:00:00+03:00. "
+        "Rendered into the user turn as <today>, exactly as the worker does it. Without it the "
+        "model has no calendar and resolves 'tomorrow' against its training cut — which is a "
+        "real, parseable, wrong date, and makes every recorded date-bearing line unrepresentative "
+        "of production.",
+    )
     args = parser.parse_args(argv)
+    now = datetime.fromisoformat(args.now) if args.now else None
+    if now is None:
+        print(
+            "::warning:: no --now given: dates in this recording are the model's guess, not the "
+            "tenant's calendar",
+            file=sys.stderr,
+        )
 
     settings = Settings(tenant_vertical=args.tenant_vertical)
     vocabulary = settings.vocabulary()
@@ -90,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     cases = load_golden(args.golden)
     lines: list[str] = []
     for i, case in enumerate(cases, 1):
-        record = _record_one(classifier, case.message, case.sender_phone, case.sender_name)
+        record = _record_one(classifier, case.message, case.sender_phone, case.sender_name, now)
         lines.append(json.dumps(record, ensure_ascii=False))
         pred = record["predicted"]
         label = pred["intent"] if pred is not None else "UNCLEAR/invalid"
@@ -103,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
         "prompt_version": PROMPT_VERSION,
         "system_prompt_fingerprint": prompt_fingerprint(system_prompt),
         "golden_set_size": len(cases),
+        "local_now": args.now,
     }
     metadata_path = args.out.with_suffix(".meta.json")
     metadata_path.write_text(
