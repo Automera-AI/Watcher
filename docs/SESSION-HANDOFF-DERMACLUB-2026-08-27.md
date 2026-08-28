@@ -12,7 +12,7 @@
 >
 > **This is demo-scope work, not a product.** Everything in this branch exists to get one scripted WhatsApp conversation working in front of one client on 1 September. It is deliberately narrow.
 >
-> **The booking journey does not exist yet.** Nada can greet, close, answer from the knowledge base and route clinical questions to a person. She *cannot* check availability, quote a price from the catalogue, hold a slot, or create an appointment. Steps 3–6 below are the whole transactional core; as of 28 August the catalogue and diary are in the database (steps 3–4, §12) and nothing in a conversation reads them yet.
+> **The booking journey now exists** (steps 5–7, §13, 28 August). Nada can check availability, quote from the catalogue, hold a slot, write an appointment and quote its reference, and a clinical disclosure stops her doing any of it. Two things stand between that and a working demo and neither is code: the environment variables in §6 and §13.4 are unset on Render, and **no Arabic service or branch name resolves** because the workbook is entirely in English and has no aliases column (§13.5).
 >
 > **Substantial work follows the demo**, whether or not the client signs — see §9. Nothing here should be read as production-ready for a live clinic: the clinical block lists are an unsigned draft, voice notes are unbuilt, Salesforce is not connected, and human-ownership states are specified but not implemented.
 
@@ -30,15 +30,16 @@ Steps 0–2 of the ten-step demo plan, plus the safety work the client review su
 | — | Tenant copy drafted and verified | ✅ **done** — clinical sign-off pending (§7) |
 | 3 | Clinic schemas + migration 008 | ✅ **done** — 28 Aug, see §12 |
 | 4 | Workbook importer | ✅ **done** — 28 Aug, see §12 |
-| 5 | Slot extraction | ⬜ **not started** — next; blocks everything multi-turn |
-| 6 | Booking tools + atomic confirm | ⬜ **not started** — the demo's core |
-| 7 | Clinical screening gate | ⬜ **not started** |
+| 5 | Slot extraction | ✅ **done** — 28 Aug, see §13 |
+| 6 | Booking tools + atomic confirm | ✅ **done** — 28 Aug, see §13 |
+| 7 | Clinical screening gate | ✅ **done** — 28 Aug, see §13 |
 | 8 | Client pack | ⬜ **not started** |
 | 9 | Journey evals | ⬜ **not started** |
 | 10 | Deploy + rehearse | ⬜ **not started** |
 
-**5 of 10 steps complete.** Steps 5 and 6 are the remaining transactional behaviour: nothing yet
-reads the imported catalogue in a conversation.
+**8 of 10 steps complete.** The booking journey exists end to end: a patient can be greeted, quoted,
+offered real times, read back to, and given a durable reference — and a clinical disclosure stops
+all of it. What is left is packaging, evals and the rehearsal, plus everything in §7 and §9.
 
 ### Commits
 
@@ -49,6 +50,10 @@ reads the imported catalogue in a conversation.
 | `eacdb6a` | Tenant conversation copy |
 | `22cf9db` | Tenant owns emergency wording; clinic routes to its doctor |
 | `24cd98c` | This handoff |
+| `0b08676` | Clinic schemas, migration 008, workbook importer (steps 3–4) |
+| `0013892` | Slot extraction; `TENANT_VERTICAL` (step 5) |
+| `86f27c9` | Booking journey: availability, quotes, holds, atomic confirm (step 6) |
+| `a08ea8b` | Clinical screening gate (step 7) |
 
 ---
 
@@ -214,14 +219,14 @@ Nothing here is blocked on the client. Every item is engineering work.
 ### Before the demo — required
 
 1. **Migration 007 is unapplied** (006 is the deployed head). Apply it, then 008 (written, §12). Render access is granted.
-2. **Steps 5–6** — slot extraction, then booking tools reading the catalogue steps 3–4 now persist. The idempotency key on (tenant, conversation, slot) has its column and its uniqueness constraint already (§12); what does not exist is anything that writes one. **This is what is left of the demo's transactional core.**
-3. **`worker.py:410` still passes `{}`** for extracted slots. Nothing multi-turn works until Step 5.
-4. **Set the environment variables in §6** on both Render services.
-5. **Steps 7–10** — screening gate, client pack, journey evals, rehearsal on the live number.
+2. ~~**Steps 5–6**~~ — done, §13. ~~**`worker.py` passes `{}`**~~ — done.
+3. **Arabic aliases for services and branches.** The single biggest demo risk now. See §13.5: the mechanism is complete and the data does not exist, so today "عايزة أحجز فاشيال في المعادي" resolves to nothing and Nada asks a question she cannot be answered. Two columns in the client's own workbook, then a re-import.
+4. **Set the environment variables in §6 and §13.4** on both Render services. `TENANT_VERTICAL=clinics` is new and **mandatory** — without it the clinic taxonomy is shipped and reachable by nothing.
+5. **Steps 8–10** — client pack, journey evals, rehearsal on the live number.
 
 ### Before the demo — strongly advised
 
-6. **Dialogue-state rule is unimplemented.** The vocabulary header specifies that short replies ("تمام", "أيوه", "لا") are resolved against an active pending question *before* the flat vocabulary is consulted. Not expressible in YAML; needs runtime work. **"تمام" meaning *yes, book it* versus *thanks, goodbye* is the most likely live failure on demo day.**
+6. ~~**Dialogue-state rule is unimplemented.**~~ Implemented for the one case the demo needs (§13.3): a short reply is read against an outstanding read-back before the classified intent may switch tasks, so "تمام" mid-booking books and "تمام" elsewhere still closes. The *general* form — every pending question, not just the confirmation — is still unbuilt.
 7. **Multi-intent decomposition** — also specified in the vocabulary header, also unimplemented. A message asking price *and* nearest branch will only get one answered.
 
 ### Accepted for the demo, not fixed
@@ -369,3 +374,168 @@ tests use invented data and pin the client file's real header row.
 Steps 5–10, the environment variables in §6, applying 007 and 008 on Render, and everything in §9.
 No conversation path reads any of these tables yet: `check_availability`, `quote_price`,
 `hold_slot` and `confirm_booking` remain unbuilt, and an unbuilt tool still hands off.
+
+---
+
+## 13. Steps 5, 6 and 7 — implemented 28 August
+
+Branch `claude/review-handoff-gug2om`. Nothing in §3's decisions was reopened. **903 passed, 2
+skipped. Ruff clean. mypy clean apart from the pre-existing `test_main.py:166`. Coverage 95.9%
+(gate 95%).**
+
+### 13.1 Step 5 — slot extraction, and a gap it uncovered
+
+The model now emits `extracted_slots` alongside the label, and `apps/api/conversations/slots.py`
+decides which keys are real and what their values mean. `<today>` on the tenant's clock is rendered
+into the user turn so the model has a calendar to resolve against. Prompt version **v4**; the intent
+catalogue now names each intent's slots, which was previously on the prompt's own "deliberately not
+here" list — the docstring says why that reason does not reach slot *names*.
+
+Three rules, and the third is the one that matters. Only slots the chosen intent declares. Only
+values that are values (`null`, `unknown` and friends are absences several models write out). And a
+date that cannot be pinned to one day is **dropped, never guessed** — a dropped date costs a
+clarifying question, a wrong one books a patient into a day they never chose and confirms it.
+
+**The gap found on the way.** Nothing could select the clinic vocabulary. Every runtime caller went
+through `default_vocabulary()`, which reads one file — `intents.yaml`, the holiday-home vertical. The
+clinic taxonomy was shipped, validated, client-reviewed and reachable by nothing: the classifier
+described holiday-home intents to the model and `decide_autonomy` looked up ceilings in the wrong
+file. **`TENANT_VERTICAL=clinics` is now mandatory for this deploy.** An unknown vertical is refused
+at startup rather than falling back.
+
+### 13.2 Step 6 — the booking journey
+
+`check_availability`, `quote_price`, `hold_slot` and `confirm_booking`, against the imported
+catalogue through a `ClinicDirectory` port. The write side never decides anything it can lose a race
+on: `hold_slot` is a conditional `UPDATE` reading its own row count, and `confirm_booking` inserts
+against the `(tenant, slot)` and `(tenant, idempotency_key)` constraints and treats the integrity
+error as an answer. Two people messaging about the last 18:00 is not hypothetical on a demo where one
+number is passed round a room.
+
+The journey, in the shape the demo will run:
+
+```
+patient  عايزة أحجز فاشيال في المعادي بكرة
+Nada     I can offer 11:00 / 16:00 / 18:00 …          ← from the diary, on this turn
+patient  الساعة ٦
+Nada     Just to confirm: … Wednesday 02 September, 18:00?   ← slot held while they answer
+patient  تمام
+Nada     That's booked. Your reference is DC-0266.    ← the appointment now exists
+```
+
+**The time is offered, never asked for.** "Which time would you like?" cannot keep the vocabulary's
+*never offer a slot the scheduling system did not return*, so `requested_time` and `requested_date`
+are now required slots on the booking and availability intents (vocabulary 2.2.0) and the ask turn
+for the time is a real availability call.
+
+### 13.3 The two things that made the journey unreachable
+
+Neither was in the tools, and both would have been found on demo day.
+
+**Nothing ever agreed to anything.** `Task.confirmed` was a set only ever *emptied* — `absorb`
+discarded from it and nothing added. An intent declaring `confirm_before_acting` read a detail back,
+was told "أيوه", and read it back again until `max_clarifying_turns` fetched a person. No task with a
+confirmable slot could reach `execute` at all, so `confirm_booking` would have been unreachable even
+once built. The read-back now covers everything outstanding in **one** message: four confirmations at
+one per turn do not fit inside `max_clarifying_turns: 2`.
+
+**And "تمام" ended the conversation.** Classified flat it is `thanks_closing` — right most of the
+time, wrong by one word mid-booking: the task was abandoned and Nada said goodbye to somebody about
+to have an appointment. This was §7 item 6, "the most likely live failure on demo day". A short reply
+is now read against a read-back that is genuinely outstanding, *before* the classified intent may
+switch tasks. Narrow on purpose: away from a pending read-back, "تمام" still closes a conversation.
+
+### 13.4 New environment variables
+
+| Variable | Value | Notes |
+|---|---|---|
+| `TENANT_VERTICAL` | `clinics` | **Mandatory.** Without it the clinic taxonomy is unreachable. |
+| `TENANT_BOOKING_REFERENCE_PREFIX` | `DC` | The letters in `DC-0042`. Defaults to `WB`, which is wrong for this client. |
+| `TENANT_AVAILABILITY_OFFER` | Arabic, `{times} {service} {branch} {date}` | Unset → neutral English. |
+| `TENANT_AVAILABILITY_NONE` | Arabic, `{service} {branch} {date}` | |
+| `TENANT_PRICE_QUOTE` | Arabic, `{service} {price} {currency} {sessions}` | **Must keep `{sessions}`** — see below. |
+| `TENANT_CHOOSE_ONE` | Arabic, `{options}` | |
+| `TENANT_BOOKING_TAKEN` | Arabic | Said when a slot goes between the offer and the yes. |
+
+`TENANT_PRICE_QUOTE` is the one with a rule rather than a preference attached. `quoting.always_state`
+requires the currency, the session count and the package scope; a template that drops `{sessions}`
+turns "15,000 EGP for six" into a number meaning a fifth as much treatment. **These five are the only
+copy still to be written in Arabic** — everything else was drafted in the previous session (§6.2).
+
+### 13.5 ⚠️ No Arabic name resolves yet — the biggest remaining demo risk
+
+The workbook is entirely in English: branches are `Maadi`, `New Cairo`, `Nasr City`; services are
+`Basic Facial`, `Primelase Laser Package - 6 Sessions`. There is **no aliases column**. Nothing in
+the code transliterates or translates — deliberately, because a guess about a place name or a
+treatment name in shared source is a guess nobody clinical has read. The consequence is concrete:
+
+> "عايزة أحجز فاشيال في المعادي بكرة" resolves to **no service and no branch** today.
+
+The mechanism is complete on both sides. `Service.aliases` already existed; `Branch.aliases` was
+added (folded into migration 008, which is unapplied, rather than a 009 for one column on a table no
+deployment has). The importer reads an `Aliases` / `Alias` / `Arabic` column on both sheets.
+
+**What is needed:** two columns in the client's own workbook, then a re-import. Putting them there
+rather than in a file in this repository is deliberate — it is the clinic's vocabulary for its own
+treatments, and decision 2 already makes the workbook the source of truth. A starter list should be
+drafted and sent for review, not invented and shipped.
+
+### 13.6 Step 7 — the clinical screening gate
+
+`apps/api/core/screening.py`, driven by a new `screening:` block in the clinic vocabulary (2.3.0).
+Two halves:
+
+* **`screened_categories: [Injectables, Skin]`** — a clinician approves these whatever the patient
+  says. Filler is a medical procedure; a receptionist taking that booking unsupervised is the
+  clinic's licence, not a UX preference. **Laser is deliberately not gated by category** — routine
+  hair-removal booking is what the demo is, and its contraindications are disclosures rather than
+  properties of the treatment.
+* **11 disclosure triggers** — pregnancy, breastfeeding, isotretinoin, anticoagulants, active
+  infection, cancer treatment, autoimmune conditions, implanted devices, epilepsy, anaesthetic
+  allergy, keloid scarring. Matched on the personal-report form, the same principle the emergency
+  triggers use: "أنا حامل" is a disclosure and "الليزر ينفع للحوامل؟" is a question about the world.
+
+A block hands off and **says nothing clinical** — no reassurance, no explanation, no follow-up
+question. Naming the disclosure back at the patient is the receptionist stating a clinical fact about
+them, and asking a follow-up implies the answer would change the outcome. Both are the
+medical-history interview `clinical_question` forbids. What the patient already told us is kept, so
+whoever takes over does not start from nothing.
+
+The gate runs on **every turn** of a booking, not once at the start: a patient thinks of the thing
+while answering a question about something else, which is why the test that matters is the disclosure
+arriving on the turn that would otherwise have confirmed the appointment.
+
+> ⚠️ **The contents are an unsigned clinical draft written by an engineer**, in the same state as the
+> emergency reply (§6.1) and the suitability block lists. Fit for a demo; the clinic's medical lead
+> must approve the category list and every trigger before a real patient reaches the number. A term
+> that is not in the list is a term nobody has written down, **not** a term somebody has cleared.
+> What is *structural* — that a match ends autonomy — is not a draft.
+
+### 13.7 Two decisions taken here that the client has not confirmed
+
+1. **The 15-minute buffer is checked against bookings *this system made*, never against the imported
+   diary.** Decisions 2 and 3 pull in opposite directions: the workbook is authoritative for the
+   diary including its 62 back-to-back pairs, and the buffer constrains new bookings. Applied against
+   the imported rows as well it would refuse most of the 407 open slots — in an hourly grid nearly
+   every one is adjacent to a booked one — and the clinic would be told its own diary is invalid.
+   This is the only reading that leaves the demo bookable. **Put it to the client.**
+2. **`Injectables` and `Skin` are the screened categories, and `Laser` is not.** Reasoned above and
+   defensible, and still a clinical judgement made by an engineer. **Put it to the medical lead**
+   alongside the trigger list.
+
+### 13.8 Also changed
+
+* **Slots are stored and queried in UTC.** SQLite compares the wall clock as text and Postgres
+  compares instants, and only one of those puts a 00:30 Cairo slot on the right day. The divergence
+  was removed rather than tested around.
+* `packages/intents/compile.py` now compiles the vertical vocabularies too, so a deployed process
+  loads `clinics` from JSON a build proved valid rather than parsing YAML in the process that has to
+  answer a patient.
+* A typing regression in `test_clinic_importer.py` from the step 3–4 commit is fixed; mypy is back to
+  the single pre-existing error.
+
+### 13.9 Still not done
+
+Steps 8–10, everything in §9, the environment variables above, applying 007 and 008 on Render, and
+the Arabic aliases in §13.5. Multi-intent decomposition (§7 item 7) is still unbuilt: a message asking
+price *and* nearest branch still gets one answered.
