@@ -6,11 +6,17 @@ Operator-run, like ``scripts/import_property_facts.py``, and for the same reason
     pip install openpyxl
 
     # read the file, validate it, write nothing
-    python scripts/import_clinic_workbook.py WORKBOOK.xlsx --timezone Africa/Cairo
+    python scripts/import_clinic_workbook.py \\
+        docs/DermaClub_Availability_DEMO_2026-08-26_1.xlsx --timezone Africa/Cairo
 
     # …and then, once the report is clean, write it for one tenant
-    DATABASE_URL=... python scripts/import_clinic_workbook.py WORKBOOK.xlsx \\
+    DATABASE_URL=... python scripts/import_clinic_workbook.py \\
+        docs/DermaClub_Availability_DEMO_2026-08-26_1.xlsx \\
         --timezone Africa/Cairo --tenant 0000-… --apply
+
+The demo workbook is committed in ``docs/`` and
+``apps/api/tests/test_clinic_workbook_integration.py`` runs this importer against it, so the
+figures the client signed off are checked by the test suite rather than by re-reading a report.
 
 Everything that decides whether the file is fit to import lives in ``apps/api/clinic/importer.py``,
 where it is tested. This script does three things and no more: find the sheets, hand their rows

@@ -356,8 +356,11 @@ unlimited sessions and so has no countable quantity to quote. Branch provenance 
 example, 4 given, 5 placeholder — the Read Me's "nine are placeholders" folds the four given in;
 the flag follows the column's literal value and §3 decision 5.
 
-The workbook itself is not committed on this branch (it arrives via PR #34, into `docs/`). The
-tests use invented data and pin the client file's real header row.
+The workbook is committed at `docs/DermaClub_Availability_DEMO_2026-08-26_1.xlsx` (merged from
+`Automera-AI-patch-1`), and `apps/api/tests/test_clinic_workbook_integration.py` runs the importer
+against it, asserting every figure above. **Nobody needs to upload it to a session again.** That
+test skips when `openpyxl` is absent, so CI stays as it is; the other clinic tests use invented data
+and pin the client file's real header row.
 
 ### Verification
 
