@@ -48,6 +48,7 @@ from apps.api.channels.config import ChannelCredentials
 from apps.api.conversations.tools import ConversationCopy
 from apps.api.core.emergency import DEFAULT_TIMEZONE, timezone_is_known
 from apps.api.core.policy import TenantPolicy
+from apps.api.core.settings_base import ConfigError
 from apps.api.schemas.common import HIGH_CONFIDENCE_THRESHOLD, PhoneE164
 
 #: Wire protocol default for Anthropic. Overridable so the regulated tier can point at a gateway
@@ -157,6 +158,13 @@ class Settings(ChannelCredentials):
     tenant_price_quote: str | None = None
     tenant_choose_one: str | None = None
     tenant_booking_taken: str | None = None
+
+    # The two sentences the receptionist composes itself rather than getting from a tool: the
+    # read-back before an appointment is written, and the confirmation that it was. They had no
+    # tenant wording until the booking journey was run end to end and it turned out that two of
+    # the demo's three turns were still in English while everything around them was configured.
+    tenant_confirm_read_back: str | None = None
+    tenant_booking_confirmed: str | None = None
 
     # ── The clinic's booking reference prefix (demo step 6) ───────────────────────────────
     #
@@ -291,7 +299,17 @@ class Settings(ChannelCredentials):
         return vocabulary_for(self.tenant_vertical)
 
     def conversation_copy(self) -> ConversationCopy:
-        """The tenant's opening and closing wording, as the tools take it."""
+        """The tenant's opening and closing wording, as the tools take it.
+
+        Raises :class:`ConfigError` if the price template drops a placeholder the vocabulary's
+        ``quoting.always_state`` requires. Every other field here is a preference and degrades
+        (``fill_template`` falls back rather than raising mid-conversation), but this one is not:
+        "15,000 EGP" without its session count is the price of six treatments read as the price of
+        one, said confidently, in the tenant's own voice. A template is pasted into a dashboard by
+        a person under time pressure and nothing downstream can tell that it is wrong, so it is
+        checked once, at startup, where somebody is still watching.
+        """
+        _check_price_template(self.tenant_price_quote)
         return ConversationCopy(
             opening=self.tenant_greeting_opening,
             opening_named=self.tenant_greeting_opening_named,
@@ -302,6 +320,8 @@ class Settings(ChannelCredentials):
             price_quote=self.tenant_price_quote,
             choose_one=self.tenant_choose_one,
             booking_taken=self.tenant_booking_taken,
+            confirm_read_back=self.tenant_confirm_read_back,
+            booking_confirmed=self.tenant_booking_confirmed,
         )
 
     def database_dsn(self) -> str:
@@ -354,6 +374,34 @@ class Settings(ChannelCredentials):
             base_url=base_url.rstrip("/"),
             timeout_seconds=self.llm_timeout_seconds,
             max_retries=self.llm_max_retries,
+        )
+
+
+#: What a price template has to keep. The vocabulary's ``quoting.always_state`` requires the
+#: currency and the quantity in every quote. ``{price}`` carries the currency already — it renders
+#: "15,000 EGP", not "15,000" — so requiring ``{currency}`` beside it would force every template to
+#: print the currency twice. It stays available for a template that wants to place it itself.
+_PRICE_PLACEHOLDERS = ("{price}",)
+
+#: The quantity, either way of saying it: ``{sessions}`` is the English phrase the default wording
+#: reads with, ``{session_count}`` the bare number a template in another language needs, because
+#: "6 جلسات" and "12 جلسة" inflect differently and no English phrase substitutes into either.
+_PRICE_QUANTITY = ("{sessions}", "{session_count}")
+
+
+def _check_price_template(template: str | None) -> None:
+    """Refuse a ``TENANT_PRICE_QUOTE`` that cannot say what a price has to say."""
+    if template is None:
+        return
+    missing = [name for name in _PRICE_PLACEHOLDERS if name not in template]
+    if not any(name in template for name in _PRICE_QUANTITY):
+        missing.append(" or ".join(_PRICE_QUANTITY))
+    if missing:
+        raise ConfigError(
+            f"TENANT_PRICE_QUOTE is missing {', '.join(missing)}. The clinic vocabulary's "
+            "quoting.always_state requires the currency, the session count and the package "
+            "scope in every quote — a template without them turns '15,000 EGP for six' into a "
+            "number meaning a fifth as much treatment."
         )
 
 

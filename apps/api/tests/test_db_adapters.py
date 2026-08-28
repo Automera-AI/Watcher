@@ -513,3 +513,28 @@ def test_a_new_intent_abandons_the_old_task_rather_than_overwriting_it(
     third = store.begin(_turn("wamid.3", text="which level?"))
     assert third.task is not None and third.task.intent == "property_question"
     assert third.replies_sent == 1
+
+
+def test_a_finished_job_leaves_no_turns_for_the_next_one_to_spend(database: Database) -> None:
+    """The question after a completed booking must be asked, not handed straight to a person.
+
+    ``max_clarifying_turns`` is 2, and a booking costs three replies to complete. Counting those
+    against whatever the patient says next — which is what happens if the budget falls back to the
+    whole conversation when no job is in flight — hands off the very next message that needs a
+    question, immediately, on a conversation that has just gone perfectly. Found by the booking
+    journey eval (``packages/eval/journeys.py``); pinned here on the store that decides it.
+    """
+    store = SqlAlchemyConversationStore(database.tenant_session)
+
+    for index in range(3):
+        state = store.begin(_turn(f"wamid.{index}"))
+        task = Task(intent="booking_enquiry")
+        if index == 2:
+            task.status = TaskStatus.COMPLETED
+        store.record_reply(
+            state, _turn(f"wamid.{index}"), task, OutboundAction(kind="say", text="ok")
+        )
+
+    after = store.begin(_turn("wamid.9", text="and where is the branch?"))
+    assert after.task is None  # the booking is finished; nothing is in flight
+    assert after.replies_sent == 0

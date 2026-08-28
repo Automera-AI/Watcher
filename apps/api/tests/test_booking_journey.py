@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from packages.intents.schema import vocabulary_for
 
+from apps.api.conversations import tools
 from apps.api.conversations.receptionist import handle
 from apps.api.conversations.task import Task, TaskStatus
 from apps.api.conversations.tools import (
@@ -485,6 +486,171 @@ def test_without_the_clinic_tools_a_booking_still_hands_off_rather_than_claiming
     action, task = _say("أيوه", "thanks_closing", {}, task, turns_taken=1)
     assert action.kind == "handoff"
     assert task.status is TaskStatus.HANDED_OFF
+
+
+def test_a_time_the_model_could_not_label_still_answers_the_question_it_answers(
+    directory: _FakeDirectory,
+) -> None:
+    """ "الساعة ٦" after an offer is the appointment time, whatever the classifier made of it.
+
+    Out of context it is two words naming an hour: no request, no treatment, no verb. Both model
+    tiers label it ``unclear`` — the escalation model more firmly than the cheap one — and before
+    this it switched tasks and fetched a person on the turn *after* the patient was offered a
+    time. Running the journeys on real classifications is what surfaced it; with labels written by
+    hand the turn always arrived as ``booking_enquiry``.
+
+    Narrow on purpose: the message is offered to the one slot the task is waiting on, through the
+    same normalisation the worker applies to the model's own output.
+    """
+    offer, task = _say(
+        "عاوزة أحجز فاشيال بيسك في المعادي بكرة",
+        "booking_enquiry",
+        {"service": "فاشيال بيسك", "branch": "المعادي", "requested_date": "2026-09-02"},
+    )
+    assert offer.kind == "ask"
+
+    read_back, task = _say("الساعة ٦", "unclear", {}, task)
+
+    assert read_back.kind == "confirm"
+    assert "18:00" in (read_back.text or "")
+    assert task.intent == "booking_enquiry"  # the booking was not abandoned
+    assert task.slots["requested_time"] == "18:00"
+
+
+def test_a_message_that_answers_nothing_is_still_a_hand_off(directory: _FakeDirectory) -> None:
+    """The rescue resolves a value or it does not happen. It is not a way to keep every task.
+
+    An ``unclear`` message that does not read as the awaited slot is exactly what ``unclear``
+    means, and the vocabulary's ceiling for it is a person.
+    """
+    _offer, task = _say(
+        "عاوزة أحجز فاشيال بيسك في المعادي بكرة",
+        "booking_enquiry",
+        {"service": "فاشيال بيسك", "branch": "المعادي", "requested_date": "2026-09-02"},
+    )
+    action, task = _say("؟؟؟", "unclear", {}, task)
+
+    assert action.kind == "handoff"
+    assert task.status is TaskStatus.HANDED_OFF
+
+
+def test_the_confidence_in_a_label_the_model_did_not_choose_does_not_gate_the_task(
+    directory: _FakeDirectory,
+) -> None:
+    """The read-back rule ended in the hand-off it exists to prevent, and this is why.
+
+    "تمام" mid-booking is `unclear` at 0.3 once the escalation model has had it. The dialogue
+    state correctly overrides the *intent* to the task's own — and then `decide_autonomy` gated a
+    booking on how sure the model had been about a label it never applied, and fetched a person.
+    The intent came from the conversation, so the model's confidence in something else has no
+    standing over it.
+    """
+    task = _complete_task()
+    booked, task = _say("تمام", "unclear", {}, task, turns_taken=1)
+
+    assert booked.kind == "say"
+    assert "DC-0266" in (booked.text or "")
+    assert task.status is TaskStatus.COMPLETED
+
+
+def test_the_session_count_tells_three_identical_package_names_apart(
+    directory: _FakeDirectory,
+) -> None:
+    """ "برايم ليز 6 جلسات بكام؟" reaches the model as a service *and* a quantity.
+
+    That split is correct — but it left the catalogue lookup holding "برايم ليز", which is three
+    packages differing only by session count, and asking a clarifying question whose answer the
+    patient had already given. The count narrows; it never picks, so a count matching two rows or
+    none still asks.
+    """
+    quoted, _task = _say(
+        "برايم ليز 6 جلسات بكام؟",
+        "price_enquiry",
+        {"service": "برايم ليز", "session_count": "6"},
+    )
+
+    assert quoted.kind == "say"
+    assert "15,000" in (quoted.text or "")
+
+
+def test_a_session_count_narrows_and_never_picks() -> None:
+    """The half of the rule that keeps it safe, against the real shape of the catalogue.
+
+    Three 12-session laser packages cost 16,350 apiece in the client's file, so a count that
+    reaches more than one — or none, or is not a number — leaves the clarifying question exactly
+    where it was. Only a count that identifies one package answers anything.
+    """
+    from apps.api.conversations.tools import _by_session_count
+
+    six = Service(
+        code="DT029", name="Primelase 6", price_minor=1, duration_minutes=1, session_count=6
+    )
+    twelve = Service(
+        code="DT030", name="Primelase 12", price_minor=1, duration_minutes=1, session_count=12
+    )
+    other_twelve = Service(
+        code="DT019", name="Full Body 12", price_minor=1, duration_minutes=1, session_count=12
+    )
+
+    found = _by_session_count((six, twelve), "6")
+    assert found is not None and found.found is six
+
+    assert _by_session_count((six, twelve), "3") is None  # matches nothing
+    assert _by_session_count((twelve, other_twelve), "12") is None  # matches two
+    assert _by_session_count((six, twelve), "ست") is None  # not a number
+    assert _by_session_count((six, twelve), None) is None  # nothing was said
+
+
+def test_the_read_back_and_the_confirmation_are_the_tenants_own_words(
+    directory: _FakeDirectory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The two sentences the receptionist composes itself, in the tenant's language.
+
+    Every other word a patient reads already came from configuration; these two were composed in
+    English inside this module, which meant a clinic whose whole conversation is in Arabic got
+    "Just to confirm:" and "That's booked." at the centre of its booking. Running the journey end
+    to end is what surfaced it — see ``packages/eval/journeys.py``.
+
+    ``{values}`` rather than ``{details}`` is the point of having both: the labels the default
+    reads with are English words, and a read-back in Arabic wants the values on their own.
+    """
+    copy = ConversationCopy(
+        confirm_read_back="تأكيد الحجز: {values} — صح كده؟",
+        booking_confirmed="تم الحجز ✅ رقم الحجز: {booking_reference}",
+    )
+    monkeypatch.setattr(tools, "_COPY", copy)
+
+    read_back, task = _say(
+        "عاوزة أحجز فاشيال بيسك في المعادي بكرة الساعة ٦",
+        "booking_enquiry",
+        _booked_slots(),
+    )
+    assert read_back.kind == "confirm"
+    assert (read_back.text or "").startswith("تأكيد الحجز:")
+    assert "Just to confirm" not in (read_back.text or "")
+    # The values, without the English slot labels the default reads with.
+    assert "فاشيال بيسك" in (read_back.text or "") and "service" not in (read_back.text or "")
+
+    booked, _task = _say("أيوه", "thanks_closing", {}, task, turns_taken=1)
+    assert booked.text == "تم الحجز ✅ رقم الحجز: DC-0266"
+
+
+def test_a_tenant_template_that_will_not_take_its_placeholder_degrades(
+    directory: _FakeDirectory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A typo in a template must not lose the reply that says an appointment exists.
+
+    The same degrade-don't-crash trade the rest of the copy makes: a ``KeyError`` here would drop
+    the one message the patient came for, on a booking that has already been written.
+    """
+    monkeypatch.setattr(
+        tools, "_COPY", ConversationCopy(booking_confirmed="تم الحجز {reference_number}")
+    )
+    task = _complete_task()
+    booked, _task = _say("أيوه", "thanks_closing", {}, task, turns_taken=1)
+
+    assert "DC-0266" in (booked.text or "")
+    assert len(directory.bookings) == 1
 
 
 def _booked_slots() -> dict[str, str]:

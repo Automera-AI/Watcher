@@ -337,3 +337,34 @@ def test_a_vertical_nobody_shipped_is_refused_at_startup() -> None:
     is the cross-vertical leak the union taxonomy exists to make fail safe."""
     with pytest.raises(ValidationError, match="TENANT_VERTICAL"):
         Settings(tenant_vertical="dental")
+
+
+def test_a_price_template_that_cannot_say_the_session_count_is_refused() -> None:
+    """The one piece of tenant copy with a rule rather than a preference attached.
+
+    ``quoting.always_state`` requires the currency, the session count and the package scope in
+    every quote, and one Primelase session is 3,100 where six are 15,000. A template that drops
+    the quantity is not imprecise — it is wrong by a factor of five, in the tenant's own voice,
+    and nothing downstream can tell. It is a template somebody pastes into a dashboard, so it is
+    checked at startup, where a person is still watching.
+    """
+    with pytest.raises(ConfigError, match="TENANT_PRICE_QUOTE"):
+        Settings(tenant_price_quote="{service} is {price}.").conversation_copy()
+    with pytest.raises(ConfigError, match=r"\{price\}"):
+        Settings(tenant_price_quote="{service} — {sessions}").conversation_copy()
+
+
+def test_a_price_template_may_state_the_quantity_in_either_form() -> None:
+    """``{sessions}`` reads as English; ``{session_count}`` is the bare number a template in
+    another language needs, because "6 جلسات" and "12 جلسة" inflect differently."""
+    english = Settings(tenant_price_quote="{service}: {price} for {sessions}.").conversation_copy()
+    arabic = Settings(
+        tenant_price_quote="{service}: {price}. عدد الجلسات: {session_count}."
+    ).conversation_copy()
+
+    assert english.price_quote is not None and arabic.price_quote is not None
+
+
+def test_an_unset_price_template_keeps_the_neutral_default() -> None:
+    """A deploy that configures nothing still quotes correctly — the check is on what is set."""
+    assert Settings().conversation_copy().price_quote is None

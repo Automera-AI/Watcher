@@ -77,3 +77,48 @@ no-egress constraint). Module layout: `cases.py` (load) · `predictors.py` (pred
 - **Nightly (next, with the concrete providers):** a live `Predictor` wrapping
   `apps.api.classifier.service.Classifier` over Anthropic + OpenAI runs against the golden set to catch
   silent model drift — it plugs into the same `run_eval` because it satisfies the `Predictor` seam.
+
+## Journey evals — `golden/clinics_journeys.jsonl` (demo step 9)
+
+The classifier eval scores one message at a time. Every failure the *booking* journey is about
+happens between messages — a detail agreed on one turn and forgotten by the next, a slot offered
+and then given away, a "تمام" that ends the conversation instead of finishing it — so the journey
+set runs whole conversations and scores what the patient would have received on each turn.
+
+```bash
+python -m packages.eval \
+  --journeys packages/eval/golden/clinics_journeys.jsonl \
+  --diary    packages/eval/fixtures/clinic_diary.json \
+  --out-dir  eval-out
+```
+
+Ten journeys: the demo booking end to end, a treatment whose one slot is already taken, a pregnancy
+disclosure arriving on the turn that would have confirmed the appointment, an injectables booking
+that must reach a clinician, a slot taken between the read-back and the yes, a "تمام" away from any
+read-back, a price that must carry its session count, three look-alike packages that must be asked
+about rather than guessed, and the question a patient asks *after* their booking.
+
+**It runs against the client's own diary.** `fixtures/clinic_diary.json` is two branches of one day
+cut out of `docs/DermaClub_Availability_DEMO_2026-08-26_1.xlsx` by the importer, and
+`apps/api/tests/test_clinic_workbook_integration.py` fails if the two drift apart. That is not
+decoration: the first thing this set established is that the workbook holds **exactly one slot per
+service, branch and day**, so the "I can offer 11:00 / 16:00 / 18:00" in the handoffs cannot happen
+with this data — the real journey offers the single open time. It also found the clarifying-turn
+budget counting a finished booking's replies against the patient's next question, which handed off
+the very next message on a conversation that had just gone perfectly.
+
+> The diary fixture carries the **proposed** Arabic aliases (`docs/dermaclub-aliases-draft.csv`).
+> A journey that resolves an Arabic name here resolves it in production only once the clinic has
+> put those in their own workbook and it has been re-imported.
+
+Two knobs:
+
+- **`--fixtures`** swaps the labels written into the journey file for recorded classifier output,
+  so the same journeys measure the model and the conversation together. A message the recording
+  does not cover fails that journey rather than falling back to the written label.
+- **`known_gap`** on a journey declares behaviour that is not built. It runs, it is reported, and
+  it does not fail the build — and if it starts passing the runner says so, because that means the
+  flag should come off. One is declared today: the closing after a booking does not repeat the
+  reference, because the reference lives on the task and the task is finished by then.
+
+The runner exits non-zero if any journey that is not a declared gap breaks.

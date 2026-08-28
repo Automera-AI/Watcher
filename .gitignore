@@ -27,3 +27,4 @@ packages/intents/build/
 # Node (control page)
 node_modules/
 .next/
+.coverage

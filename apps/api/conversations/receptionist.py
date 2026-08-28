@@ -58,10 +58,13 @@ from datetime import date
 from packages.intents.schema import Vocabulary, default_vocabulary
 
 from apps.api.conversations.confirmation import reads_as_no, reads_as_yes
+from apps.api.conversations.slots import normalise_slots
 from apps.api.conversations.task import Task, TaskStatus
-from apps.api.conversations.tools import REGISTRY, ToolResult
+from apps.api.conversations.tools import REGISTRY, ToolResult, current_copy, fill_template
 from apps.api.core.autonomy import Autonomy, decide_autonomy
 from apps.api.core.screening import ScreeningBlock, screen
+from apps.api.schemas.common import HIGH_CONFIDENCE_THRESHOLD
+from apps.api.schemas.enums import IntentType
 from apps.api.schemas.envelope import InboundTurn, OutboundAction
 
 HANDOFF_TEXT = "Let me connect you with someone who can help."
@@ -90,7 +93,16 @@ _REFERENCE_SLOT = "booking_reference"
 #: Said when an appointment has actually been written, and only then. The reference is part of the
 #: sentence rather than an afterthought: it is the thing that makes the claim checkable, and a
 #: confirmation without one is the "All set!" bug wearing a better sentence.
-_BOOKED_TEXT = "That's booked. Your reference is"
+#:
+#: The tenant may replace it (``ConversationCopy.booking_confirmed``) and most will, because this
+#: sentence and the read-back are the only two the receptionist composes itself — every other
+#: word a patient reads already came from configuration, and until the journey was run end to end
+#: nobody had noticed that the two turns at the centre of the demo were still in English.
+_BOOKED_TEXT = "That's booked. Your reference is {booking_reference}"
+
+#: The read-back. ``{details}`` carries the labels the default reads with; ``{values}`` is the
+#: same list without them, for a template in a language those English labels do not belong in.
+_READ_BACK_TEXT = "Just to confirm: {details}?"
 
 #: Tools that produce their reply directly from ``human_summary`` and cannot fail. ``greet`` and
 #: ``close_conversation`` are the two ends of a conversation, and neither has anything to look up.
@@ -104,6 +116,12 @@ _DIRECT_TOOLS = frozenset({"greet", "close_conversation"})
 #: lying about the one fact the customer came for, and they arrive at a clinic that has never
 #: heard of them. An unbuilt capability is a hand-off, and it says so.
 _UNBUILT_TEXT = "Let me check that with the team and come straight back to you."
+
+#: What the classifier says when it cannot tell what a message is. A mid-conversation fragment is
+#: the ordinary case: "الساعة ٧" carries no request, no treatment and no verb, and out of context
+#: it is not a booking — it is two words. Both tiers label it ``unclear`` and the escalation model
+#: is, if anything, more certain of that than the cheap one.
+_UNCLEAR = IntentType.UNCLEAR.value
 
 
 async def _hand_off(task: Task, tool_name: str) -> tuple[OutboundAction, Task]:
@@ -133,6 +151,7 @@ async def handle(
     turns_taken: int = 0,
     vocabulary: Vocabulary | None = None,
     conversation_id: str | None = None,
+    today: date | None = None,
 ) -> tuple[OutboundAction, Task]:
     """Process one turn and return the action to take plus the updated task state.
 
@@ -140,20 +159,39 @@ async def handle(
     """
     vocab = vocabulary or default_vocabulary()
 
-    # The dialogue-state rule, and the only place it is applied: a short reply is read against a
-    # read-back that is genuinely outstanding *before* the classified intent is allowed to start a
-    # different task. "تمام" is `thanks_closing` on its own and it is `yes, book it` here, and the
-    # difference is not in the word — it is in whether anything is waiting for an answer. Without
-    # this the reply that agrees to an appointment is the reply that abandons it.
+    # The dialogue-state rule: a reply is read against the question that is genuinely outstanding
+    # *before* the classified intent is allowed to start a different task. "تمام" is
+    # `thanks_closing` on its own and it is `yes, book it` after a read-back; "الساعة ٧" is two
+    # words on its own and it is the appointment time after an offer. The difference is never in
+    # the message — it is in what the conversation is waiting for.
+    #
+    # Two shapes, and the second is what running the journeys on real classifications forced.
+    # A read-back takes a yes or a no. An outstanding *question* takes a value, and the model
+    # cannot supply one because it does not know what was asked: it sees a fragment and says
+    # `unclear`, which switches tasks and fetches a person one turn after the patient was offered
+    # a time. So an `unclear` turn is offered to the slot the task is actually waiting on, and
+    # only a message that resolves into that slot is treated as an answer.
     answering = task is not None and task.awaiting_agreement and _is_an_answer(turn.text)
-    if answering:
+    supplied: dict[str, str] = {}
+    if not answering and task is not None and intent == _UNCLEAR:
+        supplied = _read_as_answer(task, turn, vocab, today)
+
+    if answering or supplied:
         assert task is not None
         intent = task.intent
+        # **And the confidence with it.** `decide_autonomy` gates on how sure the *model* was, and
+        # the model was not asked this question: the intent came from the conversation's own
+        # state, which is a fact rather than a guess. Leaving the model's 0.3 in `unclear` to gate
+        # a booking it never labelled is how the read-back rule ends in the hand-off it exists to
+        # prevent — which is exactly what it did, silently, until the journeys ran on real
+        # classifications. Nothing else is relaxed: the clinical gate below reads every turn, and
+        # a booking still reaches `confirm_booking` only through a read-back the patient agreed to.
+        confidence = max(confidence, HIGH_CONFIDENCE_THRESHOLD)
 
     if task is None or task.intent != intent:
         task = Task(intent=intent, vocabulary=vocab)
 
-    task.absorb(extracted_slots)
+    task.absorb({**extracted_slots, **supplied})
 
     if answering:
         if reads_as_yes(turn.text or ""):
@@ -305,6 +343,32 @@ def _is_an_answer(text: str | None) -> bool:
     return reads_as_yes(text or "") or reads_as_no(text or "")
 
 
+def _read_as_answer(
+    task: Task, turn: InboundTurn, vocab: Vocabulary, today: date | None
+) -> dict[str, str]:
+    """The message read as a value for the slot the task is waiting on, or nothing.
+
+    Deliberately narrow in three ways. It runs only when the classifier said ``unclear``, so a
+    message the model *did* understand as something else is still a change of subject. It offers
+    the message to one slot — the one the task's own next step is asking for — rather than
+    guessing which detail it might be. And it goes through ``normalise_slots``, the same
+    resolution the worker applies to the model's output, so "الساعة ٧" becomes 19:00 by the
+    tenant's own rule and a value that resolves to nothing stays nothing.
+
+    ``today`` is the tenant's date, passed in because this module has no clock and no timezone;
+    it only matters for a date-valued slot, and the caller that has a tenant zone is the worker.
+    """
+    step, slot = task.next_step()
+    if step != "ask" or slot is None or not turn.text:
+        return {}
+    return normalise_slots(
+        task.intent,
+        {slot: turn.text},
+        vocabulary=vocab,
+        today=today or turn.received_at.date(),
+    )
+
+
 def _readable(task: Task, slot: str) -> str:
     """One slot's value as a person would say it back.
 
@@ -333,6 +397,7 @@ async def _availability(
         service=task.slots.get("service"),
         branch=task.slots.get("branch"),
         requested_date=task.slots.get("requested_date"),
+        session_count=task.slots.get("session_count"),
     )
 
 
@@ -407,13 +472,15 @@ async def _read_back(
     if booking:
         await _hold_for(task, turn, conversation_id)
 
-    details = ", ".join(
-        f"{slot.replace('_', ' ')} {_readable(task, slot)}" for slot in task.unconfirmed
-    )
+    outstanding = tuple(task.unconfirmed)
+    details = ", ".join(f"{slot.replace('_', ' ')} {_readable(task, slot)}" for slot in outstanding)
+    values = "، ".join(_readable(task, slot) for slot in outstanding)
+    template = current_copy().confirm_read_back or _READ_BACK_TEXT
     return (
         OutboundAction(
             kind="confirm",
-            text=f"Just to confirm: {details}?",
+            text=fill_template(template, details=details, values=values)
+            or _READ_BACK_TEXT.format(details=details),
             quick_replies=["Yes", "No"],
         ),
         task,
@@ -463,6 +530,8 @@ async def _answer_from_catalogue(
         branch=task.slots.get("branch"),
         requested_date=task.slots.get("requested_date"),
         requested_time=task.slots.get(_TIME_SLOT),
+        # The quantity the patient said, which is what tells three same-named packages apart.
+        session_count=task.slots.get("session_count"),
     )
     if result.human_summary:
         task.status = TaskStatus.COMPLETED if result.ok else TaskStatus.COLLECTING
@@ -520,10 +589,12 @@ async def _book(
 
     task.slots[_REFERENCE_SLOT] = str(reference)
     task.status = TaskStatus.COMPLETED
+    template = current_copy().booking_confirmed or _BOOKED_TEXT
     return (
         OutboundAction(
             kind="say",
-            text=f"{_BOOKED_TEXT} {reference}",
+            text=fill_template(template, booking_reference=str(reference))
+            or _BOOKED_TEXT.format(booking_reference=reference),
         ),
         task,
     )

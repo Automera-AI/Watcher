@@ -95,3 +95,43 @@ def test_the_six_session_package_is_priced_above_the_single_session(plan: Catalo
 
 def test_the_highest_booking_reference_step_six_must_issue_after(plan: CataloguePlan) -> None:
     assert plan.report.highest_reference == {"DC": 265}
+
+
+def test_the_journey_evals_diary_still_agrees_with_the_workbook(plan: CataloguePlan) -> None:
+    """The journey eval runs against a cut of this file, and a cut can go stale silently.
+
+    ``packages/eval/fixtures/clinic_diary.json`` is two branches of one day, lifted out of this
+    workbook so the booking journeys are measured against the diary the demo will actually meet.
+    If the client sends a new workbook and the fixture is not regenerated, the journeys keep
+    passing against a day that no longer exists — which is the one failure mode of a fixture cut
+    from a file, and the reason this test lives here rather than beside the eval: only this file
+    has the workbook to compare against.
+    """
+    import json
+
+    diary = json.loads(
+        (REPO_ROOT / "packages/eval/fixtures/clinic_diary.json").read_text(encoding="utf-8")
+    )
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo(diary["timezone"])
+    branches = {branch["external_id"] for branch in diary["branches"]}
+    wanted = {
+        (
+            slot.external_id,
+            slot.service_code,
+            slot.starts_at.astimezone(zone).isoformat(),
+            slot.status,
+        )
+        for slot in plan.slots
+        if slot.branch_external_id in branches
+        and slot.starts_at.astimezone(zone).date().isoformat() == diary["day"]
+    }
+    have = {
+        (slot["external_id"], slot["service_code"], slot["starts_at"], slot["status"])
+        for slot in diary["slots"]
+    }
+    assert have == wanted, (
+        "packages/eval/fixtures/clinic_diary.json no longer matches the workbook — regenerate it, "
+        "and re-check the demo script: the times the journeys offer come from here"
+    )

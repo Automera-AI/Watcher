@@ -258,6 +258,8 @@ def test_fixture_recorder_uses_and_records_the_selected_clinic_prompt(
             str(output),
             "--tenant-vertical",
             "clinics",
+            "--now",
+            "2026-09-01T12:00:00+03:00",
         ]
     )
 
@@ -271,4 +273,8 @@ def test_fixture_recorder_uses_and_records_the_selected_clinic_prompt(
         "prompt_version": PROMPT_VERSION,
         "system_prompt_fingerprint": prompt_fingerprint(clinic_prompt),
         "golden_set_size": 1,
+        # Recorded so a fixture file says which calendar produced it. Without a clock the model
+        # resolves "tomorrow" against its training cut, which is a real, parseable, wrong date —
+        # and a recording made that way is not the pipeline production runs.
+        "local_now": "2026-09-01T12:00:00+03:00",
     }

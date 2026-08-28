@@ -91,6 +91,7 @@ class Receptionist(Protocol):
         turns_taken: int,
         vocabulary: Vocabulary | None,
         conversation_id: str | None,
+        today: date,
     ) -> tuple[OutboundAction, Task]: ...
 
 
@@ -446,6 +447,10 @@ class Orchestrator:
             turns_taken=state.replies_sent,
             vocabulary=self._vocabulary,
             conversation_id=state.conversation_id,
+            # The same tenant-clock date the slots were resolved against. The receptionist needs
+            # it for the one case where it resolves a slot itself: a reply that answers the
+            # question it just asked, which the classifier could only label `unclear`.
+            today=self._today(message),
         )
 
         # Recorded before it is sent, deliberately. A reply we sent but did not record makes us
