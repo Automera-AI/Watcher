@@ -468,7 +468,9 @@ copy still to be written in Arabic** — everything else was drafted in the prev
 ### 13.5 ⚠️ No Arabic name resolves yet — the biggest remaining demo risk
 
 The workbook is entirely in English: branches are `Maadi`, `New Cairo`, `Nasr City`; services are
-`Basic Facial`, `Primelase Laser Package - 6 Sessions`. There is **no aliases column**. Nothing in
+`Basic Facial`, `Primelase Laser Package - 6 Sessions`. There is **no aliases column** — it is
+committed at `docs/DermaClub_Availability_DEMO_2026-08-26_1.xlsx`, so this is checkable in one
+`grep` rather than on somebody's word. Nothing in
 the code transliterates or translates — deliberately, because a guess about a place name or a
 treatment name in shared source is a guess nobody clinical has read. The consequence is concrete:
 
