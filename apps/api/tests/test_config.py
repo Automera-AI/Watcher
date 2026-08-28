@@ -111,6 +111,36 @@ def test_unknown_tenant_vertical_fails_at_startup(_settings: SettingsFactory) ->
         _settings(TENANT_VERTICAL="unknown_vertical")
 
 
+def test_clinic_policy_requires_tenant_emergency_copy(_settings: SettingsFactory) -> None:
+    settings = _settings(TENANT_VERTICAL="clinics")
+
+    with pytest.raises(ConfigError, match="TENANT_EMERGENCY_REPLY"):
+        settings.tenant_policy()
+
+
+def test_clinic_emergency_copy_placeholder_requires_urgent_contact(
+    _settings: SettingsFactory,
+) -> None:
+    settings = _settings(
+        TENANT_VERTICAL="clinics",
+        TENANT_EMERGENCY_REPLY="Call our doctor on {contact}. I am alerting them now.",
+    )
+
+    with pytest.raises(ConfigError, match="TENANT_URGENT_CONTACT"):
+        settings.tenant_policy()
+
+
+def test_clinic_emergency_copy_without_placeholder_needs_no_contact(
+    _settings: SettingsFactory,
+) -> None:
+    settings = _settings(
+        TENANT_VERTICAL="clinics",
+        TENANT_EMERGENCY_REPLY="I am alerting our doctor right now.",
+    )
+
+    assert settings.tenant_policy().emergency_reply == "I am alerting our doctor right now."
+
+
 def test_the_tenant_timezone_reaches_the_policy(_settings: SettingsFactory) -> None:
     """G3's one knob: the window on the night-time trigger is read in the guest's local time."""
     assert _settings().tenant_policy().timezone == "Asia/Dubai"

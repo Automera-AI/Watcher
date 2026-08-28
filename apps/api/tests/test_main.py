@@ -282,6 +282,7 @@ def test_clinic_greeting_uses_the_real_factory_and_composition_path(
         meta_webhook_verify_token=VERIFY_TOKEN,
         anthropic_api_key="sk-ant",
         tenant_vertical="clinics",
+        tenant_emergency_reply="I am alerting our doctor right now.",
         tenant_greeting_opening="Welcome to the clinic.",
     )
     vocabulary = settings.vocabulary()
@@ -485,6 +486,24 @@ def test_assemble_switches_to_the_redis_queue_when_redis_url_is_set(
 
     with TestClient(app):  # runs the lifespan; must close cleanly with nothing ever connected
         pass
+
+
+def test_redis_api_refuses_clinic_without_emergency_copy(
+    seeded: Database, provider: StubProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The thin producer must enforce clinic safety even though it builds no consumer graph."""
+    for name in Settings.model_fields:
+        monkeypatch.delenv(name.upper(), raising=False)
+    settings = Settings(
+        _env_file=None,
+        meta_app_secret=APP_SECRET,
+        meta_webhook_verify_token=VERIFY_TOKEN,
+        redis_url="redis://localhost:1/0",
+        tenant_vertical="clinics",
+    )
+
+    with pytest.raises(ConfigError, match="TENANT_EMERGENCY_REPLY"):
+        assemble(settings, seeded, Classifier(provider, provider))
 
 
 def test_create_application_reports_what_the_environment_is_missing(

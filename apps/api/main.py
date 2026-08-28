@@ -107,6 +107,10 @@ def assemble(
     `orchestration/composition.build_consumer` this branch calls when there is no Redis). Building
     them here anyway would leave an idle sender client open in a process that never uses it.
     """
+    # Validate the tenant's runtime policy before choosing a queue. The Redis producer does not
+    # build a consumer graph in this process, but it must still refuse an unsafe clinic setup.
+    settings.tenant_policy()
+
     # The tenant resolver gets the unstamped scope deliberately (B2): it answers the one question
     # asked *before* a tenant is known — which tenant owns this endpoint — and migration 004 gives
     # that lookup a policy of its own. Every tenant-scoped collaborator below (built inside

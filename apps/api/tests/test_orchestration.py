@@ -9,6 +9,7 @@ that a few tests poke at, but the ordinary way a classified message is handled.
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -564,6 +565,27 @@ def test_a_clinic_emergency_uses_the_selected_vocabulary_through_the_orchestrato
     assert outcome.emergency is not None and outcome.emergency.trigger_id == "burn"
     assert audit.entries[0].action == "emergency"
     assert inbox.drafts[0].status is InboxStatus.NEEDS_REVIEW
+
+
+def test_clinic_emergency_log_omits_patient_text_and_phone(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    clinics = shipped_vocabularies()["clinics"]
+    alerter = _FakeAlerter()
+    orch, _audit, _inbox, _store = _emergency_orchestrator(alerter=alerter, vocabulary=clinics)
+    symptom = "جلدي اتحرق جامد بعد الليزر"
+
+    with caplog.at_level(logging.CRITICAL, logger="apps.api.orchestration.worker"):
+        _converse(orch, symptom)
+
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "trigger=burn" in logged
+    assert TENANT_UUID in logged
+    assert MSG_ID in logged
+    assert "جلدي اتحرق" not in logged
+    assert "+966500000000" not in logged
+    assert alerter.alerts[0].text == symptom
+    assert alerter.alerts[0].guest_identity == "+966500000000"
 
 
 def test_the_guest_is_answered_and_a_person_is_alerted() -> None:

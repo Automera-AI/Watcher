@@ -74,6 +74,14 @@ def test_clinic_golden_set_covers_the_demo_prompt_boundaries() -> None:
     assert {"en", "ar", "mixed"} <= languages
 
 
+def test_franco_arabic_with_one_borrowed_word_is_labelled_arabic() -> None:
+    case = next(
+        case for case in load_golden(CLINIC_GOLDEN) if case.message == "3ayza a3raf el se3r please"
+    )
+
+    assert case.expected.language is Language.AR
+
+
 def test_every_golden_message_has_a_recorded_fixture() -> None:
     fixtures = load_fixtures(FIXTURES)
     for case in load_golden(GOLDEN):
