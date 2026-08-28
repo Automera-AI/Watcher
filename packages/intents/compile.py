@@ -47,6 +47,24 @@ def main() -> int:
     print(f"wrote build/intents.json  ({(OUT / 'intents.json').stat().st_size:,} bytes)")
 
     failed = False
+    # Vertical vocabularies alongside the base one. Compiled for the same reason: `TENANT_VERTICAL`
+    # makes one of these the vocabulary a deployed process actually speaks, so it is loaded at
+    # startup exactly as `intents.yaml` is, and it should be loaded from JSON that was proven valid
+    # by a build rather than parsed and validated in the process that has to answer a patient.
+    for path in sorted((HERE / "verticals").glob("*.yaml")):
+        try:
+            vertical = schema.load(path)
+        except Exception as exc:
+            print(f"FAIL {path.name}\n  {exc}")
+            failed = True
+            continue
+        target = OUT / f"vertical-{path.stem}.json"
+        target.write_text(
+            json.dumps(vertical.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        print(f"wrote {target.name}  ({vertical.vertical}, {len(vertical.intents)} intents)")
+
     for path in sorted((HERE / "clients").glob("*.yaml")):
         try:
             client = schema.load_client(path)

@@ -71,7 +71,13 @@ def build_provider(
     *,
     system_prompt: str | None = None,
 ) -> LLMProvider:
-    """Concrete provider for one pinned model. Raises ``ConfigError`` if its key is missing."""
+    """Concrete provider for one pinned model. Raises ``ConfigError`` if its key is missing.
+
+    ``system_prompt`` is the assembled prompt for this deployment's vertical. Passed rather than
+    left to each provider's import-time default because the default is built from the *base*
+    vocabulary: a clinic deploy that did not pass one would describe holiday-home intents to the
+    model and then reject every clinic label it could not parse.
+    """
     credentials = settings.llm_credentials(model_id)
     http = client if client is not None else _default_client()
     prompt = (
@@ -119,10 +125,18 @@ def build_classifier(
     it would add more latency than the escalation itself costs.
     """
     http = client if client is not None else _default_client()
-    prompt = build_system_prompt(vocabulary or settings.vocabulary())
+    # Assembled once and shared by both tiers: it is ~5k tokens of identical text, and building it
+    # twice would also let the two tiers drift apart if the vocabulary were ever reloaded between
+    # the calls. An explicit ``vocabulary`` wins over the settings' own, so a caller that has
+    # already read it once (main.py, the arq worker) does not read it a second time.
+    system_prompt = build_system_prompt(vocabulary or settings.vocabulary())
     return Classifier(
-        build_provider(settings, settings.classifier_model_first_pass, http, system_prompt=prompt),
-        build_provider(settings, settings.classifier_model_escalation, http, system_prompt=prompt),
+        build_provider(
+            settings, settings.classifier_model_first_pass, http, system_prompt=system_prompt
+        ),
+        build_provider(
+            settings, settings.classifier_model_escalation, http, system_prompt=system_prompt
+        ),
         escalation_threshold=settings.classifier_confidence_escalation_threshold,
     )
 

@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
 
-from packages.intents.schema import Vocabulary, shipped_vocabularies
+from packages.intents.schema import UnknownVertical, Vocabulary, vocabulary_for
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import SettingsConfigDict
 
@@ -95,13 +95,6 @@ class Settings(ChannelCredentials):
     # loudly at startup.
     control_chat_phone_e164: PhoneE164 | None = None
 
-    # ── Demo deployment vertical ───────────────────────────────────────────────────────────
-    #
-    # One process serves one fixed vertical for its lifetime. This is deliberately not tenant
-    # database state: the DermaClub demo runs its API and worker with `clinics`, while an existing
-    # deployment that does not set the variable keeps the holiday-home behavior.
-    tenant_vertical: str = "holiday_homes"
-
     # ── Where the properties are (roadmap G3) ─────────────────────────────────────────────
     #
     # An IANA zone name, because one emergency trigger fires only between 22:00 and 07:00 and
@@ -110,6 +103,18 @@ class Settings(ChannelCredentials):
     # error, whereas refusing to start over a timezone would be a safety feature that stops the
     # service running.
     tenant_timezone: str = DEFAULT_TIMEZONE
+
+    # ── Which vocabulary this deployment speaks (demo step 5) ─────────────────────────────
+    #
+    # A vertical name — `holiday_homes` or `clinics` — naming one of the shipped vocabularies.
+    # Everything downstream reads it: the intents described to the classifier, the autonomy
+    # ceilings, the slots the receptionist collects, the safety floor a YAML edit may not unset.
+    #
+    # It defaults to the vertical this service was built for, so an existing deploy is unchanged
+    # by this variable existing. A clinic deploy MUST set it: without it the clinic taxonomy is
+    # shipped and reachable by nothing, and a patient asking to book is classified against
+    # holiday-home intents.
+    tenant_vertical: str = "holiday_homes"
 
     # ── The number customers may ring directly in an emergency (roadmap G3) ───────────────
     #
@@ -140,6 +145,26 @@ class Settings(ChannelCredentials):
     tenant_greeting_opening_named: str | None = None
     tenant_closing: str | None = None
     tenant_closing_booking_confirmed: str | None = None
+
+    # The booking journey's wording (demo step 6). Every one of these is said while quoting or
+    # offering something real, so the neutral English defaults are correct on their own and a
+    # tenant sets them to say the same thing in its own voice. `tenant_price_quote` is the one
+    # with a rule attached rather than a preference: the vocabulary's `quoting.always_state`
+    # requires the currency, the session count and the package scope, and a template that drops
+    # `{sessions}` turns "15,000 EGP for six" into a number meaning a fifth as much treatment.
+    tenant_availability_offer: str | None = None
+    tenant_availability_none: str | None = None
+    tenant_price_quote: str | None = None
+    tenant_choose_one: str | None = None
+    tenant_booking_taken: str | None = None
+
+    # ── The clinic's booking reference prefix (demo step 6) ───────────────────────────────
+    #
+    # The letters before the serial in `DC-0042`. The clinic's own initials, so it belongs with
+    # the tenant's configuration and never in shared code — a default here would quote one
+    # client's identifier at the next. The 265 references already in the imported diary use it,
+    # and `confirm_booking` issues after the highest serial it finds under this prefix.
+    tenant_booking_reference_prefix: str = "WB"
 
     # ── Classifier tiering (addendum §8 / D8-a) ────────────────────────────────────────────
     anthropic_api_key: SecretStr | None = None
@@ -196,6 +221,22 @@ class Settings(ChannelCredentials):
     # arq worker process (`apps/api/worker.py`) — the durability B5 exists for is that swap.
     redis_url: SecretStr | None = None
 
+    @field_validator("tenant_vertical")
+    @classmethod
+    def _shipped_vertical(cls, value: str) -> str:
+        """Refuse a vertical no shipped vocabulary declares, at startup.
+
+        The same trade as ``tenant_timezone`` below and a sharper one: an unknown vertical has no
+        safe default. Serving a clinic out of the holiday-home vocabulary would answer patients
+        from the wrong taxonomy with the wrong safety floor, so this fails where somebody is
+        watching rather than in front of one.
+        """
+        try:
+            vocabulary_for(value)
+        except UnknownVertical as exc:
+            raise ValueError(f"TENANT_VERTICAL={value!r}: {exc.args[0]}") from exc
+        return value
+
     @field_validator("tenant_timezone")
     @classmethod
     def _resolvable_zone(cls, value: str) -> str:
@@ -210,16 +251,6 @@ class Settings(ChannelCredentials):
             raise ValueError(
                 f"TENANT_TIMEZONE={value!r} is not an IANA zone name this machine can resolve "
                 f"(e.g. {DEFAULT_TIMEZONE}, Africa/Cairo)"
-            )
-        return value
-
-    @field_validator("tenant_vertical")
-    @classmethod
-    def _shipped_vertical(cls, value: str) -> str:
-        known = shipped_vocabularies()
-        if value not in known:
-            raise ValueError(
-                f"TENANT_VERTICAL={value!r} is not a shipped vocabulary. Known: {sorted(known)}"
             )
         return value
 
@@ -252,8 +283,12 @@ class Settings(ChannelCredentials):
         )
 
     def vocabulary(self) -> Vocabulary:
-        """The one shipped vocabulary selected for this process lifetime."""
-        return shipped_vocabularies()[self.tenant_vertical]
+        """The intent vocabulary this deployment speaks (``TENANT_VERTICAL``).
+
+        One call, so the classifier prompt, the autonomy gate and the receptionist are all reading
+        the same file. Validated at startup, so this cannot raise here.
+        """
+        return vocabulary_for(self.tenant_vertical)
 
     def conversation_copy(self) -> ConversationCopy:
         """The tenant's opening and closing wording, as the tools take it."""
@@ -262,6 +297,11 @@ class Settings(ChannelCredentials):
             opening_named=self.tenant_greeting_opening_named,
             closing=self.tenant_closing,
             closing_booking_confirmed=self.tenant_closing_booking_confirmed,
+            availability_offer=self.tenant_availability_offer,
+            availability_none=self.tenant_availability_none,
+            price_quote=self.tenant_price_quote,
+            choose_one=self.tenant_choose_one,
+            booking_taken=self.tenant_booking_taken,
         )
 
     def database_dsn(self) -> str:

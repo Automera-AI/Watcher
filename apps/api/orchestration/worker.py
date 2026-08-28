@@ -40,9 +40,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import UTC, date
 from enum import StrEnum
 from typing import Protocol
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from packages.intents.schema import Vocabulary, default_vocabulary
 
@@ -50,6 +52,7 @@ from apps.api.audit.log import AuditEntry, AuditLog
 from apps.api.channels.sender import ChannelSender
 from apps.api.classifier.service import Classifier
 from apps.api.classifier.types import ClassificationOutcome, input_from
+from apps.api.conversations.slots import normalise_slots
 from apps.api.conversations.task import Task
 from apps.api.core.alerts import LOG_ONLY, AlertOutcome, EmergencyAlert, OperatorAlerter
 from apps.api.core.autonomy import Autonomy, decide_autonomy
@@ -86,7 +89,8 @@ class Receptionist(Protocol):
         identity_verified: bool,
         emergency: bool,
         turns_taken: int,
-        vocabulary: Vocabulary,
+        vocabulary: Vocabulary | None,
+        conversation_id: str | None,
     ) -> tuple[OutboundAction, Task]: ...
 
 
@@ -159,6 +163,10 @@ class Orchestrator:
         self._sender = sender
         self._classifications = classifications
         self._alerter = alerter
+        # The tenant's own vocabulary (``TENANT_VERTICAL``). Held rather than fetched per call so
+        # the autonomy ceiling, the slots absorbed and the receptionist's task machine are all
+        # reading the same file — a clinic served out of the holiday-home vocabulary would collect
+        # ``check_in`` for an appointment and look up ceilings for intents it never emits.
         self._vocabulary = vocabulary or default_vocabulary()
         self._logger = logger
 
@@ -194,7 +202,9 @@ class Orchestrator:
         if emergency is not None:
             return await self._emergency(tenant_id, message_id, message, emergency)
 
-        outcome = self._classifier.classify(input_from(message, history or []))
+        outcome = self._classifier.classify(
+            input_from(message, history or [], timezone=self._policy.timezone)
+        )
 
         if outcome.result is None:
             return self._finish(
@@ -235,6 +245,7 @@ class Orchestrator:
                 message,
                 result_intent=result.intent,
                 confidence=result.confidence_overall,
+                extracted_slots=result.extracted_slots,
                 identity_verified=identity_verified,
                 band=band,
                 snapshot=snapshot,
@@ -395,6 +406,7 @@ class Orchestrator:
         *,
         result_intent: str,
         confidence: float,
+        extracted_slots: dict[str, str],
         identity_verified: bool,
         band: ConfidenceBand,
         snapshot: dict[str, object],
@@ -412,16 +424,28 @@ class Orchestrator:
         # receptionist is an emergency. The parameter stays on the seam — `decide_autonomy` takes
         # it too — because the check belonging to one caller is not a reason for the ceiling to
         # stop knowing about it, and a second entry point into the receptionist would need it.
+        # Demo step 5. What the model read out of this message, filtered to the slots the chosen
+        # intent is allowed to collect and resolved into the forms a booking can act on. ``today``
+        # is the tenant's, not the server's: a message at 00:30 in Cairo is still "tomorrow" from
+        # the previous day to a server in UTC, and the whole point of the dates here is which day
+        # the patient meant.
+        extracted = normalise_slots(
+            result_intent,
+            extracted_slots,
+            vocabulary=self._vocabulary,
+            today=self._today(message),
+        )
         action, task = await self._receptionist(
             turn,
             result_intent,
             confidence,
-            {},  # slot extraction is a prompt change (the model emits no slots today); item 2.x
+            extracted,
             state.task,
             identity_verified=identity_verified,
             emergency=False,
             turns_taken=state.replies_sent,
             vocabulary=self._vocabulary,
+            conversation_id=state.conversation_id,
         )
 
         # Recorded before it is sent, deliberately. A reply we sent but did not record makes us
@@ -459,6 +483,23 @@ class Orchestrator:
             outbound_action=action,
             delivered=delivered,
         )
+
+    def _today(self, message: MessageEnvelope) -> date:
+        """The date this message arrived on, on the tenant's clock.
+
+        Same conversion ``input_from`` makes for the model, made again here rather than carried
+        across: the model is told the date so it can resolve "بكرة", and this is what *checks* the
+        answer. Reading the date back out of the prompt we sent would make the check agree with
+        the thing it is checking.
+        """
+        received = message.received_at
+        stamped = received if received.tzinfo is not None else received.replace(tzinfo=UTC)
+        try:
+            return stamped.astimezone(ZoneInfo(self._policy.timezone)).date()
+        except (ZoneInfoNotFoundError, ValueError):
+            # A zone name `Settings` would have refused at startup. Fall back to the timestamp's
+            # own day rather than dropping every date in the conversation.
+            return stamped.date()
 
     async def _deliver(self, action: OutboundAction, turn: InboundTurn) -> bool | None:
         """Put the reply on the wire. ``None`` when no sender is configured at all.

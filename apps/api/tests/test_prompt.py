@@ -298,7 +298,7 @@ def test_the_fingerprint_moves_when_the_vocabulary_does() -> None:
     """``PROMPT_VERSION`` only moves when a human moves it, and the vocabulary is data.
 
     A client can edit ``intents.yaml`` without a deploy, which changes what the model is asked
-    while the version string stays ``v4``. The fingerprint is what distinguishes two eval runs
+    while the version string stays ``v5``. The fingerprint is what distinguishes two eval runs
     that both claim to be the same prompt version.
     """
     edited = _VOCAB.model_copy(deep=True)
@@ -306,4 +306,4 @@ def test_the_fingerprint_moves_when_the_vocabulary_does() -> None:
 
     assert prompt_fingerprint(build_system_prompt(edited)) != SYSTEM_PROMPT_FINGERPRINT
     assert prompt_fingerprint(SYSTEM_PROMPT) == SYSTEM_PROMPT_FINGERPRINT
-    assert PROMPT_VERSION == "v4"
+    assert PROMPT_VERSION == "v5"
