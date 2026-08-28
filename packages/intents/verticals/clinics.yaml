@@ -1,0 +1,1275 @@
+# Watcher clinic receptionist intent vocabulary
+# Vertical: dermatology and aesthetics clinics. Market: Egypt. Audience: external contacts,
+# primarily patients.
+#
+# This file defines shared clinic intent boundaries. Client-specific branch lists, practitioner
+# rosters, hours, services, prices, promotions and policy wording belong in tenant-scoped data or
+# clients/*.yaml. The client's opening and closing copy is wired through
+# configure_conversation_copy(), not through this schema.
+#
+# Clinical boundary
+#
+# The receptionist books, checks live availability, quotes approved current catalogue data and
+# reads approved facts. It does not diagnose, interpret symptoms or photographs, decide whether a
+# treatment is suitable, recommend a treatment for a condition or reassure a patient about a
+# reaction.
+#
+# Safety routing has three severities:
+#
+#   emergency         -> immediate danger. Checked before intent classification, replies at once,
+#                        provides the senior dermatologist's number and alerts that clinician.
+#   clinical_urgent   -> a significant post-treatment reaction without an immediate-danger sign.
+#                        A person must review it promptly.
+#   clinical_question -> suitability, symptoms, medical history, medicines, pregnancy or personal
+#                        treatment advice. A qualified person answers.
+#
+# Dialogue-state rule
+#
+# Short replies such as "تمام", "أيوه", "لا", "الأول" and a bare name are interpreted against an
+# active pending question or confirmation before this flat vocabulary is consulted. They are not
+# safe action-independent intents because their meaning and terminal action depend on state.
+#
+# Multi-intent rule
+#
+# A single message may contain more than one request, such as price plus nearest branch or offer
+# plus booking. Orchestration decomposes the message into action-aligned intents, preserves safety
+# precedence, answers all safe read-only parts, and continues one mutating flow at a time. This is
+# not represented as a catch-all multi-intent label because doing so would lose the terminal tools.
+
+version: "2.1.0"
+vertical: clinics
+markets: [EG]
+# Retain the shared schema's existing external-user enum. In this vertical, "guest" means a
+# person contacting the clinic rather than a staff user; it includes patients and the occasional
+# legitimate careers or business contact.
+audience: guests_only
+
+languages:
+  - code: ar-EG
+    spoken: true
+    note: Egyptian Arabic in Arabic script. The default for this vertical.
+  - code: ar-EG-latin
+    spoken: false
+    note: Franco-Arabic. Text only, never spoken or sent to a speech model.
+  - code: en
+    spoken: true
+    note: Used when requested or when the patient continues in English.
+  - code: mixed
+    spoken: true
+    note: Egyptian Arabic and English in one message. Normal usage, not an error.
+
+tools:
+  - greet
+  - close_conversation
+  - check_availability
+  - quote_price
+  - hold_slot
+  - confirm_booking
+  - lookup_appointment
+  - answer_from_knowledge
+  - create_ticket
+  - take_message
+  - handoff_to_human
+
+# Emergency matching mixes short current-state reports with longer contextual phrases. Broad topic
+# nouns such as "حروق" and ambiguous UI phrases such as "مش شايفة" remain excluded, while reports
+# such as "جلدي اتحرق", "لساني وارم" and "نزيف مش بيقف" match immediately. Orchestration normalizes
+# case, Arabic diacritics, alef/hamza variants, whitespace and punctuation before matching. It must
+# preserve negation, reject clearly hypothetical or recovered reports, and continue checking other
+# trigger groups when one symptom is negated.
+#
+# The patient reply provides only the tenant-configured senior dermatologist contact. The alert is
+# sent to that same clinician, never a public-service number or a general support queue. The current
+# emergency schema has no reply-copy or contact field, so the client pack owns both values.
+# Demo-only senior dermatologist number: +20 000 000 0000. It is intentionally invalid.
+emergency:
+  action: handoff_to_human
+  # The operator target resolves to the tenant's senior dermatologist in the client pack.
+  alert: phone_call_to_operator
+  reply_immediately: true
+  triggers:
+    - id: breathing
+      any_of:
+        - "can't breathe"
+        - "cant breathe"
+        - "cannot breathe"
+        - "can not breathe"
+        - "difficulty breathing"
+        - "having difficulty breathing"
+        - "struggling to breathe"
+        - "صعوبة في التنفس"
+        - "مش قادرة أتنفس"
+        - "مش قادرة اتنفس"
+        - "مش قادر أتنفس"
+        - "مش قادر اتنفس"
+        - "مش عارفة آخد نفسي"
+        - "مش قادر آخد نفسي"
+        - "نفسي مش داخل"
+        - "mesh 2adra atnafes"
+        - "mesh 2ader atnafes"
+      note: Current breathing difficulty is always immediate.
+    - id: airway_swelling
+      any_of:
+        - "my throat is closing"
+        - "my throat is closing up"
+        - "throat closing up"
+        - "my throat is swelling"
+        - "my tongue is swollen"
+        - "tongue is swollen"
+        - "my tongue is swelling"
+        - "my face is swelling fast"
+        - "حلقي بيقفل"
+        - "حلقي بيورم"
+        - "لساني وارم"
+        - "لساني بيورم"
+        - "وشي بيورم بسرعة"
+        - "حلقي بيورم ومش عارفة أبلع"
+        - "لساني وارم ومش عارفة أتنفس"
+        - "وشي بيورم بسرعة بعد الحقن"
+        - "7al2y bey2fel"
+        - "lesany warem"
+      note: Sudden airway or rapidly progressing facial swelling.
+    - id: anaphylaxis
+      any_of:
+        - "severe allergic reaction"
+        - "having an allergic reaction"
+        - "I'm having a severe allergic reaction"
+        - "حساسية شديدة"
+        - "عندي حساسية شديدة"
+        - "حصلتلي حساسية شديدة"
+        - "حساسية جامدة بعد الحقن"
+        - "حساسية شديدة ومش قادرة أتنفس"
+        - "حساسية جامدة وحلقي بيقفل"
+        - "7asaseya shadida w mesh 2adra atnafes"
+    - id: collapse
+      any_of:
+        - "she is unconscious"
+        - "he is unconscious"
+        - "they are unconscious"
+        - "unconscious right now"
+        - "not waking up"
+        - "not waking up after the injection"
+        - "passed out and is not waking up"
+        - "مغمى عليها"
+        - "مغمى عليه"
+        - "مش بتفوق"
+        - "مش بيفوق"
+        - "وقعت ومش بتفوق"
+        - "مغمى عليها ومش بتفوق"
+        - "مغمى عليه ومش بيفوق"
+        - "فقدت الوعي ومش بتفوق"
+        - "فقد الوعي ومش بيفوق"
+      note: Current unresponsiveness only. A recovered fainting episode is clinical_urgent.
+    - id: severe_bleeding
+      any_of:
+        - "bleeding won't stop"
+        - "bleeding wont stop"
+        - "bleeding will not stop"
+        - "uncontrolled bleeding"
+        - "I'm bleeding heavily after the procedure"
+        - "the bleeding will not stop"
+        - "نزيف مش بيقف"
+        - "نزيف مش واقف"
+        - "الدم مش بيقف"
+        - "بنزف جامد"
+        - "عندي نزيف شديد بعد الجلسة"
+        - "الدم مش بيقف بعد الحقن"
+    - id: burn
+      any_of:
+        - "severe burn after laser"
+        - "bad burn after laser"
+        - "my skin got burned"
+        - "my skin burned"
+        - "severe burn and blisters after laser"
+        - "my skin is badly burned after the session"
+        - "جلدي اتحرق"
+        - "وشي اتحرق"
+        - "اتحرقت من الليزر"
+        - "حرق شديد بعد الليزر"
+        - "جلدي اتحرق جامد بعد الليزر"
+        - "في حرق شديد وفقاقيع بعد الجلسة"
+      note: Broad questions about whether laser can burn are not emergency triggers.
+    - id: vision
+      any_of:
+        - "lost vision after filler"
+        - "can't see from one eye"
+        - "cant see from one eye"
+        - "double vision after injection"
+        - "I suddenly lost my vision after filler"
+        - "I cannot see from one eye after the injection"
+        - "my vision suddenly became blurry after filler"
+        - "I am seeing double after the facial injection"
+        - "مش شايف بعيني"
+        - "مش شايفة بعيني"
+        # "مبقتش شايفة" is "I can no longer see" — a change of state, not the ambiguous "مش
+        # شايفة" the note above excludes. Still qualified by the eye or by the injection so it
+        # cannot fire on "مبقتش شايفة الرسايل".
+        - "مبقتش شايف بعيني"
+        - "مبقتش شايفة بعيني"
+        - "مبقتش شايف بعد الحقن"
+        - "مبقتش شايفة بعد الحقن"
+        - "مبقتش شايف بعد الفيلر"
+        - "مبقتش شايفة بعد الفيلر"
+        - "فقدت النظر بعد الفيلر"
+        - "مش شايف بعيني بعد الحقن"
+        - "فقدت النظر فجأة بعد الفيلر"
+        - "مش شايفة بعيني بعد الحقن"
+        - "نظري راح فجأة بعد الفيلر"
+        - "عندي زغللة مفاجئة بعد الفيلر"
+        - "بشوف دوبل بعد الحقن في الوش"
+      note: Sudden vision change after facial injection is treated as immediate danger.
+
+defaults:
+  # Read-only and handoff intents do not inherit confirmation requirements. Each autonomous
+  # mutating intent declares its own exact confirmation slots.
+  confirm_before_acting: []
+  max_clarifying_turns: 2
+  on_max_turns: handoff_to_human
+  on_tool_failure: handoff_to_human
+  on_no_knowledge: handoff_to_human
+
+# The property_systems key is retained for compatibility with the shared Watcher schema. In this
+# vertical it refers to the clinic catalogue and scheduling source, not accommodation property.
+property_systems:
+  - id: imported_catalogue
+    quotable: true
+    note: >
+      Validated tenant-scoped service, treatment-package and availability records. Every returned
+      item retains its source identifier, import version and fetched time so it can be audited later.
+  - id: salesforce
+    quotable: true
+    note: >
+      The client's intended API-backed system. Every response must carry a stable record
+      identifier. The adapter must implement the same interface as imported_catalogue.
+  - id: custom_sheet
+    quotable: false
+    note: >
+      A spreadsheet read live without a stable auditable record. It may provide reference facts,
+      but prices, promotions, stock and availability go to a person.
+  - id: none
+    quotable: false
+    note: No connected auditable clinic system.
+
+quoting:
+  source: property_system_only
+  requires_quotable_system: true
+  never_from_memory: true
+  never_from_knowledge_base: true
+  max_age_seconds: 300
+  on_stale_or_failed: handoff_to_human
+
+  provenance_required:
+    - property_system_id
+    - rate_or_quote_id
+    - fetched_at
+    - valid_until
+    - currency
+    - the exact service or treatment-package scope
+    - the exact session count or package quantity
+
+  always_state:
+    - the currency
+    - whether the amount covers one session or a treatment package
+    - the session count or quantity when applicable
+    - that treatment-package use is subject to the approved written terms
+  never:
+    - invent, negotiate, extend or promise a discount
+    - quote a service or treatment package that the current catalogue does not list
+    - imply a treatment is suitable by quoting it
+    - repeat an earlier price without fetching it again
+    - state a price when the system did not answer
+
+intents:
+
+  # Opening and conversation control
+
+  - name: greeting
+    means: >
+      A conversation-opening salutation with no request attached and no active pending question,
+      slot selection or confirmation. A profile name alone belongs here only as the first message.
+    required_slots: []
+    optional_slots: [customer_name]
+    terminal_tool: greet
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - treat a short answer to an active question as a new greeting
+      - hand off merely because the patient has not asked for anything yet
+      - claim to be a human member of staff
+      - request personal or medical details before a request exists
+      - list the complete service catalogue in the greeting
+    confusable_with: [thanks_closing, human_request, general_info, unclear]
+    examples:
+      - {lang: ar-EG, text: "السلام عليكم"}
+      - {lang: ar-EG, text: "ازيكم"}
+      - {lang: ar-EG, text: "مساء الخير"}
+      - {lang: ar-EG, text: "هاي"}
+      - {lang: ar-EG-latin, text: "salam 3alekom"}
+      - {lang: en, text: "hello"}
+      - {lang: mixed, text: "hi مساء الخير"}
+
+  - name: thanks_closing
+    means: >
+      A clear thank-you, goodbye or statement that the patient needs nothing else, only when no
+      unanswered request or pending action remains. Short acknowledgements such as "تمام" and
+      "ماشي" are not closings during an active booking or confirmation flow.
+    required_slots: []
+    optional_slots: []
+    terminal_tool: close_conversation
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - close while a booking, change, choice or confirmation is pending
+      - interpret a bare yes, no, okay or selected option without conversation state
+      - re-open a booking that is already confirmed
+      - ask another question after an explicit goodbye
+      - offer an add-on after the patient says they are finished
+    confusable_with: [greeting, human_request, complaint, unclear]
+    examples:
+      - {lang: ar-EG, text: "شكرا كده تمام"}
+      - {lang: ar-EG, text: "متشكرة جدا مش محتاجة حاجة تانية"}
+      - {lang: ar-EG, text: "خلاص شكرا سلام"}
+      - {lang: ar-EG, text: "تمام كده يومك جميل"}
+      - {lang: ar-EG-latin, text: "tamam keda shokran"}
+      - {lang: en, text: "that's everything, thank you"}
+      - {lang: mixed, text: "تمام thank you"}
+
+  - name: human_request
+    means: >
+      An explicit request to speak with an employee, branch, practitioner, supervisor or call
+      centre, or to receive a human callback. This intent does not require the patient to justify
+      why they want a person.
+    required_slots: []
+    optional_slots: [branch, service, practitioner, customer_name, phone]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - block the handoff by forcing the patient to continue with automation
+      - claim that a person is already connected when no handoff was accepted
+      - promise an exact callback time unless the handoff system returned one
+      - collect medical history merely to decide who should receive the handoff
+    confusable_with: [complaint, clinical_question, clinical_urgent, unclear]
+    examples:
+      - {lang: ar-EG, text: "ممكن أكلم حد؟"}
+      - {lang: ar-EG, text: "عايزة حد من الفرع يكلمني"}
+      - {lang: ar-EG, text: "وصليني بخدمة العملاء"}
+      - {lang: ar-EG, text: "محتاجة أكلم الدكتورة"}
+      - {lang: ar-EG-latin, text: "momken akalem 7ad?"}
+      - {lang: en, text: "please connect me to a person"}
+      - {lang: mixed, text: "ممكن human agent يرد عليا؟"}
+
+  # Discovery, pricing and booking
+
+  - name: availability_check
+    means: >
+      Asking for real bookable slots for a service at a branch, optionally on a date or at a time,
+      without identifying a particular practitioner. Opening hours are not proof that an appointment
+      is available. General practitioner coverage uses practitioner_availability; an explicitly
+      identified practitioner uses named_practitioner_request and goes to a person.
+    required_slots: [service, branch]
+    optional_slots: [requested_date, requested_time, customer_name]
+    terminal_tool: check_availability
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - offer a slot the scheduling system did not return
+      - offer a slot held for another patient
+      - describe opening hours or a roster as live availability
+      - offer a time on a closed day or outside the configured schedule
+      - claim a requested practitioner is available without live confirmation
+    confusable_with: [booking_enquiry, practitioner_availability, named_practitioner_request, general_info, price_enquiry]
+    examples:
+      - {lang: ar-EG, text: "في مواعيد فاضيه لليزر؟"}
+      - {lang: ar-EG, text: "عندكم مكان بكرة الساعة ٦؟"}
+      - {lang: ar-EG, text: "أقرب ميعاد للفاشيال فين؟"}
+      - {lang: ar-EG, text: "فيه availability النهارده في فرع قريب؟"}
+      - {lang: ar-EG-latin, text: "fi maw3eed fadya bokra?"}
+      - {lang: en, text: "do you have a laser slot on Thursday?"}
+      - {lang: mixed, text: "ممكن check availability للسبت؟"}
+
+  - name: price_enquiry
+    means: >
+      Asking for the current price of a named clinic service, treatment area, session or treatment
+      package. The intent is the amount itself, not whether the item is medically suitable, how it
+      compares clinically or whether an unverified discount can be applied. For compatibility with
+      quote_price, the legacy service slot holds the selected service or package catalogue item ID.
+    required_slots: [service]
+    optional_slots: [branch, session_count, treatment_area, customer_name]
+    terminal_tool: quote_price
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - quote from memory, chat history or the knowledge base
+      - negotiate or invent a discount
+      - quote a service or package missing from the current catalogue
+      - imply suitability while quoting
+      - omit the currency, session count, quantity or package scope
+      - quote a retail item or gift voucher under this intent
+    confusable_with: [promotion_enquiry, product_voucher_enquiry, payment_options, package_terms_question, service_question]
+    examples:
+      - {lang: ar-EG, text: "جلسة الليزر بكام؟"}
+      - {lang: ar-EG, text: "جلسة الهايدرافيشل بكام؟"}
+      - {lang: ar-EG, text: "الباكدج الست جلسات بكام؟"}
+      - {lang: ar-EG, text: "ممكن أعرف أسعار ليزر الوش؟"}
+      - {lang: ar-EG-latin, text: "el botox bekam?"}
+      - {lang: en, text: "how much is one facial session?"}
+      - {lang: mixed, text: "بكام الـ facial package؟"}
+
+  - name: promotion_enquiry
+    means: >
+      Asking about a currently active offer, promotional code, promotional package, qualifying
+      payment method or offer expiry. The demo has no approved live promotion source, so a person
+      answers instead of Nada quoting an offer from memory, social media or static knowledge.
+    required_slots: []
+    optional_slots: [service, branch, package, promotion_code, payment_method, customer_name]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - invent, negotiate, extend or reactivate an offer
+      - quote a promotion without its conditions and expiry
+      - assume an online offer applies in a branch or to every payment method
+      - state an expired or unverified social-media promotion
+      - treat a request for a personal exception as an ordinary offer enquiry
+      - delay the human handoff to collect unnecessary information
+    confusable_with: [price_enquiry, payment_options, package_terms_question, service_question]
+    examples:
+      - {lang: ar-EG, text: "إيه عروض الليزر دلوقتي؟"}
+      - {lang: ar-EG, text: "الكود ده شغال لحد إمتى؟"}
+      - {lang: ar-EG, text: "في عرض على الفيلر؟"}
+      - {lang: ar-EG, text: "تفاصيل العرض إيه؟"}
+      - {lang: ar-EG-latin, text: "fi offers 3ala el laser?"}
+      - {lang: en, text: "is the online discount still active?"}
+      - {lang: mixed, text: "الـ promo code ينفع مع card payment؟"}
+
+  - name: payment_options
+    means: >
+      Asking which payment methods, financing or instalment options are generally accepted before
+      payment. A past charge, failed payment, refund, invoice or patient-specific balance is a
+      billing question instead.
+    required_slots: []
+    optional_slots: [branch, service, package, payment_method, customer_name]
+    terminal_tool: answer_from_knowledge
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - claim a financing approval or eligibility decision
+      - invent a payment provider, fee, instalment period or branch exception
+      - disclose or interpret a patient's transaction
+      - ask for card numbers, CVV codes, PINs or one-time passwords
+    confusable_with: [price_enquiry, promotion_enquiry, billing_question, package_terms_question]
+    examples:
+      - {lang: ar-EG, text: "فيه تقسيط؟"}
+      - {lang: ar-EG, text: "بتقبلوا فيزا ولا كاش؟"}
+      - {lang: ar-EG, text: "ينفع أدفع بالمحفظة؟"}
+      - {lang: ar-EG, text: "إيه أنظمة الدفع المتاحة؟"}
+      - {lang: ar-EG-latin, text: "fe ta2seet?"}
+      - {lang: en, text: "what payment methods do you accept?"}
+      - {lang: mixed, text: "في installment plans للباكدج؟"}
+
+  - name: booking_enquiry
+    means: >
+      Expressing an intention to create a new appointment for a service or consultation. Missing
+      service, branch, date or time are slot-filling needs, not reasons to classify the request as
+      unclear. A symptom mentioned only as the reason for explicitly booking a dermatology
+      consultation remains booking, unless the message also asks for assessment or advice or has
+      an urgent or emergency sign. The flow ends only after explicit patient confirmation and a
+      durable reference.
+    required_slots: [service, branch, requested_date]
+    optional_slots: [requested_time, customer_name, phone, treatment_area]
+    confirm_before_acting: [service, branch, requested_date, requested_time, phone]
+    terminal_tool: confirm_booking
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - create a booking before explicit confirmation in the patient's own words
+      - say a booking is confirmed without a scheduling-system reference
+      - re-ask for a value already established in the active conversation
+      - offer an add-on before confirming the main appointment
+      - book a treatment when screening or a clinician has blocked it
+      - treat a stateful "تمام احجزي" as a closing message
+      - continue autonomous booking after a named or context-resolved practitioner is established
+    confusable_with: [availability_check, named_practitioner_request, appointment_lookup_status, modify_appointment, price_enquiry]
+    examples:
+      - {lang: ar-EG, text: "عاوزه احجز جلسة ليزر"}
+      - {lang: ar-EG, text: "ممكن أحجز كشف جلدية بكرة؟"}
+      - {lang: ar-EG, text: "احجزيلي فاشيال يوم السبت"}
+      - {lang: ar-EG, text: "عندي حبوب وعايزة أحجز مع دكتورة جلدية"}
+      - {lang: ar-EG-latin, text: "3ayza a7gez jalset laser"}
+      - {lang: en, text: "I'd like to book a consultation"}
+      - {lang: mixed, text: "عايزة أحجز appointment للبوتوكس"}
+
+  - name: service_question
+    means: >
+      Asking which clinic-wide services or consultation types are offered, or asking objective,
+      approved facts about a named service, device or package, such as what it is, what areas it
+      covers, its general duration or the non-personal differences between two catalogue items.
+      Personal suitability, expected individual results and medical advice do not belong here.
+    required_slots: []
+    optional_slots: [service, branch, package, treatment_area, device, customer_name]
+    terminal_tool: answer_from_knowledge
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - invent a benefit, result, recovery time, device or service fact
+      - answer whether the service is right or safe for this patient
+      - recommend one treatment over another for a personal concern
+      - promise a result or number of sessions needed by an individual
+      - answer preparation or aftercare instructions under this intent
+      - invent branch availability for a listed service
+      - dump the full catalogue when a concise category summary answers the question
+    confusable_with: [general_info, clinical_question, preparation_aftercare_info, package_terms_question]
+    examples:
+      - {lang: ar-EG, text: "عندكم خدمات إيه؟"}
+      - {lang: ar-EG, text: "بتعملوا إيه للبشرة والشعر؟"}
+      - {lang: ar-EG, text: "في عندكم ليزر وفيلر؟"}
+      - {lang: ar-EG, text: "ممكن أعرف أقسام العيادة؟"}
+      - {lang: ar-EG-latin, text: "3andoko services eh?"}
+      - {lang: en, text: "what services do you offer?"}
+      - {lang: mixed, text: "عندكم body shaping services؟"}
+      - {lang: ar-EG, text: "الجلسة بتاخد قد إيه؟"}
+      - {lang: ar-EG, text: "الفول بادي بيشمل إيه؟"}
+      - {lang: ar-EG, text: "إيه الفرق بين الجهازين؟"}
+      - {lang: ar-EG, text: "الفاشيال ده عبارة عن إيه؟"}
+      - {lang: ar-EG-latin, text: "el jalsa btakhod ad eh?"}
+      - {lang: en, text: "what is included in this service?"}
+      - {lang: mixed, text: "الـ session duration قد إيه؟"}
+
+  - name: preparation_aftercare_info
+    means: >
+      Asking for approved general preparation or aftercare instructions for a named treatment,
+      without reporting a personal symptom or reaction. The instruction phase is normalized to
+      exactly preparation or aftercare. Nada uses the deterministic (service, instruction_phase) key
+      to select the exact ordered list from the tenant's approved checklist map, returns it as a
+      clear itemised checklist, and does not adapt medical advice to the patient. A missing key uses
+      the configured no-knowledge handoff instead of generating instructions.
+    required_slots: [service, instruction_phase]
+    optional_slots: [branch, treatment_area, appointment_ref, customer_name]
+    terminal_tool: answer_from_knowledge
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - provide instructions not present in approved clinic material
+      - interpret a personal symptom as an ordinary aftercare question
+      - recommend a medicine, cream, painkiller or dose
+      - reassure a patient that a reported reaction is normal
+      - replace a clinician's specific instructions
+      - merge, omit or add items outside the approved checklist map
+      - answer until both the treatment and whether the request is before-care or aftercare are clear
+    confusable_with: [service_question, clinical_question, clinical_urgent, complaint]
+    examples:
+      - {lang: ar-EG, text: "أعمل إيه قبل جلسة الليزر؟"}
+      - {lang: ar-EG, text: "إيه التعليمات بعد الفيلر؟"}
+      - {lang: ar-EG, text: "أحلق قبل الجلسة بقد إيه؟"}
+      - {lang: ar-EG, text: "ممنوع أعمل إيه بعد الفاشيال؟"}
+      - {lang: ar-EG-latin, text: "a3mel eh abl jalset el laser?"}
+      - {lang: en, text: "what are the approved aftercare instructions?"}
+      - {lang: mixed, text: "إيه الـ preparation قبل الـ session؟"}
+
+  - name: package_terms_question
+    means: >
+      Asking about the clinic's general written treatment-package terms, such as activation,
+      validity, included sessions, branch use, transfer, pause, expiry, missed sessions or refund
+      rules. Questions about the patient's own balance or expiry are account-specific.
+    required_slots: []
+    optional_slots: [service, package, branch, customer_name]
+    terminal_tool: answer_from_knowledge
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - paraphrase a term in a way that changes its meaning
+      - invent a term or promise an exception
+      - decide a refund, transfer or extension
+      - disclose a patient's package balance or purchase history
+      - state social-media wording as policy unless it is in approved current terms
+    confusable_with: [package_account_status, product_voucher_enquiry, promotion_enquiry, price_enquiry, billing_question]
+    examples:
+      - {lang: ar-EG, text: "الباكدج صالحة قد إيه؟"}
+      - {lang: ar-EG, text: "لازم أبدأ الجلسات خلال كام يوم؟"}
+      - {lang: ar-EG, text: "ينفع أستخدم الباكدج في أي فرع؟"}
+      - {lang: ar-EG, text: "ينفع أحول الباكدج لأختي؟"}
+      - {lang: ar-EG-latin, text: "el package valid le modet ad eh?"}
+      - {lang: en, text: "what are the package activation terms?"}
+      - {lang: mixed, text: "الـ package ليها expiry date؟"}
+
+  - name: practitioner_availability
+    means: >
+      Asking for general practitioner coverage or available clinician timings at a branch, without
+      naming or identifying a practitioner. Nada may list only the general timings returned by the
+      approved schedule. A named practitioner, a context-resolved individual, or a request for who
+      is best uses named_practitioner_request and goes to a person.
+    required_slots: [branch]
+    optional_slots: [service, requested_date, requested_time, customer_name]
+    terminal_tool: check_availability
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - invent a practitioner, specialty, branch assignment or schedule
+      - describe an old roster as live availability
+      - recommend a practitioner as the best choice for the patient's condition
+      - offer a slot not returned by the scheduling system
+      - answer a named or context-resolved practitioner's schedule autonomously
+      - include practitioner names when the patient asked only for general timings
+    confusable_with: [availability_check, named_practitioner_request, booking_enquiry, general_info, clinical_question]
+    examples:
+      - {lang: ar-EG, text: "مواعيد دكاترة الجلدية في الفرع إيه؟"}
+      - {lang: ar-EG, text: "في دكاترة موجودين إمتى النهارده؟"}
+      - {lang: ar-EG, text: "ممكن مواعيد الدكاترة المتاحة الأسبوع ده؟"}
+      - {lang: ar-EG, text: "في حد متاح بكرة للكشف؟"}
+      - {lang: ar-EG-latin, text: "mawa3eed el doctors fel far3 eh?"}
+      - {lang: en, text: "what are the general dermatologist timings at this branch?"}
+      - {lang: mixed, text: "إيه الـ general doctor timings بكرة؟"}
+
+  - name: named_practitioner_request
+    means: >
+      Asking about, requesting or trying to book a practitioner explicitly named in the message or
+      resolved as a specific individual from active context. The demo has no reliable named-person
+      roster or schedule, so the request goes to a human without Nada stating availability.
+    required_slots: []
+    optional_slots: [practitioner, branch, service, requested_date, requested_time, customer_name]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - state or imply that a named practitioner is available
+      - invent a practitioner, specialty, branch assignment or schedule
+      - recommend the named practitioner as suitable for the patient's condition
+      - downgrade the request to general timings after a specific person is established
+      - delay the human handoff to collect or verify identity
+    confusable_with: [practitioner_availability, availability_check, booking_enquiry, human_request]
+    examples:
+      - {lang: ar-EG, text: "دكتورة [اسم الدكتورة] موجودة إمتى؟"}
+      - {lang: ar-EG, text: "في ميعاد مع دكتورة [الاسم] يوم السبت؟"}
+      - {lang: ar-EG, text: "الدكتورة دي بتكون في أنهي فرع؟"}
+      - {lang: ar-EG, text: "عايزة أحجز مع الدكتورة اللي سألت عليها"}
+      - {lang: ar-EG-latin, text: "Dr [name] mawgooda emta?"}
+      - {lang: en, text: "when is Dr [name] available?"}
+      - {lang: mixed, text: "مواعيد Dr [name] في الفرع إيه؟"}
+
+  # Existing appointments and patient accounts
+
+  - name: appointment_lookup_status
+    means: >
+      Asking whether an existing appointment is confirmed, requesting its date, time, branch,
+      service or reference again, or checking whether a recent booking attempt created a record.
+      The lookup uses either a supplied appointment reference or a verified account or channel key,
+      never a name alone, before disclosing patient-specific details. The current flat slot schema
+      cannot express that one-of precondition, so the lookup adapter must enforce it.
+    required_slots: []
+    optional_slots: [appointment_ref, customer_name, phone]
+    terminal_tool: lookup_appointment
+    max_autonomy: act
+    needs_verified_identity: true
+    never:
+      - disclose an appointment before verifying identity
+      - act on a partial name match
+      - run the lookup without an appointment reference or a verified account or channel key
+      - say a booking exists when the system returned no durable record
+      - modify or cancel the appointment under this intent
+      - expose another patient's appointment details
+    confusable_with: [booking_enquiry, modify_appointment, cancel_appointment, online_order_support]
+    examples:
+      - {lang: ar-EG, text: "حجزي اتأكد؟"}
+      - {lang: ar-EG, text: "ممكن تبعتي رقم الحجز تاني؟"}
+      - {lang: ar-EG, text: "ميعادي كان إمتى؟"}
+      - {lang: ar-EG, text: "أنا حجزت أونلاين في ميعاد متسجل؟"}
+      - {lang: ar-EG-latin, text: "7agzy et2aked?"}
+      - {lang: en, text: "can you resend my appointment details?"}
+      - {lang: mixed, text: "ممكن check booking status؟"}
+
+  - name: modify_appointment
+    means: >
+      Requesting a change to the date, time, branch, practitioner or service on an existing
+      appointment. Because the declared tool registry has no atomic reschedule action, the
+      receptionist hands the requested change to a person. That workflow verifies identity before
+      disclosing or changing anything, but verification must never block the handoff itself.
+    required_slots: []
+    optional_slots: [appointment_ref, requested_date, requested_time, branch, service, practitioner, customer_name, phone]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - say an appointment was changed before the scheduling system confirms it
+      - release the original slot before a replacement is secured
+      - disclose or change an appointment before the human workflow verifies identity
+      - delay the human handoff to collect or verify identity
+      - create a second appointment and leave the original active
+      - promise that a requested replacement slot will remain available
+    confusable_with: [availability_check, appointment_lookup_status, booking_enquiry, cancel_appointment]
+    examples:
+      - {lang: ar-EG, text: "عايزه اغير المعاد لبكره"}
+      - {lang: ar-EG, text: "عايزة أنقل الحجز لفرع تاني"}
+      - {lang: ar-EG, text: "ينفع أقدم الميعاد ساعة؟"}
+      - {lang: ar-EG, text: "غيرولي الدكتورة في الحجز"}
+      - {lang: ar-EG-latin, text: "momken a8ayar mi3ady?"}
+      - {lang: en, text: "I need to move my appointment"}
+      - {lang: mixed, text: "عايزة reschedule للسبت"}
+
+  - name: cancel_appointment
+    means: >
+      Requesting cancellation of an existing appointment or a paid package. Appointment
+      cancellation changes live capacity and package cancellation may involve money, so both are
+      handed to a person under the current tool registry. That workflow verifies identity before
+      disclosing or changing anything, but verification must never block the handoff itself.
+    required_slots: []
+    optional_slots: [appointment_ref, package, customer_name, phone]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - cancel anything automatically
+      - state that cancellation is complete before the clinic processes it
+      - promise or refuse a refund
+      - expose appointment or package details before identity verification
+      - delay the human handoff to collect or verify identity
+      - treat a request to move the appointment as cancellation
+    confusable_with: [modify_appointment, billing_question, package_account_status, appointment_lookup_status]
+    examples:
+      - {lang: ar-EG, text: "عاوزه الغي المعاد"}
+      - {lang: ar-EG, text: "مش هقدر أجي الغوا الحجز"}
+      - {lang: ar-EG, text: "محتاجة ألغي الباكدج"}
+      - {lang: ar-EG, text: "ممكن تعملوا cancel للسيشن؟"}
+      - {lang: ar-EG-latin, text: "3ayza al8y el mi3ad"}
+      - {lang: en, text: "please cancel my appointment"}
+      - {lang: mixed, text: "عايزة cancel الحجز"}
+
+  - name: arrival_late_no_show
+    means: >
+      Reporting that the patient is on the way, has arrived, will be late, cannot arrive on time
+      or has already missed the appointment. The receptionist creates an operational ticket for
+      the relevant branch after verifying which patient and appointment are affected.
+    required_slots: [appointment_ref, branch]
+    optional_slots: [estimated_delay_minutes, customer_name, phone]
+    terminal_tool: create_ticket
+    max_autonomy: act_and_notify
+    needs_verified_identity: true
+    never:
+      - promise that a late arrival will still be seen
+      - change, cancel or mark an appointment complete
+      - claim the branch has received the update unless ticket creation succeeded
+      - disclose appointment details before identity verification
+      - treat a complaint about a historical wait as a current arrival update
+    confusable_with: [modify_appointment, cancel_appointment, complaint, directions]
+    examples:
+      - {lang: ar-EG, text: "أنا في الطريق وهتأخر ربع ساعة"}
+      - {lang: ar-EG, text: "وصلت الفرع ومحدش بيرد"}
+      - {lang: ar-EG, text: "فاتني ميعادي النهارده"}
+      - {lang: ar-EG, text: "أنا تحت وهطلع دلوقتي"}
+      - {lang: ar-EG-latin, text: "ana fel taree2 w hat2akhar 15 de2ee2a"}
+      - {lang: en, text: "I'm running twenty minutes late"}
+      - {lang: mixed, text: "أنا وصلت الـ branch ومحدش بيرد"}
+
+  - name: package_account_status
+    means: >
+      Asking about the patient's own purchased package or voucher, including activation, remaining
+      sessions, personal expiry date, redemption history or whether a purchase appears on the
+      account. The current registry has no package lookup tool, so a human handles it and verifies
+      identity before disclosing account data. Verification must not block the handoff itself.
+    required_slots: []
+    optional_slots: [package, voucher, customer_name, phone, order_ref]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - disclose package or voucher data before identity verification
+      - delay the human handoff to collect or verify identity
+      - estimate a balance from conversation history
+      - change expiry, transfer ownership or add sessions
+      - promise activation, extension, credit or refund
+      - answer a general written package term as though it were account-specific
+    confusable_with: [package_terms_question, online_order_support, billing_question, appointment_lookup_status]
+    examples:
+      - {lang: ar-EG, text: "فاضلي كام سيشن؟"}
+      - {lang: ar-EG, text: "الباكدج بتاعتي اتفعلت ولا لسه؟"}
+      - {lang: ar-EG, text: "الاشتراك بتاعي بينتهي إمتى؟"}
+      - {lang: ar-EG, text: "الجلسة دي اتحسبت من الباكدج؟"}
+      - {lang: ar-EG-latin, text: "fadely kam session fel package?"}
+      - {lang: en, text: "how many sessions do I have left?"}
+      - {lang: mixed, text: "ممكن check package balance؟"}
+
+  # Products, vouchers, orders and billing
+
+  - name: product_voucher_enquiry
+    means: >
+      Asking about a clinic product or gift voucher, such as labelled ingredients, included value,
+      redemption method or written terms. The demo has no approved retail or voucher data source,
+      so a person answers. Price and stable facts remain under this handoff intent, stock uses
+      stock_enquiry, and a missing, damaged or undelivered order uses online_order_support.
+    required_slots: []
+    optional_slots: [product, voucher, branch, customer_name]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - invent a product benefit, ingredient, stock level or voucher term
+      - give personalised clinical advice about using a product
+      - state a current price from the knowledge base
+      - access or disclose an order under this intent
+      - promise that a voucher applies to a service without approved terms
+      - delay the human handoff to collect unnecessary information
+    confusable_with: [price_enquiry, package_terms_question, online_order_support, stock_enquiry, service_question]
+    examples:
+      - {lang: ar-EG, text: "إيه المكونات المكتوبة على جل بعد الليزر؟"}
+      - {lang: ar-EG, text: "الـ gift voucher بتستخدم إزاي؟"}
+      - {lang: ar-EG, text: "عبوة الـ skin protector كام مل؟"}
+      - {lang: ar-EG, text: "الفاوتشر ينفع هدية؟"}
+      - {lang: ar-EG, text: "الـ gift voucher بكام؟"}
+      - {lang: ar-EG-latin, text: "el voucher byshtaghal ezay?"}
+      - {lang: en, text: "how much is the after-laser gel?"}
+      - {lang: mixed, text: "إيه الـ redemption terms بتاعة الـ voucher؟"}
+
+  - name: stock_enquiry
+    means: >
+      Asking whether a product, product size or gift voucher is currently in stock, or at which
+      branch it is available. Stock is volatile and the declared registry has no inventory lookup
+      tool, so the request goes to a person instead of being answered from static knowledge.
+    required_slots: []
+    optional_slots: [product, voucher, branch, customer_name]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - state current stock from memory, chat history or the knowledge base
+      - claim an item is reserved or held for the patient
+      - access or disclose a patient's existing order
+      - recommend a product for the patient's condition
+      - confuse product stock with bookable appointment availability
+    confusable_with: [product_voucher_enquiry, price_enquiry, online_order_support, general_info]
+    examples:
+      - {lang: ar-EG, text: "كريم بعد الليزر متوفر دلوقتي؟"}
+      - {lang: ar-EG, text: "في فاوتشرز متاحة في الفرع؟"}
+      - {lang: ar-EG, text: "المنتج ده موجود في أنهي فرع؟"}
+      - {lang: ar-EG, text: "مقاس العبوة الكبيرة موجود؟"}
+      - {lang: ar-EG-latin, text: "el product da available?"}
+      - {lang: en, text: "is this product in stock at the branch?"}
+      - {lang: mixed, text: "الـ after-laser gel in stock؟"}
+
+  - name: online_order_support
+    means: >
+      Reporting a patient-specific problem with an online product, package or voucher order,
+      including missing confirmation, non-delivery, duplicate order, wrong item, damage, rejected
+      redemption or failure to receive the promised digital voucher.
+    required_slots: []
+    optional_slots: [order_ref, product, package, voucher, customer_name, phone]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - disclose or alter an order before identity verification
+      - delay the human handoff to collect or verify identity
+      - claim that an order, refund, replacement or voucher was processed
+      - invent delivery timing, stock or courier status
+      - request card numbers, CVV codes, PINs or one-time passwords
+      - treat a general product question as an account problem
+    confusable_with: [package_account_status, billing_question, complaint, product_voucher_enquiry]
+    examples:
+      - {lang: ar-EG, text: "اشتريت فاوتشر ولسه موصلنيش"}
+      - {lang: ar-EG, text: "دفعت أونلاين ومفيش تأكيد"}
+      - {lang: ar-EG, text: "المنتج وصل غلط"}
+      - {lang: ar-EG, text: "كود الفاوتشر مش شغال"}
+      - {lang: ar-EG-latin, text: "daft online w mafeesh confirmation"}
+      - {lang: en, text: "my digital voucher never arrived"}
+      - {lang: mixed, text: "الـ order وصل damaged"}
+
+  - name: billing_question
+    means: >
+      A patient-specific question or dispute about a completed or attempted payment, invoice,
+      refund, duplicate charge, incorrect amount, declined transaction or prior purchase price.
+      Money after the fact goes to a person, who verifies identity before disclosing transaction
+      data. Verification must not block the handoff itself.
+    required_slots: []
+    optional_slots: [appointment_ref, order_ref, package, customer_name, phone]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - disclose transaction details before identity verification
+      - delay the human handoff to collect or verify identity
+      - state what was charged when the receptionist cannot verify it
+      - approve, refuse or promise a refund
+      - request card numbers, CVV codes, PINs or one-time passwords
+      - explain a bank or payment-provider decision as fact
+    confusable_with: [price_enquiry, payment_options, online_order_support, package_terms_question, complaint]
+    examples:
+      - {lang: ar-EG, text: "اتخصم مني مبلغ غلط"}
+      - {lang: ar-EG, text: "اتحاسبت مرتين"}
+      - {lang: ar-EG, text: "الريفاند هينزل إمتى؟"}
+      - {lang: ar-EG, text: "محتاجة الفاتورة بتاعتي"}
+      - {lang: ar-EG-latin, text: "etkhasam meny el mabla8 marratein"}
+      - {lang: en, text: "I was charged twice"}
+      - {lang: mixed, text: "الـ payment failed بس الفلوس اتخصمت"}
+
+  - name: medical_documents_results
+    means: >
+      Requesting a clinic-issued prescription, prescription renewal, medical report, referral,
+      consent copy, treatment record, laboratory or biopsy result, or asking whether one of those
+      documents is ready. A human verifies identity before releasing or changing anything, but
+      verification must never block the handoff itself.
+    required_slots: []
+    optional_slots: [document_type, appointment_ref, service, customer_name, phone]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - disclose a result, prescription, report or treatment record before identity verification
+      - interpret a result or change a prescription
+      - promise that a document is ready when the clinic has not confirmed it
+      - request detailed medical history in order to route the handoff
+      - delay the human handoff to collect or verify identity
+    confusable_with: [clinical_question, privacy_data_request, appointment_lookup_status, billing_question]
+    examples:
+      - {lang: ar-EG, text: "نتيجة التحليل طلعت؟"}
+      - {lang: ar-EG, text: "ممكن أجدد الروشتة؟"}
+      - {lang: ar-EG, text: "عايزة نسخة من التقرير الطبي"}
+      - {lang: ar-EG, text: "نتيجة العينة ظهرت ولا لسه؟"}
+      - {lang: ar-EG-latin, text: "natiget el ta7leel zaharet?"}
+      - {lang: en, text: "can I get a copy of my prescription?"}
+      - {lang: mixed, text: "ممكن أستلم الـ biopsy result؟"}
+
+  - name: followup_touchup_review
+    means: >
+      Asking about a post-treatment review, follow-up, maintenance visit or touch-up, including
+      whether it is due, included, chargeable or clinically approved. Because eligibility may
+      depend on the treatment record and clinical judgement, a person handles the request.
+    required_slots: []
+    optional_slots: [service, appointment_ref, practitioner, branch, customer_name, phone]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - promise that a review or touch-up is free, included or medically appropriate
+      - decide whether another treatment session is needed
+      - create an ordinary new booking when review eligibility is unresolved
+      - disclose treatment history before identity verification
+      - delay the human handoff to collect or verify identity
+    confusable_with: [booking_enquiry, package_terms_question, package_account_status, clinical_question]
+    examples:
+      - {lang: ar-EG, text: "جلسة المتابعة بعد الفيلر إمتى؟"}
+      - {lang: ar-EG, text: "الريتاتش بتاعي داخل في السعر؟"}
+      - {lang: ar-EG, text: "الدكتورة قالتلي أرجع بعد أسبوعين"}
+      - {lang: ar-EG, text: "ينفع أعمل تاتش أب دلوقتي؟"}
+      - {lang: ar-EG-latin, text: "el retouch beta3y emta?"}
+      - {lang: en, text: "when should I come back for my review?"}
+      - {lang: mixed, text: "الـ touch-up included ولا لأ؟"}
+
+  - name: digital_support_issue
+    means: >
+      Reporting a technical problem with the website, booking link, form, one-time code, uploaded
+      image, map link or chat attachment before a confirmed order exists. A missing or damaged
+      completed order uses online_order_support instead.
+    required_slots: []
+    optional_slots: [channel, appointment_ref, order_ref, customer_name, phone]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - ask for passwords, PINs, card details or one-time codes
+      - claim the website, link or booking was repaired
+      - treat a confirmed payment or order problem as a generic technical issue
+      - open or follow an untrusted link supplied by the sender
+      - force repeated troubleshooting before offering a person
+    confusable_with: [online_order_support, booking_enquiry, appointment_lookup_status, unclear]
+    examples:
+      - {lang: ar-EG, text: "لينك الحجز مش بيفتح"}
+      - {lang: ar-EG, text: "الكود مش بيجيلي"}
+      - {lang: ar-EG, text: "مش عارفة أرفع الصورة في الفورم"}
+      - {lang: ar-EG, text: "الموقع بيطلعلي error قبل الدفع"}
+      - {lang: ar-EG-latin, text: "link el 7agz mesh byfta7"}
+      - {lang: en, text: "the booking form will not submit"}
+      - {lang: mixed, text: "الـ OTP مش بيوصل"}
+
+  - name: lost_property
+    means: >
+      Reporting an item forgotten or lost during a clinic visit, or asking whether a branch found
+      it. A person at the relevant branch checks without promising that the item is present, held
+      or safe.
+    required_slots: []
+    optional_slots: [branch, appointment_ref, item_description, visit_date, customer_name, phone]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - claim the branch found, stored or secured the item before staff confirms it
+      - disclose another visitor's belongings or contact details
+      - promise replacement or compensation
+      - ask for unnecessary identity documents in chat
+      - delay the branch handoff while collecting nonessential detail
+    confusable_with: [human_request, complaint, arrival_late_no_show, general_info]
+    examples:
+      - {lang: ar-EG, text: "نسيت شنطتي في الفرع"}
+      - {lang: ar-EG, text: "لقيتوا موبايل بعد ميعادي؟"}
+      - {lang: ar-EG, text: "سيبت نضارتي في العيادة"}
+      - {lang: ar-EG, text: "في حاجة ضاعت مني في غرفة الليزر"}
+      - {lang: ar-EG-latin, text: "neseet shantety fel far3"}
+      - {lang: en, text: "I left my phone at the clinic"}
+      - {lang: mixed, text: "نسيت الـ wallet في الفرع"}
+
+  - name: positive_feedback
+    means: >
+      An unsolicited compliment or positive account of a completed clinic experience, practitioner
+      or staff interaction, with no unresolved request attached. Record it for the clinic and reply
+      warmly without turning it into marketing or asking for a public review.
+    required_slots: []
+    optional_slots: [branch, service, practitioner, customer_name]
+    terminal_tool: take_message
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - ask for a public rating or review unless the configured journey explicitly allows it
+      - offer a discount, gift or benefit in exchange for praise
+      - close the conversation while another request remains unanswered
+      - expose staff or patient information
+      - misclassify dissatisfaction or a reported reaction as positive feedback
+    confusable_with: [thanks_closing, complaint, human_request, careers_business_enquiry]
+    examples:
+      - {lang: ar-EG, text: "الخدمة كانت ممتازة بجد"}
+      - {lang: ar-EG, text: "الدكتورة كانت ذوق جداً"}
+      - {lang: ar-EG, text: "النتيجة عجبتني قوي"}
+      - {lang: ar-EG, text: "شكراً للفريق على التعامل الحلو"}
+      - {lang: ar-EG-latin, text: "el service kanet momtaza gedan"}
+      - {lang: en, text: "the team was wonderful today"}
+      - {lang: mixed, text: "الـ experience كانت ممتازة"}
+
+  # Clinical safety
+
+  - name: clinical_question
+    means: >
+      Asking for personalised medical judgement about a condition or symptom, sharing a photo for
+      interpretation, mentioning pregnancy, medicines, allergies or medical history in a safety or
+      suitability question, or asking which treatment is likely to work for this patient. A symptom
+      mentioned only as the reason for explicitly booking a dermatology consultation remains
+      booking_enquiry unless it contains an urgent or emergency sign. The receptionist never
+      answers a medical question.
+    required_slots: []
+    optional_slots: [service, branch, customer_name]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - diagnose, interpret a symptom, photograph, test result or medical history
+      - say a treatment is safe, suitable or unsuitable for this patient
+      - conduct a medical-history interview in order to decide
+      - recommend a particular treatment, product or practitioner for the condition
+      - promise results or reassure
+    confusable_with: [service_question, preparation_aftercare_info, clinical_urgent, booking_enquiry]
+    examples:
+      - {lang: ar-EG, text: "أنا حامل ينفع أعمل ليزر؟"}
+      - {lang: ar-EG, text: "باخد روأكيوتان ينفع أعمل الجلسة؟"}
+      - {lang: ar-EG, text: "عندي حبوب في وشي أعمل إيه؟"}
+      - {lang: ar-EG, text: "بصي على الصورة دي ده طبيعي؟"}
+      - {lang: ar-EG-latin, text: "ana 7amel yenfa3 a3mel laser?"}
+      - {lang: en, text: "is this treatment safe with my medication?"}
+      - {lang: mixed, text: "عندي sensitive skin أنهي treatment يناسبني؟"}
+
+  - name: clinical_urgent
+    means: >
+      Reporting a significant post-treatment problem without a current immediate-danger trigger,
+      such as worsening swelling, spreading redness, strong or increasing pain, blistering, pus,
+      marked heat, skin colour change or a reaction that is not settling. It is acknowledged and
+      handed to a person immediately without assessment or delay.
+    required_slots: []
+    optional_slots: [service, appointment_ref, branch, customer_name]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - say the reaction is normal, expected or nothing to worry about
+      - suggest a remedy, medicine, cream, ice, painkiller or dose
+      - ask the patient to wait and see
+      - delay handoff to collect booking details
+      - downgrade an immediate-danger trigger to this intent
+    confusable_with: [clinical_question, preparation_aftercare_info, complaint]
+    examples:
+      - {lang: ar-EG, text: "وشي وارم بعد السيشن والوجع بيزيد"}
+      - {lang: ar-EG, text: "الاحمرار بينتشر مكان الليزر"}
+      - {lang: ar-EG, text: "طلعلي فقاقيع بعد الجلسة"}
+      - {lang: ar-EG, text: "أغمي عليا بعد الجلسة وفوقت دلوقتي"}
+      - {lang: ar-EG-latin, text: "wishy warem w el wag3 beyzeed"}
+      - {lang: en, text: "the swelling and pain are getting worse"}
+      - {lang: mixed, text: "في severe redness بعد الـ session"}
+
+  # Clinic information and operational support
+
+  - name: general_info
+    means: >
+      Asking approved non-clinical facts about the clinic or a branch, including hours, hotline,
+      walk-in policy, accessibility, parking, privacy arrangements, age policy, who the clinic
+      serves or whether a listed service or device is offered at that branch.
+    required_slots: []
+    optional_slots: [branch, service, device, customer_name]
+    terminal_tool: answer_from_knowledge
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - invent a branch, phone number, hour, facility, device or policy
+      - state branch-specific information without establishing the branch
+      - describe opening hours as live appointment availability
+      - answer clinical suitability under the guise of policy
+      - infer a policy from social media or another branch
+    confusable_with: [directions, availability_check, service_question, practitioner_availability, named_practitioner_request]
+    examples:
+      - {lang: ar-EG, text: "مواعيد العمل إيه؟"}
+      - {lang: ar-EG, text: "في باركينج عند الفرع؟"}
+      - {lang: ar-EG, text: "لازم حجز ولا ينفع walk-in؟"}
+      - {lang: ar-EG, text: "الفرع ده فيه الجهاز ده؟"}
+      - {lang: ar-EG-latin, text: "mawa3eed el sho8l eh?"}
+      - {lang: en, text: "is the branch wheelchair accessible?"}
+      - {lang: mixed, text: "في privacy في الـ laser rooms؟"}
+
+  - name: directions
+    means: >
+      Asking for a branch address, map pin, landmark, nearest branch or directions while travelling.
+      The branch is established explicitly or selected from approved live branch data before any
+      location is sent.
+    required_slots: []
+    optional_slots: [branch, current_area, customer_name]
+    terminal_tool: answer_from_knowledge
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - invent an address, map link, landmark or branch
+      - guess the nearest branch without a current area or approved location data
+      - send directions to a branch different from the established booking branch
+      - interpret a historical complaint about finding a branch as a current directions request
+    confusable_with: [general_info, arrival_late_no_show, availability_check]
+    examples:
+      - {lang: ar-EG, text: "الفرع فين بالظبط؟"}
+      - {lang: ar-EG, text: "ممكن تبعتولي اللوكيشن"}
+      - {lang: ar-EG, text: "إيه أقرب فرع لمدينة نصر؟"}
+      - {lang: ar-EG, text: "أوصل للفرع إزاي؟"}
+      - {lang: ar-EG-latin, text: "el far3 fen bel zabt?"}
+      - {lang: en, text: "please send me the branch location"}
+      - {lang: mixed, text: "ممكن تبعتي الـ location؟"}
+
+  - name: privacy_data_request
+    means: >
+      Requesting access to, correction of, deletion of or restriction on personal data, opting out
+      of marketing, withdrawing consent, or reporting unwanted messages. A person handles the
+      applicable privacy process. Access, correction and deletion require verification inside the
+      human workflow; a current-channel marketing opt-out must take the minimal-data path without
+      extra identity collection. Verification must never block the handoff itself.
+    required_slots: []
+    optional_slots: [customer_name, phone, channel]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - claim data was accessed, corrected or deleted before the process completes
+      - expose stored personal data before identity verification
+      - delay the human handoff to collect or verify identity
+      - argue with or discourage an opt-out request
+      - continue marketing after a valid opt-out has been recorded
+      - provide legal conclusions or promise a statutory deadline
+    confusable_with: [human_request, complaint, spam, billing_question]
+    examples:
+      - {lang: ar-EG, text: "امسحوا بياناتي من عندكم"}
+      - {lang: ar-EG, text: "محدش يبعتلي عروض تاني"}
+      - {lang: ar-EG, text: "عايزة أعرف عندكم بيانات إيه عني"}
+      - {lang: ar-EG, text: "شيلوا رقمي من الرسائل"}
+      - {lang: ar-EG-latin, text: "ems7o bayanaty men 3andoko"}
+      - {lang: en, text: "please delete my personal data"}
+      - {lang: mixed, text: "عايزة opt out من الـ marketing messages"}
+
+  - name: complaint
+    means: >
+      Dissatisfaction with treatment results, waiting time, staff behaviour, hygiene, privacy,
+      booking handling, call-centre service, unavailable promised items, branch access or another
+      completed experience. A reported medical reaction takes clinical priority instead.
+    required_slots: []
+    optional_slots: [branch, service, appointment_ref, order_ref, customer_name]
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - defend the clinic, blame the patient or say they are mistaken
+      - offer compensation, credit, refund or a result guarantee
+      - treat a side effect or worsening reaction as an ordinary complaint
+      - disclose staff or patient information
+      - promise a resolution time the handoff system did not return
+    confusable_with: [clinical_urgent, billing_question, online_order_support, arrival_late_no_show]
+    examples:
+      - {lang: ar-EG, text: "استنيت 3 ساعات قبل الجلسة"}
+      - {lang: ar-EG, text: "الكول سنتر محدش فيه ساعدني"}
+      - {lang: ar-EG, text: "حجزت مع حد وكان أسلوبه مش محترم"}
+      - {lang: ar-EG, text: "المنتج اللي قالوا عليه مكانش موجود في الفرع"}
+      - {lang: ar-EG-latin, text: "estaneet 3 sa3at abl el jalsa"}
+      - {lang: en, text: "the treatment result was very disappointing"}
+      - {lang: mixed, text: "الـ reservation agent كان غير professional"}
+
+  - name: careers_business_enquiry
+    means: >
+      A legitimate non-patient enquiry about employment, training, supplying, partnerships,
+      corporate packages, media, events, influencer work or business development. It is recorded
+      for the appropriate team and is not treated as spam merely because it is commercial.
+    required_slots: []
+    optional_slots: [customer_name, phone, email, organisation, enquiry_type]
+    terminal_tool: take_message
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - promise employment, partnership, payment or a response time
+      - request sensitive documents or financial information in chat
+      - route a patient-care request as a business enquiry
+      - engage with bulk solicitation, suspicious links or automated marketing
+    confusable_with: [spam, human_request, general_info, unclear]
+    examples:
+      - {lang: ar-EG, text: "عايزة أقدم على شغل"}
+      - {lang: ar-EG, text: "ممكن رقم مسؤول التعاقدات؟"}
+      - {lang: ar-EG, text: "عايزين نتعاون معاكم في event"}
+      - {lang: ar-EG, text: "إزاي أبقى supplier عندكم؟"}
+      - {lang: ar-EG-latin, text: "3ayza a2adem 3ala sho8l"}
+      - {lang: en, text: "I'd like to discuss a corporate partnership"}
+      - {lang: mixed, text: "عندي proposal للـ marketing team"}
+
+  - name: spam
+    means: >
+      Unsolicited bulk marketing, scams, phishing, suspicious links, irrelevant automated messages
+      or obvious wrong-number automation. Record silently if required by operations and do not
+      reply, click, unsubscribe or confirm that the number is active.
+    required_slots: []
+    optional_slots: []
+    terminal_tool: take_message
+    max_autonomy: act
+    needs_verified_identity: false
+    never:
+      - reply
+      - click or open a supplied link
+      - unsubscribe when doing so confirms the number is active
+      - provide clinic, staff, patient or system information
+      - classify a legitimate careers or supplier enquiry as spam solely because it is commercial
+    confusable_with: [careers_business_enquiry, unclear]
+    examples:
+      - {lang: ar-EG, text: "اربح آيفون دلوقتي واضغط على اللينك"}
+      - {lang: ar-EG, text: "تم إيقاف حسابك سجل بيانات البطاقة هنا"}
+      - {lang: ar-EG, text: "عرض تسويق جماعي أرسل كلمة موافق"}
+      - {lang: ar-EG, text: "عميلنا العزيز تم تجديد باقة الإنترنت"}
+      - {lang: ar-EG-latin, text: "eksab iphone wedos 3ala el link"}
+      - {lang: en, text: "Congratulations, click here to claim your prize"}
+      - {lang: mixed, text: "urgent اضغطي هنا عشان تأكدي الـ account"}
+
+  - name: unclear
+    means: >
+      The message remains genuinely unintelligible or referential after using available
+      conversation state. Ask one concise either-or clarification when two plausible meanings
+      exist; if it still cannot be resolved, fetch a person instead of guessing.
+    required_slots: []
+    optional_slots: []
+    terminal_tool: handoff_to_human
+    max_autonomy: hand_off
+    needs_verified_identity: false
+    never:
+      - ignore usable conversation state
+      - pick the closest intent and act without sufficient evidence
+      - ask more than one clarification for the same unresolved message
+      - say it did not understand repeatedly
+      - classify a short answer to a pending question without evaluating that state first
+    confusable_with: []
+    examples:
+      - {lang: ar-EG, text: "؟؟"}
+      - {lang: ar-EG, text: "الحاجة اللي قولتلك عليها"}
+      - {lang: ar-EG, text: "هو ده"}
+      - {lang: ar-EG, text: "مش عارفة أقولك"}
+      - {lang: ar-EG-latin, text: "el 7aga beta3et abl keda"}
+      - {lang: en, text: "the thing from before"}
+      - {lang: mixed, text: "عايزة الـ thing دي"}

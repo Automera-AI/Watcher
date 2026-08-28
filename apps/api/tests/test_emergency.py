@@ -17,13 +17,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from packages.intents.schema import default_vocabulary
+from packages.intents.schema import default_vocabulary, shipped_vocabularies
 
 from apps.api.core.emergency import (
     DEFAULT_TIMEZONE,
     EMERGENCY_REPLY,
     EmergencyDetection,
     detect,
+    emergency_reply,
     normalise,
     timezone_is_known,
 )
@@ -214,3 +215,142 @@ def test_the_reply_speaks_both_languages() -> None:
     """A safety line is the last place to guess which language the guest reads."""
     assert "emergency" in EMERGENCY_REPLY.lower()
     assert "طارئة" in EMERGENCY_REPLY
+
+
+# ── Clinic emergencies: recall against how a frightened person actually types ────────────────
+#
+# The trigger tests above check that every *declared* phrase fires. That is necessary and not
+# sufficient: a vocabulary can declare only long, fully-formed sentences, pass that check
+# completely, and still miss the real message. It happened — an earlier clinic draft replaced
+# short phrases with compound ones like "جلدي اتحرق جامد بعد الليزر" and recall against realistic
+# messages fell to 4/15 while every declared trigger still matched.
+#
+# So this suite tests the opposite direction: messages nobody wrote into the YAML. For emergencies
+# the asymmetry is the whole point — a false positive costs a phone call, a false negative costs
+# the thing the detector exists to prevent — so recall is asserted at 100% while the decoys below
+# guard the other side.
+
+_CLINICS = shipped_vocabularies()["clinics"]
+
+#: Real-shaped emergency reports. Short, unpunctuated, mid-panic — not the tidy sentences a
+#: vocabulary author writes. Arabic, Franco-Arabic and English, since all three reach this number.
+_CLINIC_EMERGENCIES = [
+    "مش قادرة اتنفس",
+    "مش قادرة أتنفس ساعدوني",
+    "وشي وارم اوي ومش قادرة اتنفس",
+    "حلقي بيقفل",
+    "لساني وارم",
+    "حساسية شديدة",
+    "فقدت النظر بعد الفيلر",
+    "مبقتش شايفة بعد الحقن",
+    "جلدي اتحرق من الليزر",
+    "نزيف مش بيقف",
+    "اغمي عليها ومش بتفوق",
+    "I can't breathe",
+    "she is unconscious",
+    "my throat is closing up",
+    "severe burn after laser",
+]
+
+#: The other side of the trade. Each is a phrase a *loose* matcher fires on, and each is an
+#: ordinary question a clinic receives daily. "في حروق من الليزر عادة؟" is the one that caught an
+#: earlier draft: it asks whether burns are normal, and a bare "حروق" trigger phoned a clinician.
+#: The last two are the reason the vision trigger is qualified by the eye or by the injection
+#: rather than matching "مش شايفة" — someone who cannot see a *message* is not losing their sight.
+_CLINIC_NEAR_MISSES = [
+    "الليزر بيحرق الجلد؟",
+    "في حروق من الليزر عادة؟",
+    "does laser burn the skin?",
+    "بشرتي حساسة شوية",
+    "الفيلر بيسبب حساسية؟",
+    "ممكن الليزر يعمل فقاقيع؟",
+    "عايزة احجز ليزر",
+    "بكام جلسة الفيلر؟",
+    "مش شايفة الرسالة",
+    "مبقتش شايفة الرسايل",
+]
+
+
+@pytest.mark.parametrize("text", _CLINIC_EMERGENCIES)
+def test_a_real_clinic_emergency_is_detected(text: str) -> None:
+    """Recall, message by message, so a failure names the one that would have been missed."""
+    assert detect(text, vocabulary=_CLINICS, at=datetime.now(UTC)) is not None
+
+
+@pytest.mark.parametrize("text", _CLINIC_NEAR_MISSES)
+def test_an_ordinary_clinic_question_does_not_page_a_clinician(text: str) -> None:
+    """A clinician woken for a price question stops trusting the alert, and misses a real one."""
+    assert detect(text, vocabulary=_CLINICS, at=datetime.now(UTC)) is None
+
+
+# ── The tenant's own urgent contact ──────────────────────────────────────────────────────────
+
+
+def test_without_a_configured_contact_the_reply_is_unchanged() -> None:
+    """A tenant that has not given a number still gets the neutral, correct safety line."""
+    assert emergency_reply(None) == EMERGENCY_REPLY
+    assert emergency_reply("") == EMERGENCY_REPLY
+
+
+def test_a_configured_contact_reaches_the_customer_in_both_languages() -> None:
+    """The point of configuring it: the number is in the first message, not the call back."""
+    reply = emergency_reply("+20 100 000 0000")
+    assert reply.count("+20 100 000 0000") == 2, "one for each language"
+
+
+def test_the_default_wording_still_points_at_emergency_services() -> None:
+    """Unchanged for the vertical it was written for.
+
+    A short-let guest who smells gas needs the fire service, and no operator substitutes for one.
+    The clinic override below is a *different tenant's* wording, not a replacement for this.
+    """
+    reply = emergency_reply("+20 100 000 0000")
+    assert EMERGENCY_REPLY in reply
+    assert "local emergency number" in reply
+
+
+def test_a_tenant_override_replaces_the_default_entirely() -> None:
+    """The clinic requirement, and the reason this is per tenant rather than one shared sentence.
+
+    Telling a patient to call an ambulance is a triage judgement — deciding this is an ambulance
+    case rather than a call to the clinician who performed the procedure. Triage is the one thing
+    a clinic receptionist may never do, so the clinic's wording routes to its own doctor and the
+    default's public-emergency line must not survive underneath it.
+    """
+    override = "Please call our doctor now on {contact}. I am alerting them as well."
+    reply = emergency_reply("+20 100 000 0000", override)
+
+    assert reply == "Please call our doctor now on +20 100 000 0000. I am alerting them as well."
+    assert "local emergency number" not in reply
+    assert "رقم الطوارئ المحلي" not in reply
+
+
+def test_an_override_is_used_even_with_no_contact_configured() -> None:
+    """A tenant that has forbidden the default must not fall back to it for want of a number."""
+    override = "I am alerting our doctor right now."
+    assert emergency_reply(None, override) == override
+
+
+def test_a_broken_override_template_still_reaches_the_customer() -> None:
+    """The last text in the system that may raise.
+
+    A KeyError from a mistyped placeholder would mean the person who cannot breathe receives
+    nothing at all. A copy typo must cost the substitution, never the message.
+    """
+    reply = emergency_reply("+20 100 000 0000", "Call our doctor on {phone_number} now.")
+    assert reply == "Call our doctor on {phone_number} now."
+
+
+def test_every_emergency_reply_promises_a_person() -> None:
+    """The one invariant across all four branches.
+
+    A reply that names no number and promises no person is the only genuinely unsafe output here.
+    """
+    for reply in (
+        emergency_reply(),
+        emergency_reply("+20 100 000 0000"),
+        emergency_reply(None, "I am alerting our doctor right now."),
+        emergency_reply("+20 100 000 0000", "Call our doctor on {contact}. Alerting them now."),
+    ):
+        assert reply.strip()
+        assert "alert" in reply.lower() or "doctor" in reply.lower()

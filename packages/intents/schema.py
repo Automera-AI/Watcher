@@ -38,30 +38,91 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Autonomy = Literal["act", "act_and_notify", "hand_off"]
 
-#: Intents that must never act alone, whatever the file says. Belt and braces: the YAML sets
-#: these too, but a bad edit to the YAML should not be able to unset them.
-#:
-#: ``owner_enquiry`` is here for the second half of "money and owner matters always reach a
-#: person" (NEXT-STEPS §13.3). An owner is not a guest, and the receptionist has no business
-#: discussing payouts or who is staying in a unit.
-MUST_HAND_OFF: frozenset[str] = frozenset(
-    {
-        "cancel_reservation",
-        "billing_question",
-        "payment_question",
-        "complaint",
-        "owner_enquiry",
-        "unclear",
-    }
-)
 
-#: Intents that must require proof of identity before acting.
-MUST_VERIFY: frozenset[str] = frozenset(
-    {"access_code_request", "modify_reservation", "cancel_reservation", "extend_stay"}
-)
+class SafetyRules(BaseModel):
+    """The safety floor for one vertical: what a YAML edit is not allowed to unset.
 
-#: Intents that touch money and must therefore carry an explicit no-discount rule.
-MONEY_INTENTS: frozenset[str] = frozenset({"price_enquiry", "extend_stay"})
+    **Why this is keyed by vertical rather than global.** These sets used to be three
+    module-level frozensets naming holiday-home intents, and ``Vocabulary`` required every name
+    in them to exist in the file. That made the vertical unchangeable in practice: a clinic
+    vocabulary could not be written without also declaring ``extend_stay``, ``owner_enquiry``
+    and ``access_code_request``, none of which mean anything in a clinic. The safety property
+    was never "these nine names"; it was "each vertical has intents a YAML edit must not be able
+    to weaken". That is what this holds, per vertical, so adding one is data rather than a
+    rewrite of the validator.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    #: Intents that must never act alone, whatever the file says.
+    must_hand_off: frozenset[str]
+    #: Intents that must require proof of identity before acting.
+    must_verify: frozenset[str]
+    #: Intents that touch money and must therefore carry an explicit no-discount rule.
+    money_intents: frozenset[str]
+    #: The slot that *is* the proof for this vertical. An intent that demands identity but never
+    #: collects this has nothing to check the person against.
+    identity_proof_slot: str
+
+
+#: Safety floors by ``vertical``. A vocabulary declaring a vertical that is not here is refused:
+#: an unregistered vertical is one nobody has decided the safety rules for, and defaulting to
+#: the loosest set would make forgetting to add one the silent, dangerous path.
+SAFETY: dict[str, SafetyRules] = {
+    # ``owner_enquiry`` is here for the second half of "money and owner matters always reach a
+    # person" (NEXT-STEPS §13.3). An owner is not a guest, and the receptionist has no business
+    # discussing payouts or who is staying in a unit.
+    "holiday_homes": SafetyRules(
+        must_hand_off=frozenset(
+            {
+                "cancel_reservation",
+                "billing_question",
+                "payment_question",
+                "complaint",
+                "owner_enquiry",
+                "unclear",
+            }
+        ),
+        must_verify=frozenset(
+            {"access_code_request", "modify_reservation", "cancel_reservation", "extend_stay"}
+        ),
+        money_intents=frozenset({"price_enquiry", "extend_stay"}),
+        identity_proof_slot="reservation_ref",
+    ),
+    # Clinics. The two clinical intents are the reason this vertical exists as its own floor:
+    # a receptionist that answers "is this safe for me" is practising medicine, and no YAML edit
+    # may turn that into an intent it handles alone. ``cancel_appointment`` hands off because a
+    # cancellation inside a paid package is a refund question, and refunds reach a person.
+    #
+    # **``must_verify`` names only the intents that act on patient data by themselves.** It first
+    # listed ``modify_appointment`` and ``cancel_appointment``, which was wrong: both hand off to
+    # a person, and demanding proof of identity *before* a hand-off means an unverified patient
+    # cannot reach a human at all — strictly worse than the disclosure it was guarding against.
+    # Verification on those belongs inside the human workflow. What is left is the pair that
+    # genuinely discloses or mutates without a person in the loop: a lookup that reads an
+    # appointment back, and an arrival update that files a ticket against one.
+    "clinics": SafetyRules(
+        must_hand_off=frozenset(
+            {
+                "clinical_question",
+                "clinical_urgent",
+                "cancel_appointment",
+                "billing_question",
+                "complaint",
+                "unclear",
+            }
+        ),
+        must_verify=frozenset({"appointment_lookup_status", "arrival_late_no_show"}),
+        money_intents=frozenset({"price_enquiry"}),
+        identity_proof_slot="appointment_ref",
+    ),
+}
+
+#: Backwards-compatible aliases for the holiday-home floor, which was the only one when these
+#: were module constants. Kept so existing callers and tests read the same names.
+MUST_HAND_OFF: frozenset[str] = SAFETY["holiday_homes"].must_hand_off
+MUST_VERIFY: frozenset[str] = SAFETY["holiday_homes"].must_verify
+MONEY_INTENTS: frozenset[str] = SAFETY["holiday_homes"].money_intents
 
 #: Channel names that reach a speech model. A client on one of these may only declare languages
 #: the base file marks ``spoken``.
@@ -110,26 +171,8 @@ class Intent(BaseModel):
         if self.name in self.confusable_with:
             raise ValueError(f"{self.name}: confusable with itself")
 
-        if self.name in MUST_HAND_OFF and self.max_autonomy != "hand_off":
-            raise ValueError(
-                f"{self.name}: must be hand_off, found {self.max_autonomy}. "
-                "This is a safety rule, not a preference. If you meant to change it, "
-                "change MUST_HAND_OFF in schema.py and say why in the commit."
-            )
-
-        if self.name in MUST_VERIFY and not self.needs_verified_identity:
-            raise ValueError(f"{self.name}: must require proof of identity")
-
-        if self.needs_verified_identity and "reservation_ref" not in (
-            self.required_slots + self.optional_slots
-        ):
-            raise ValueError(
-                f"{self.name}: requires proof of identity but never asks for a booking "
-                "reference, so there is nothing to check them against"
-            )
-
-        if self.name in MONEY_INTENTS and not any("discount" in n for n in self.never):
-            raise ValueError(f"{self.name}: touches money but has no rule against discounting")
+        # The safety-floor checks that used to live here now run in ``Vocabulary``: they depend
+        # on which vertical the file declares, and an ``Intent`` cannot see its parent.
 
         known = set(self.required_slots) | set(self.optional_slots)
         if self.confirm_before_acting:
@@ -263,11 +306,44 @@ class Vocabulary(BaseModel):
 
         known = set(names)
 
+        if (safety := SAFETY.get(self.vertical)) is None:
+            raise ValueError(
+                f"unknown vertical {self.vertical!r}: no safety rules are registered for it. "
+                f"Known: {sorted(SAFETY)}. Add an entry to SAFETY in schema.py deciding which "
+                "intents must hand off, which need proof of identity, and which touch money."
+            )
+
         # Checked before the cross-references below, so deleting a safety-critical intent
         # reports the real problem rather than a dangling reference to it.
-        for required in MUST_HAND_OFF | MUST_VERIFY:
+        for required in safety.must_hand_off | safety.must_verify:
             if required not in known:
                 raise ValueError(f"safety-critical intent {required!r} is missing from the file")
+
+        by_name = {i.name: i for i in self.intents}
+        for name in safety.must_hand_off:
+            if (intent := by_name[name]).max_autonomy != "hand_off":
+                raise ValueError(
+                    f"{name}: must be hand_off, found {intent.max_autonomy}. "
+                    "This is a safety rule, not a preference. If you meant to change it, "
+                    f"change SAFETY[{self.vertical!r}] in schema.py and say why in the commit."
+                )
+
+        for name in safety.must_verify:
+            if not by_name[name].needs_verified_identity:
+                raise ValueError(f"{name}: must require proof of identity")
+
+        for intent in self.intents:
+            if intent.needs_verified_identity and safety.identity_proof_slot not in (
+                intent.required_slots + intent.optional_slots
+            ):
+                raise ValueError(
+                    f"{intent.name}: requires proof of identity but never asks for "
+                    f"{safety.identity_proof_slot!r}, so there is nothing to check them against"
+                )
+
+        for name in safety.money_intents:
+            if name in by_name and not any("discount" in n for n in by_name[name].never):
+                raise ValueError(f"{name}: touches money but has no rule against discounting")
 
         for intent in self.intents:
             if intent.terminal_tool not in tools:
@@ -306,6 +382,11 @@ class ClientOverride(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     client: str
+    #: Which vertical vocabulary this client runs. Defaults to the vertical that existed when
+    #: overrides were introduced, so the client files written before this field keep working.
+    #: With more than one vertical shipped, an override that does not say is a client whose
+    #: intents could be checked against the wrong vocabulary and pass.
+    vertical: str = "holiday_homes"
     market: Literal["AE", "EG"]
     currency: str
     timezone: str
@@ -318,6 +399,13 @@ class ClientOverride(BaseModel):
     slot_overrides: dict[str, list[str]] = Field(default_factory=dict)
 
     def check_against(self, vocab: Vocabulary) -> None:
+        if vocab.vertical != self.vertical:
+            raise ValueError(
+                f"{self.client}: declares vertical {self.vertical!r} but was checked against "
+                f"{vocab.vertical!r}. Checking a client against the wrong vocabulary makes every "
+                "intent name below meaningless."
+            )
+
         known = {i.name for i in vocab.intents}
         langs = {lang.code for lang in vocab.languages}
         systems = {s.id: s for s in vocab.property_systems}
@@ -436,43 +524,98 @@ def default_vocabulary() -> Vocabulary:
     return _cached
 
 
+#: Additional vertical vocabularies, alongside ``intents.yaml``. One file per vertical, each a
+#: complete ``Vocabulary`` validated by the same rules.
+_VERTICALS_DIR = _DEFAULT_DIR / "verticals"
+
+
+def shipped_vocabularies() -> dict[str, Vocabulary]:
+    """Every vertical vocabulary in the package, keyed by ``vertical``.
+
+    Exists so a check can be made *per vertical* rather than against whichever one happens to be
+    the default. The prompt catalogue is built from one vocabulary at a time, so "every intent the
+    model may emit is described to it" is a claim about a single vertical; asserting it against the
+    union of all of them is either vacuous or wrong. Callers that need the tenant's own vocabulary
+    still go through ``default_vocabulary`` — this is for tests and the build.
+    """
+    found = {(base := load(_DEFAULT_DIR / "intents.yaml")).vertical: base}
+    if _VERTICALS_DIR.is_dir():
+        for path in sorted(_VERTICALS_DIR.glob("*.yaml")):
+            vocab = load(path)
+            if vocab.vertical in found:
+                raise ValueError(
+                    f"{path.name}: vertical {vocab.vertical!r} is already defined by another "
+                    "file. One vocabulary per vertical, or a tenant cannot say which it means."
+                )
+            found[vocab.vertical] = vocab
+    return found
+
+
 def main(argv: list[str]) -> int:
     if not argv:
         print("usage: python -m packages.intents intents.yaml [clients/*.yaml]")
         return 2
 
+    # Any number of vocabularies, then any number of client overrides. Told apart by shape rather
+    # than by position: with more than one vertical shipped, "the first argument is the base file"
+    # stopped being true, and a client is checked against the vocabulary for *its own* vertical
+    # rather than against whichever happened to be listed first.
     paths = [Path(a) for a in argv]
-    base_path, client_paths = paths[0], paths[1:]
-    try:
-        vocab = load(base_path)
-    except Exception as exc:
-        print(f"FAIL {base_path}\n  {exc}")
-        return 1
-
-    acting = sum(1 for i in vocab.intents if i.max_autonomy == "act")
-    notify = sum(1 for i in vocab.intents if i.max_autonomy == "act_and_notify")
-    human = sum(1 for i in vocab.intents if i.max_autonomy == "hand_off")
-    examples = sum(len(i.examples) for i in vocab.intents)
-
-    print(f"OK   {base_path}  v{vocab.version}")
-    print(
-        f"     {len(vocab.intents)} intents: {acting} act, {notify} act and notify, {human} human"
-    )
-    print(f"     {examples} examples across {len(vocab.languages)} languages")
-    print(f"     {len(vocab.emergency.triggers)} emergency triggers, checked before everything")
-
+    vocabs: dict[str, Vocabulary] = {}
+    client_paths: list[Path] = []
     failed = False
+    least_examples = 0
+
+    for path in paths:
+        try:
+            raw = _read_yaml(path)
+        except Exception as exc:
+            print(f"FAIL {path}\n  {exc}")
+            failed = True
+            continue
+
+        if not isinstance(raw, dict) or "client" in raw:
+            client_paths.append(path)
+            continue
+
+        try:
+            vocab = Vocabulary.model_validate(raw)
+        except Exception as exc:
+            print(f"FAIL {path}\n  {exc}")
+            failed = True
+            continue
+
+        vocabs[vocab.vertical] = vocab
+        acting = sum(1 for i in vocab.intents if i.max_autonomy == "act")
+        notify = sum(1 for i in vocab.intents if i.max_autonomy == "act_and_notify")
+        human = sum(1 for i in vocab.intents if i.max_autonomy == "hand_off")
+        examples = sum(len(i.examples) for i in vocab.intents)
+        least_examples = examples if not least_examples else min(least_examples, examples)
+
+        print(f"OK   {path}  v{vocab.version}  [{vocab.vertical}]")
+        print(
+            f"     {len(vocab.intents)} intents: {acting} act, {notify} act and notify, "
+            f"{human} human"
+        )
+        print(f"     {examples} examples across {len(vocab.languages)} languages")
+        print(f"     {len(vocab.emergency.triggers)} emergency triggers, checked before everything")
+
     for path in client_paths:
         try:
             client = load_client(path)
-            client.check_against(vocab)
+            if (against := vocabs.get(client.vertical)) is None:
+                raise ValueError(
+                    f"{client.client}: declares vertical {client.vertical!r}, whose vocabulary "
+                    f"was not given to check against. Listed: {sorted(vocabs) or 'none'}."
+                )
+            client.check_against(against)
             print(f"OK   {path}  {client.client} ({client.market}, {client.currency})")
         except Exception as exc:
             print(f"FAIL {path}\n  {exc}")
             failed = True
 
-    if examples < 60:
-        print(f"\nNOTE {examples} examples. Roadmap item 2.5 wants about 60 before the accuracy")
-        print("     number means anything. These are seeds, not the finished set.")
+    if least_examples and least_examples < 60:
+        print(f"\nNOTE {least_examples} examples in the smallest vocabulary. Roadmap item 2.5")
+        print("     wants about 60 before the accuracy number means anything.")
 
     return 1 if failed else 0

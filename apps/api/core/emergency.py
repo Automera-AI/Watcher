@@ -64,6 +64,55 @@ EMERGENCY_REPLY = (
     "إذا كان أي شخص في خطر، اتصل برقم الطوارئ المحلي أولاً."
 )
 
+
+def emergency_reply(contact: str | None = None, override: str | None = None) -> str:
+    """The immediate reply: the default wording, or the tenant's own.
+
+    **Why this is tenant copy and not one shared sentence.** ``EMERGENCY_REPLY`` tells the guest to
+    call their local emergency number, which is the right answer for the vertical it was written
+    for: a short-let guest smelling gas needs the fire service, and no operator can substitute for
+    one. It is the wrong answer for a clinic. Telling a patient to call an ambulance is itself a
+    triage judgement — deciding this is an ambulance case rather than a call to the clinician who
+    performed the procedure — and triage is the one thing a clinic receptionist may never do. The
+    clinic's position is that its own doctor makes that call, so its wording routes there instead.
+
+    Both are correct for their vertical and neither can be the global default, so the wording is
+    per tenant. ``override`` is that wording, and it may contain ``{contact}``.
+
+    ``contact`` is the number the tenant wants its customers to ring. Without an override it is
+    added to the default text; with one, it is substituted into it. A template that will not take
+    the substitution falls back rather than raising mid-emergency — see ``_fill_contact``.
+
+    The one invariant, whichever branch runs: the reply always says a human is being alerted right
+    now. A message that names no number and promises no person is the only genuinely unsafe output
+    here, and no path produces it.
+    """
+    if override:
+        if not contact:
+            return override
+        return _fill_contact(override, contact) or override
+    if not contact:
+        return EMERGENCY_REPLY
+    return (
+        f"{EMERGENCY_REPLY}\n\n"
+        f"You can also reach our clinical team directly on {contact}.\n"
+        f"يمكنك أيضاً التواصل مع الفريق الطبي مباشرة على {contact}."
+    )
+
+
+def _fill_contact(template: str, contact: str) -> str | None:
+    """Substitute ``{contact}`` into tenant emergency wording, or ``None`` if the template is bad.
+
+    Emergency copy is edited by people under time pressure and is the last text in the system that
+    may raise. A ``KeyError`` from a mistyped placeholder would mean the person who cannot breathe
+    receives nothing at all, so a broken template degrades to the un-substituted text instead.
+    """
+    try:
+        return template.format(contact=contact)
+    except (KeyError, IndexError, ValueError):
+        return None
+
+
 #: The default market's zone. AE and EG are the two declared markets; Dubai is where the first
 #: client will be. It is a *default*, not an assumption baked into the detector — see
 #: ``TenantPolicy.timezone``, which is what actually reaches this module.

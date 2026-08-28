@@ -51,7 +51,7 @@ from apps.api.classifier.types import ClassificationOutcome, input_from
 from apps.api.conversations.task import Task
 from apps.api.core.alerts import LOG_ONLY, AlertOutcome, EmergencyAlert, OperatorAlerter
 from apps.api.core.autonomy import Autonomy, decide_autonomy
-from apps.api.core.emergency import EMERGENCY_REPLY, EmergencyDetection, detect
+from apps.api.core.emergency import EmergencyDetection, detect, emergency_reply
 from apps.api.core.policy import DEFAULT_POLICY, TenantPolicy
 from apps.api.identity.resolver import IncomingContact, resolve
 from apps.api.media.pipeline import MediaPipeline
@@ -291,7 +291,10 @@ class Orchestrator:
         make the resumed conversation worse.
         """
         turn = to_inbound_turn(UUID(tenant_id), message)
-        action = OutboundAction(kind="handoff", text=EMERGENCY_REPLY)
+        action = OutboundAction(
+            kind="handoff",
+            text=emergency_reply(self._policy.urgent_contact, self._policy.emergency_reply),
+        )
 
         if self._conversations is not None:
             state = self._conversations.begin(turn)

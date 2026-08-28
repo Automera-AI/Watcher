@@ -67,6 +67,140 @@ class HandoffToHuman(Tool):
         return ToolResult(ok=True, human_summary="Transferred to a team member.")
 
 
+#: The placeholder a tenant may put in its named opening, and in its confirmed-booking closing.
+_NAME_FIELD = "customer_name"
+_REFERENCE_FIELD = "booking_reference"
+
+
+def _fill(template: str, field: str, value: str) -> str | None:
+    """Substitute one field into a tenant-authored template, or return ``None`` if it cannot.
+
+    Tenant copy is data written by a person who is not looking at this code, so a template can
+    carry a typo — ``{booking_ref}`` where the field is ``booking_reference``. ``str.format`` would
+    raise ``KeyError`` mid-conversation. Every caller here treats ``None`` as "use the safe
+    wording instead", which turns a copy typo into a slightly plainer message rather than a
+    customer receiving nothing at all.
+    """
+    try:
+        return template.format(**{field: value})
+    except (KeyError, IndexError, ValueError):
+        return None
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationCopy:
+    """A tenant's own wording for the two ends of a conversation.
+
+    Every field is optional and every one defaults to neutral English that names nobody. That is
+    not a placeholder to be tidied away later — it is what a tenant which has configured nothing
+    must still say, and it has to be correct on its own. The client's real lines are configuration
+    because they carry the client's name, its receptionist's name and its brand voice, none of
+    which belong in shared code (``tests/test_no_client_name.py``).
+
+    ``opening_named`` is a *separate whole sentence* rather than the plain opening with a name
+    glued on. The two are not the same message in every language: a tenant writing in Egyptian
+    Arabic composes one sentence that happens to contain the name, and prefixing an English
+    "Hello Rana!" to it would produce a bilingual mess no client would approve. Whole sentences
+    also mean the client reviews exactly what its customers will read.
+    """
+
+    opening: str | None = None
+    """Said when no customer name is known. A complete message."""
+
+    opening_named: str | None = None
+    """Said when a name is known. A complete message containing ``{customer_name}``."""
+
+    closing: str | None = None
+    """Said when the customer is done and no booking was confirmed in this conversation."""
+
+    closing_booking_confirmed: str | None = None
+    """Said only when a durable booking reference exists. Contains ``{booking_reference}``.
+
+    **This is the one piece of copy that can lie.** It says a booking is confirmed, so it may only
+    ever be rendered when the scheduling system has actually returned a reference — see
+    ``CloseConversation.run``, which falls back to ``closing`` whenever it has no reference to put
+    in it. Nothing in the receptionist supplies one until ``confirm_booking`` is built, so today
+    this text is unreachable, which is the correct behaviour rather than a gap.
+    """
+
+
+class Greet(Tool):
+    """Open the conversation: say hello, say what can be done here, invite the request.
+
+    **Why a greeting needs a tool at all.** It did not have one, and the consequence was not a
+    missing feature but a wrong answer to the single most common message a receptionist receives.
+    "Hi" had two routes and both ended in the same sentence: classified ``unclear``, whose
+    ``max_autonomy`` is ``hand_off``, so ``decide_autonomy`` fetched a person before confidence
+    was even consulted; or classified ``general_info``, whose ``answer_from_knowledge`` searched
+    the facts table for "hi", found nothing, and fell through ``on_no_knowledge`` to the same
+    hand-off. A greeting is not a failure to understand, and this is the tool that says so.
+
+    The wording is tenant configuration, not code — see ``ConversationCopy``. Without one
+    configured the reply is deliberately plain and still correct: it greets, and it invites the
+    request.
+    """
+
+    name = "greet"
+    description = "Open the conversation and invite the customer's request."
+
+    _FALLBACK = "Hello! How can I help you today?"
+    _FALLBACK_NAMED = "Hello {customer_name}! How can I help you today?"
+
+    def __init__(self, copy: ConversationCopy | None = None) -> None:
+        self._copy = copy or ConversationCopy()
+
+    async def run(self, **kwargs: Any) -> ToolResult:
+        name: str | None = kwargs.get(_NAME_FIELD)
+        if name:
+            template = self._copy.opening_named or self._FALLBACK_NAMED
+            if (greeting := _fill(template, _NAME_FIELD, name)) is not None:
+                return ToolResult(ok=True, data={"greeted_by_name": True}, human_summary=greeting)
+        return ToolResult(
+            ok=True,
+            data={"greeted_by_name": False},
+            human_summary=self._copy.opening or self._FALLBACK,
+        )
+
+
+class CloseConversation(Tool):
+    """Close politely when the customer says thanks or goodbye.
+
+    Paired with ``Greet`` for the same reason: "شكراً" classified as ``unclear`` handed off, which
+    turns a *completed* conversation into one that looks unresolved and puts a person in front of
+    someone who was only saying goodbye. Nothing is asked here, so nothing is asked back — in
+    particular no add-on, which is the temptation and which reads as a sales pitch after the
+    customer has already finished.
+    """
+
+    name = "close_conversation"
+    description = "Close the conversation politely when the customer is done."
+
+    _FALLBACK = "You're very welcome. Have a lovely day!"
+
+    def __init__(self, copy: ConversationCopy | None = None) -> None:
+        self._copy = copy or ConversationCopy()
+
+    async def run(self, **kwargs: Any) -> ToolResult:
+        """Close, naming the booking reference only when there genuinely is one.
+
+        The confirmed-booking closing states that an appointment exists. Rendering it without a
+        reference from the scheduling system would be the "All set! I've noted everything down."
+        bug again, in the customer's own language and with more authority — so the reference is
+        the *precondition*, not a slot to fill in. No reference, or a template that will not take
+        one, and the generic closing is used instead.
+        """
+        reference: str | None = kwargs.get(_REFERENCE_FIELD)
+        template = self._copy.closing_booking_confirmed
+        if reference and template:
+            if (closing := _fill(template, _REFERENCE_FIELD, reference)) is not None:
+                return ToolResult(
+                    ok=True,
+                    data={"booking_reference": reference},
+                    human_summary=closing,
+                )
+        return ToolResult(ok=True, human_summary=self._copy.closing or self._FALLBACK)
+
+
 class _NoFacts:
     """The default knowledge lookup: no tenant has any facts. Every match is a real "I don't
     know" rather than a crash — the same trade ``channels/factory.py`` makes for a process with
@@ -131,6 +265,19 @@ class AnswerFromKnowledge(Tool):
 register(TakeMessage())
 register(HandoffToHuman())
 register(AnswerFromKnowledge(_NoFacts()))
+register(Greet())
+register(CloseConversation())
+
+
+def configure_conversation_copy(copy: ConversationCopy) -> None:
+    """Swap in the tenant's own opening and closing wording (``main.py``).
+
+    Mirrors ``configure_knowledge``: before this is called the tools are wired to neutral wording
+    that greets and closes correctly but names nobody, which is the same degrade-don't-crash trade
+    ``_NoFacts`` makes for a tenant with no facts.
+    """
+    register(Greet(copy))
+    register(CloseConversation(copy))
 
 
 def configure_knowledge(

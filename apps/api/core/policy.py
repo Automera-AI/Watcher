@@ -32,6 +32,25 @@ class TenantPolicy:
     classifier_max_attempts: int = 2
     delivery_max_attempts: int = 3
 
+    urgent_contact: str | None = None
+    """A number this tenant's customers may ring directly in an emergency, if it has given one.
+
+    Unset by default and never a literal in shared code — it is a different number for every
+    tenant, and for a clinic it is a specific clinician rather than a support queue. Where it is
+    set, ``emergency_reply`` puts it in the immediate reply so someone in trouble has it in the
+    first message instead of waiting for the call back — added to the default wording, or
+    substituted into ``emergency_reply`` below where the tenant supplies its own.
+    """
+
+    emergency_reply: str | None = None
+    """This tenant's own emergency wording, replacing the default. May contain ``{contact}``.
+
+    A clinic and a short-let operator need opposite things here. Telling a guest with a gas leak
+    to call the fire service is correct; telling a patient to call an ambulance is a triage
+    judgement, which is exactly what a clinic receptionist may not make — its own clinician
+    decides that. Neither can be the shared default, so it is per tenant.
+    """
+
     timezone: str = DEFAULT_TIMEZONE
     """Where this tenant's properties are, as an IANA zone name (roadmap G3).
 

@@ -19,7 +19,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from packages.intents.schema import default_vocabulary
+from packages.intents.schema import default_vocabulary, shipped_vocabularies
 
 from apps.api.classifier.prompt import (
     PROMPT_VERSION,
@@ -57,15 +57,39 @@ def _input(
 # ── The prompt and the taxonomy are the same taxonomy ────────────────────────────────────────
 
 
-def test_every_intent_the_schema_accepts_is_described_in_the_prompt() -> None:
-    """The 2.6 failure in miniature: a member the model is allowed to emit but never told about.
+@pytest.mark.parametrize("vertical", sorted(shipped_vocabularies()))
+def test_every_intent_a_vertical_declares_is_described_in_its_prompt(vertical: str) -> None:
+    """The 2.6 failure in miniature: an intent the model may emit but is never told about.
 
-    A model cannot return an intent it has not been shown, so an enum member missing from the
+    A model cannot return an intent it has not been shown, so a declared intent missing from the
     catalogue is dead — every message that should carry it gets something else instead, and the
     eval reports a confusion rather than the gap it really is.
+
+    **Per vertical, not against ``IntentType``.** This used to assert that every enum member
+    appeared in ``SYSTEM_PROMPT``, which held only while there was one vertical and the enum was
+    exactly its intent list. ``IntentType`` is now the union across verticals — it types the
+    classifier's output, which ships once — while a prompt is built from a single vocabulary. A
+    clinic prompt has no business describing ``check_in_support``, so the honest claim is the one
+    made here: whatever a vertical declares, that vertical's prompt defines.
     """
-    missing = [i.value for i in IntentType if f"### {i.value}\n" not in SYSTEM_PROMPT]
-    assert not missing, f"intents the schema accepts but the prompt never defines: {missing}"
+    vocab = shipped_vocabularies()[vertical]
+    prompt = build_system_prompt(vocab)
+    missing = [i.name for i in vocab.intents if f"### {i.name}\n" not in prompt]
+    assert not missing, f"{vertical}: intents it declares but its prompt never defines: {missing}"
+
+
+@pytest.mark.parametrize("vertical", sorted(shipped_vocabularies()))
+def test_every_intent_a_vertical_declares_is_parseable(vertical: str) -> None:
+    """The other half of 2.6: an intent the vocabulary names that the enum cannot represent.
+
+    ``build_system_prompt`` raises ``TaxonomyDrift`` for this, so the assertion is that building
+    the prompt succeeds at all. Without it a vertical could ship an intent the model would emit
+    and the classifier would then reject twice, marking every such message unclear — a silent
+    per-message failure visible only as a rising unclear rate.
+    """
+    vocab = shipped_vocabularies()[vertical]
+    build_system_prompt(vocab)
+    assert {i.name for i in vocab.intents} <= {t.value for t in IntentType}
 
 
 def test_the_prompt_defines_no_intent_the_schema_cannot_parse() -> None:

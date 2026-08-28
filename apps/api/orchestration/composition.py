@@ -23,7 +23,7 @@ from apps.api.channels.factory import build_alerter, build_sender
 from apps.api.channels.sender import ChannelSender
 from apps.api.classifier.service import Classifier
 from apps.api.conversations.receptionist import handle
-from apps.api.conversations.tools import configure_knowledge
+from apps.api.conversations.tools import configure_conversation_copy, configure_knowledge
 from apps.api.core.config import Settings
 from apps.api.db.engine import Database
 from apps.api.db.knowledge_repo import SqlAlchemyFactRepository
@@ -70,6 +70,10 @@ def build_consumer(settings: Settings, database: Database, classifier: Classifie
         SqlAlchemyFactRepository(tenant_scope),
         SqlAlchemyPropertyRepository(tenant_scope),
     )
+    # The receptionist's own words, by the same named-seam pattern. Wired here rather than left
+    # to import-time defaults so a deploy that sets nothing still greets and closes correctly,
+    # in neutral English that names no client.
+    configure_conversation_copy(settings.conversation_copy())
     orchestrator = Orchestrator(
         classifier,
         SqlAlchemyAuditLog(tenant_scope),

@@ -61,8 +61,11 @@ include = ["apps*", "packages*"]
 # the classifier prompt is built at import time, and then dies on a missing YAML — which is what
 # the first container run found. `clients/*.yaml` are the per-client overlays the same loader
 # takes, and are shipped for the same reason.
+# `verticals/*.yaml` are the additional vertical vocabularies (clinics, and any that follow).
+# Same failure mode as the two above if they are left out: the image imports, then dies the
+# moment a tenant on that vertical has its vocabulary loaded.
 [tool.setuptools.package-data]
-"packages.intents" = ["*.yaml", "clients/*.yaml"]
+"packages.intents" = ["*.yaml", "clients/*.yaml", "verticals/*.yaml"]
 
 [tool.ruff]
 target-version = "py313"
