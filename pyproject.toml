@@ -40,10 +40,24 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# `ruff` and `types-PyYAML` are pinned to exactly what `.github/workflows/ci.yml` installs,
+# because both are checks a contributor is expected to run *before* pushing and both report
+# differently on a different version.
+#
+# A formatter is a moving target: ruff 0.15 reformats two files that ruff 0.6.9 considers
+# already formatted. Leaving ruff out of this list entirely — which is how it was — means
+# `uv sync` yields whatever ruff is ambient, `ruff format` produces a diff, and `ruff format
+# --check .` in CI then rejects it. The local run has to be able to predict the gate.
+#
+# types-PyYAML is here for the reason CI gives for installing it: PyYAML ships no inline types
+# and `ignore_missing_imports` does not cover `import-untyped`, so without the stubs strict
+# mypy reports two errors against packages/intents that do not exist in CI.
 dev = [
     "pytest>=9.1,<10",
     "pytest-cov>=7.1,<8",
     "mypy>=1.11,<2",
+    "ruff==0.6.9",
+    "types-PyYAML==6.0.12.20240917",
 ]
 
 [build-system]
