@@ -6,8 +6,9 @@
 the 28 August one (steps 5–7, decisions 12–14). Both remain the reference for everything they
 cover; nothing in either is reopened here.
 **Demo:** Tuesday 1 September 2026, 15:00–17:00 Africa/Cairo
-**Tests:** 959 passed, 2 skipped. Ruff clean. **mypy clean** — including `test_main.py:166`, which
-no longer reports. Coverage 96.2% (gate 95%).
+**Tests:** 965 passed, 2 skipped. Ruff clean. **mypy clean** — including `test_main.py:166`, which
+no longer reports. Coverage 96.3% (gate 95%). Re-verified in CI's own pinned environment
+(956 passed, 11 skipped, 96.0% — the workbook tests skip without `openpyxl`, as they do in CI).
 
 ---
 
@@ -19,9 +20,15 @@ no longer reports. Coverage 96.2% (gate 95%).
 > fixture. A facial at Maadi on Wednesday 2 September is **19:00**, so the patient's second line is
 > `الساعة ٧`, not `الساعة ٦`. §5 has what is open where.
 >
-> **Two defects were found by running the journey end to end, and both are fixed.** A patient was
-> handed to a person on the very next question after a successful booking, and the two turns at the
-> centre of the booking were composed in English with no configuration behind them.
+> **The demo failed at its second message, and it took a live model to see it.** `الساعة ٧` is
+> `unclear` to both tiers, which abandoned the booking and fetched a person one turn after the
+> patient was offered a time. Fixed, along with three others — §4.3. Running the journeys on real
+> classifications took them from 5/9 to 9/9.
+>
+> **Three more defects came out of running the journey end to end**, all fixed: a patient handed
+> off on the very next question after a successful booking, the two turns at the centre of the
+> booking composed in English with no configuration behind them, and a price question that asked
+> which package instead of quoting one.
 >
 > **Steps 8 and 9 are done. Step 10 is prepared but unexecuted** — it needs Render, the database
 > and the live number, none of which a repository session can reach. `DERMACLUB-DEPLOY-RUNBOOK-2026-09-01.md`
@@ -52,10 +59,11 @@ no longer reports. Coverage 96.2% (gate 95%).
 
 ## 2. The Arabic aliases — drafted, reviewed, folded in
 
-`docs/dermaclub-aliases-draft.csv` is the data; `DERMACLUB-ARABIC-ALIASES-DRAFT-2026-08-28.md` is
-the review document; `DermaClub_Aliases_DRAFT_2026-08-28.xlsx` is the two columns ready to paste
-into the client's own workbook. **Nothing is imported and the client's file is untouched** —
-decision 12 puts this data in their workbook, not in this repository.
+`docs/dermaclub-aliases-draft.csv` is the data and `DERMACLUB-ARABIC-ALIASES-DRAFT-2026-08-28.md`
+is the review document. **The confirmed names are now in the demo workbook itself** — decision 12
+puts this data in the clinic's workbook rather than in code, and the workbook committed here is
+that file. The import needs no manual paste, and the clinic's own copy still wins on the next
+import, which upserts on their keys.
 
 134 aliases over 48 rows. Measured with `scripts/check_alias_resolution.py` over the demo's own
 phrases:
@@ -149,6 +157,48 @@ It runs, it is reported, it does not fail the build, and the runner says so if i
 passing. **The booking turn itself does quote the reference** (§5) — this is only the goodbye
 after it.
 
+### 4.3 What the live model changed — the run that mattered
+
+The key arrived late in the session and bought a measurement nobody had made: **the clinic
+taxonomy had never been run against a live model at all.** The CI gate replays the holiday-home
+set under an older prompt; the 18 clinic cases deliberately had no recordings.
+
+Recorded now (`fixtures/recorded_clinics_haiku.jsonl`, prompt v5, `claude-haiku-4-5`): **18/18,
+100% in every language group, Brier 0.0145.** The classifier is not the problem.
+
+The demo's own turns are. Recorded and replayed through the journeys they scored **5/9 journeys,
+10/17 turns.** Three defects, all now fixed and pinned:
+
+1. **`الساعة ٧` is `unclear`** — 0.25 on the cheap tier and **0.3 after escalating to Sonnet 5**,
+   which is more certain of it, not less. Out of context two words naming an hour carry no
+   request, no treatment and no verb. It switched tasks and handed off on the turn after the offer.
+   The dialogue-state rule now covers an outstanding *question* as well as a read-back: an
+   `unclear` turn is offered to the slot the task is waiting on, through the worker's own
+   normalisation, and only a message that resolves into it counts as an answer.
+2. **The confidence in a label the model did not choose gated the task.** When the conversation
+   supplies the intent, `decide_autonomy` was still reading the model's confidence in something
+   else — so "تمام" mid-booking at 0.3 made the read-back rule end in the hand-off it exists to
+   prevent. An intent that came from conversation state is a fact, not a guess.
+3. **`برايم ليز 6 جلسات بكام؟` splits into a service and a quantity**, correctly — leaving the
+   lookup holding three packages that differ only by session count. The count now narrows them.
+   It never picks: two matches, or none, still asks.
+
+And the recorder itself was unfaithful: it passed no `local_now`, so the model resolved "بكرة"
+against its training cut — `2025-01-10`, a real, parseable, wrong date. `--now` fixes it and the
+metadata records which calendar produced a file.
+
+**On recorded classifications the journeys now score 9/9 and 17/17**, and that run is a test
+(`test_every_journey_survives_what_the_model_actually_says`), so the gap between the labels we
+write and the ones the model produces is measured on every commit.
+
+> Re-record when the prompt or model changes:
+> ```bash
+> ANTHROPIC_API_KEY=… python scripts/record_fixtures.py \
+>   --golden packages/eval/golden/clinics_journey_turns.jsonl \
+>   --out    packages/eval/fixtures/recorded_clinics_journey_haiku.jsonl \
+>   --tenant-vertical clinics --now 2026-09-01T12:00:00+03:00
+> ```
+
 ---
 
 ## 5. Step 10 — prepared, not executed
@@ -215,9 +265,9 @@ catalogue's.
 ### Before the demo — required
 
 1. **Step 10 itself.** Migrations 007 and 008, the environment, the import, the rehearsal.
-2. **The aliases into the client's workbook.** The list is reviewed and complete (§2.1); it still
-   has to go into their file and be re-imported. Nothing Arabic resolves until then; the English
-   names still work.
+2. ~~**The aliases into the client's workbook.**~~ Done — they are in the committed workbook and
+   the import carries them (§2). Take the clinic's own copy when it arrives and re-run
+   `check_alias_resolution.py` on it.
 3. **The medical lead's approval** of the screening categories, the eleven disclosures and the
    emergency wording. Unchanged, and still unsigned.
 4. **Re-script the demo around 19:00** (or Nasr City's 17:00). See the warning at the top.

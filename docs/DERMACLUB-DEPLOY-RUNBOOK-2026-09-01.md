@@ -14,11 +14,11 @@ touches Render or the live number: §2, §3, §4 and §6 are unexecuted.
 
 | | |
 |---|---|
-| Code | On `claude/dermaclub-booking-completion-vaivp2`. 959 tests pass, ruff and mypy clean, coverage 96.2% |
+| Code | On `claude/dermaclub-booking-completion-vaivp2`. 965 tests pass, ruff and mypy clean, coverage 96.3% |
 | Migrations | **007 and 008 are both unapplied.** 006 is the deployed head |
 | Environment | None of §3 is set on either service |
 | Catalogue | Nothing imported. The tables do not exist until 008 is applied |
-| Arabic names | Drafted and sent for review (`docs/DERMACLUB-ARABIC-ALIASES-DRAFT-2026-08-28.md`), **not in the client's workbook** |
+| Arabic names | Reviewed, confirmed, and **in the committed workbook** — the import carries them |
 
 The order below is the dependency order. Migrations before the import (the tables have to exist),
 `TENANT_VERTICAL` before anything is messaged (without it a patient is classified against
@@ -156,10 +156,12 @@ highest booking reference already taken: DC-0265
 `--timezone` is required and there is no default: the sheet holds a wall clock and names no zone.
 A week of appointments an hour out is not something a demo notices until it is quoting times.
 
-### 4.1 When the aliases come back
+### 4.1 The aliases are already in this file
 
-The clinic adds an `Aliases` column to the Branches and Services sheets and returns the workbook.
-Then, before re-importing:
+The `Aliases` columns are in the committed workbook — 14 branches and 34 of the 35 services, with
+DT020 left blank on the client's instruction. Nothing needs pasting before the demo.
+
+When the clinic returns their own copy, run this against it before re-importing:
 
 ```bash
 python scripts/check_alias_resolution.py <their-workbook>.xlsx --timezone Africa/Cairo
@@ -176,7 +178,7 @@ made by this system holds**.
 
 ### 5.1 Off the live number
 
-Both of these run in a checkout, need no credentials, and take seconds:
+All three run in a checkout, need no credentials, and take seconds:
 
 ```bash
 # the booking conversation, turn by turn, against the client's own diary
@@ -184,14 +186,22 @@ python -m packages.eval \
   --journeys packages/eval/golden/clinics_journeys.jsonl \
   --diary    packages/eval/fixtures/clinic_diary.json
 
+# …and the same conversations on what the model actually said, rather than on labels we wrote
+python -m packages.eval \
+  --journeys packages/eval/golden/clinics_journeys.jsonl \
+  --diary    packages/eval/fixtures/clinic_diary.json \
+  --fixtures packages/eval/fixtures/recorded_clinics_journey_haiku.jsonl
+
 # what a patient's Arabic actually reaches in the catalogue
 python scripts/check_alias_resolution.py \
   docs/DermaClub_Availability_DEMO_2026-08-26_1.xlsx --timezone Africa/Cairo \
   --draft docs/dermaclub-aliases-draft.csv
 ```
 
-Expect `journeys: 9/9`, one declared known gap, and `17 resolved / 1 clarifying question / 0
-reaching nothing`.
+Expect `journeys: 9/9` from both runs, one declared known gap, and `23 resolved / 1 clarifying
+question / 0 reaching nothing` from the resolver check. The second run is the one that matters:
+it replays `claude-haiku-4-5`'s own classifications of the demo's messages, and the first time it
+was made it scored 5/9.
 
 ### 5.2 The transcript these settings produce
 
