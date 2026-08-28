@@ -16,6 +16,7 @@ eval runner's job.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 
 import pytest
@@ -36,6 +37,7 @@ from apps.api.schemas.common import HIGH_CONFIDENCE_THRESHOLD, MEDIUM_CONFIDENCE
 from apps.api.schemas.enums import IntentType, MessageType
 
 _VOCAB = default_vocabulary()
+_CLINICS = shipped_vocabularies()["clinics"]
 
 
 def _input(
@@ -79,6 +81,31 @@ def test_every_intent_a_vertical_declares_is_described_in_its_prompt(vertical: s
 
 
 @pytest.mark.parametrize("vertical", sorted(shipped_vocabularies()))
+def test_a_vertical_prompt_never_advertises_an_intent_it_cannot_emit(vertical: str) -> None:
+    vocab = shipped_vocabularies()[vertical]
+    prompt = build_system_prompt(vocab)
+    declared = {intent.name for intent in vocab.intents}
+    described = {
+        line.removeprefix("### ") for line in prompt.splitlines() if line.startswith("### ")
+    }
+    confusable = {
+        name.strip().removesuffix(".")
+        for line in prompt.splitlines()
+        if line.startswith("Check against: ")
+        for name in line.removeprefix("Check against: ").split(",")
+    }
+    labelled = set(re.findall(r"(?:`|\*\*)([a-z][a-z0-9_]*)(?:`|\*\*)", prompt))
+    advertised = described | confusable | labelled
+    leaked = sorted(
+        intent.value
+        for intent in IntentType
+        if intent.value not in declared and intent.value in advertised
+    )
+
+    assert leaked == [], f"{vertical}: prompt advertises undeclared intents: {leaked}"
+
+
+@pytest.mark.parametrize("vertical", sorted(shipped_vocabularies()))
 def test_every_intent_a_vertical_declares_is_parseable(vertical: str) -> None:
     """The other half of 2.6: an intent the vocabulary names that the enum cannot represent.
 
@@ -119,6 +146,30 @@ def test_each_intent_carries_its_definition_and_examples_from_the_vocabulary() -
 
     assert " ".join(availability.means.split()) in SYSTEM_PROMPT
     assert sum(f'e.g. "{ex.text}"' in SYSTEM_PROMPT for ex in availability.examples) == 3
+
+
+def test_clinic_prompt_contains_clinic_examples_without_holiday_home_guidance() -> None:
+    prompt = build_system_prompt(_CLINICS)
+    greeting = next(intent for intent in _CLINICS.intents if intent.name == "greeting")
+
+    assert " ".join(greeting.means.split()) in prompt
+    assert any(f'e.g. "{example.text}"' in prompt for example in greeting.examples)
+    for holiday_only in (
+        "holiday-home short stays",
+        "door code",
+        "kitchen",
+        "accommodation",
+        "check_in_support",
+        "access_code_request",
+        "for the guest",
+    ):
+        assert holiday_only not in prompt
+
+
+def test_clinic_and_holiday_home_prompts_have_distinct_fingerprints() -> None:
+    clinic_prompt = build_system_prompt(_CLINICS)
+
+    assert prompt_fingerprint(clinic_prompt) != SYSTEM_PROMPT_FINGERPRINT
 
 
 def test_the_catalogue_carries_franco_arabic_examples() -> None:
@@ -247,7 +298,7 @@ def test_the_fingerprint_moves_when_the_vocabulary_does() -> None:
     """``PROMPT_VERSION`` only moves when a human moves it, and the vocabulary is data.
 
     A client can edit ``intents.yaml`` without a deploy, which changes what the model is asked
-    while the version string stays ``v4``. The fingerprint is what distinguishes two eval runs
+    while the version string stays ``v5``. The fingerprint is what distinguishes two eval runs
     that both claim to be the same prompt version.
     """
     edited = _VOCAB.model_copy(deep=True)
@@ -255,4 +306,4 @@ def test_the_fingerprint_moves_when_the_vocabulary_does() -> None:
 
     assert prompt_fingerprint(build_system_prompt(edited)) != SYSTEM_PROMPT_FINGERPRINT
     assert prompt_fingerprint(SYSTEM_PROMPT) == SYSTEM_PROMPT_FINGERPRINT
-    assert PROMPT_VERSION == "v4"
+    assert PROMPT_VERSION == "v5"

@@ -10,13 +10,18 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from arq.connections import RedisSettings
+from packages.intents.schema import Vocabulary
 
 from apps.api import worker
 from apps.api.audit.log import AuditEntry
+from apps.api.channels import ConfigError
 from apps.api.classifier.service import Classifier
+from apps.api.core.config import Settings
 from apps.api.orchestration.ports import InboxItemDraft
 from apps.api.orchestration.queue import LoadedMessage, MessageConsumer
 from apps.api.orchestration.worker import Orchestrator, RoutingAction
@@ -107,6 +112,64 @@ def test_consume_message_reuses_the_shared_consumer() -> None:
     assert outcome is not None
     assert outcome.action is RoutingAction.CONTROL_PING
     assert len(inbox.drafts) == 1
+
+
+def test_startup_passes_one_selected_clinic_vocabulary_to_both_graphs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(
+        _env_file=None,
+        tenant_vertical="clinics",
+        tenant_emergency_reply="I am alerting our doctor right now.",
+    )
+    seen: dict[str, Any] = {}
+    database = SimpleNamespace()
+    classifier = SimpleNamespace()
+    graph = SimpleNamespace(sender=None, consumer=SimpleNamespace())
+
+    monkeypatch.setattr(worker, "get_settings", lambda: settings)
+    monkeypatch.setattr(worker, "build_database", lambda _settings: database)
+
+    def fake_classifier(_settings: Settings, *, vocabulary: Vocabulary) -> Any:
+        seen["classifier"] = vocabulary
+        return classifier
+
+    def fake_consumer(
+        _settings: Settings,
+        _database: Any,
+        _classifier: Any,
+        *,
+        vocabulary: Vocabulary,
+    ) -> Any:
+        seen["consumer"] = vocabulary
+        return graph
+
+    monkeypatch.setattr(worker, "build_classifier", fake_classifier)
+    monkeypatch.setattr(worker, "build_consumer", fake_consumer)
+    ctx: dict[str, Any] = {}
+
+    asyncio.run(worker.startup(ctx))
+
+    assert seen["classifier"] is seen["consumer"]
+    assert seen["classifier"].vertical == "clinics"
+    assert ctx["consumer"] is graph.consumer
+
+
+def test_worker_startup_refuses_clinic_without_emergency_copy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(_env_file=None, tenant_vertical="clinics")
+    database = SimpleNamespace()
+    classifier = SimpleNamespace()
+    graph = SimpleNamespace(sender=None, consumer=SimpleNamespace())
+
+    monkeypatch.setattr(worker, "get_settings", lambda: settings)
+    monkeypatch.setattr(worker, "build_database", lambda _settings: database)
+    monkeypatch.setattr(worker, "build_classifier", lambda *_args, **_kwargs: classifier)
+    monkeypatch.setattr(worker, "build_consumer", lambda *_args, **_kwargs: graph)
+
+    with pytest.raises(ConfigError, match="TENANT_EMERGENCY_REPLY"):
+        asyncio.run(worker.startup({}))
 
 
 def test_shutdown_closes_sender_and_disposes_database_when_present() -> None:

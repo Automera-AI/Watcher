@@ -15,13 +15,12 @@ without a tool block returns ``{}`` here instead of raising: an empty dict fails
 failing validation is already a defined path that ends at a human. A ``ProviderError`` means the
 provider could not be reached at all, which is a different thing and deserves a different answer.
 
-**The system block is marked cacheable, and that is the point.** ``SYSTEM_PROMPT`` is ~5k tokens
-of intent catalogue and rules, byte-identical on every call by construction (``prompt.py`` renders
-everything variable into the user turn). Sent uncached it is the largest line item in the
-classifier's bill and most of its latency; sent with ``cache_control`` it is charged once per
-cache lifetime and read back at a fraction of the input rate afterwards. The saving is reported
-as :attr:`AnthropicProvider.last_usage` so a regression in it is visible rather than merely
-expensive.
+**The system block is marked cacheable, and that is the point.** The selected vertical's injected
+prompt is byte-identical on every call by construction (``prompt.py`` renders everything variable
+into the user turn). Sent uncached it is the largest line item in the classifier's bill and most
+of its latency; sent with ``cache_control`` it is charged once per cache lifetime and read back at
+a fraction of the input rate afterwards. The saving is reported as
+:attr:`AnthropicProvider.last_usage` so a regression in it is visible rather than merely expensive.
 """
 
 from __future__ import annotations
@@ -36,7 +35,6 @@ from apps.api.classifier.prompt import (
     CLASSIFICATION_TOOL_DESCRIPTION,
     CLASSIFICATION_TOOL_NAME,
     CLASSIFICATION_TOOL_SCHEMA,
-    SYSTEM_PROMPT,
     render_user_prompt,
 )
 from apps.api.classifier.transport import TokenUsage, post_json
@@ -70,7 +68,7 @@ class AnthropicProvider:
         base_url: str = "https://api.anthropic.com",
         timeout_seconds: float = 30.0,
         max_retries: int = 2,
-        system_prompt: str = SYSTEM_PROMPT,
+        system_prompt: str,
         thinking: Mapping[str, Any] | None = None,
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     ) -> None:

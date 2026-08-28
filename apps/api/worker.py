@@ -45,9 +45,11 @@ _logger = logging.getLogger(__name__)
 async def startup(ctx: dict[str, Any]) -> None:
     """Build the object graph once per worker process (not once per job)."""
     settings = get_settings()
+    settings.tenant_policy()
+    vocabulary = settings.vocabulary()
     database = build_database(settings)
-    classifier = build_classifier(settings)
-    graph = build_consumer(settings, database, classifier)
+    classifier = build_classifier(settings, vocabulary=vocabulary)
+    graph = build_consumer(settings, database, classifier, vocabulary=vocabulary)
     ctx["database"] = database
     ctx["sender"] = graph.sender
     ctx["consumer"] = graph.consumer

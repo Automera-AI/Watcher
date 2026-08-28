@@ -120,14 +120,15 @@ class Settings(ChannelCredentials):
     #
     # Distinct from `control_chat_phone_e164`, which is where the *alert* goes: this is what the
     # customer is told. For a clinic they are rarely the same — the alert wakes whoever is on
-    # call, while the number a patient rings for a filler occlusion is a named clinician. Unset,
-    # the emergency reply names no clinic number and points only at public emergency services.
+    # call, while the number a patient rings for a filler occlusion is a named clinician. It is
+    # required for clinics only when their emergency copy includes the {contact} placeholder.
     tenant_urgent_contact: str | None = None
 
     # Replaces the default emergency wording entirely. May contain {contact}. Set this for any
     # tenant that must NOT direct customers to public emergency services — a clinic routes to its
     # own clinician, because deciding that something is an ambulance case is triage and triage is
-    # not the receptionist's to do. Unset, the default wording is used.
+    # not the receptionist's to do. It is required for clinics; other verticals retain the safe
+    # default wording when it is unset.
     tenant_emergency_reply: str | None = None
 
     # ── The receptionist's own words (roadmap 2.x) ────────────────────────────────────────
@@ -268,11 +269,17 @@ class Settings(ChannelCredentials):
         Per-*tenant* overrides are a different thing and land with the control page; this is the
         process default for every tenant it serves.
         """
+        emergency_reply = self.tenant_emergency_reply
+        if self.tenant_vertical == "clinics":
+            (emergency_reply,) = self._require(TENANT_EMERGENCY_REPLY=emergency_reply)
+            if "{contact}" in emergency_reply:
+                self._require(TENANT_URGENT_CONTACT=self.tenant_urgent_contact)
+
         return TenantPolicy(
             high_confidence_threshold=self.classifier_confidence_escalation_threshold,
             timezone=self.tenant_timezone,
             urgent_contact=self.tenant_urgent_contact,
-            emergency_reply=self.tenant_emergency_reply,
+            emergency_reply=emergency_reply,
         )
 
     def vocabulary(self) -> Vocabulary:

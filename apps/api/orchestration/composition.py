@@ -57,24 +57,31 @@ class ConsumerGraph:
     sender: ChannelSender | None
 
 
-def build_consumer(settings: Settings, database: Database, classifier: Classifier) -> ConsumerGraph:
+def build_consumer(
+    settings: Settings,
+    database: Database,
+    classifier: Classifier,
+    *,
+    vocabulary: Vocabulary | None = None,
+) -> ConsumerGraph:
     """Wire one `MessageConsumer` — the orchestrator, its senders, alerter, and DB repos.
 
     Tenant-scoped throughout (B2): every repository below takes `database.tenant_session`, so
     migration 004's RLS policies enforce on this consumer exactly as they do on the request path.
     """
-    tenant_scope = database.tenant_session
     # One vocabulary for the whole graph (``TENANT_VERTICAL``, demo step 5). Read once here rather
     # than fetched by each collaborator: the alert channel, the autonomy ceilings, the slots the
     # receptionist collects and the intents described to the model are four readings of one file,
     # and a process where they disagree is a process that greets a patient in one vertical and
-    # books them in another.
-    vocabulary: Vocabulary = settings.vocabulary()
+    # books them in another. A caller that has already read it — `main.py`, the arq worker — passes
+    # it in rather than paying for the read a second time.
+    selected: Vocabulary = vocabulary or settings.vocabulary()
+    tenant_scope = database.tenant_session
     sender = build_sender(settings)
     alerter = build_alerter(
         sender,
         settings.control_chat_phone_e164,
-        declared_channel=vocabulary.emergency.alert,
+        declared_channel=selected.emergency.alert,
     )
     # The knowledge base (roadmap 2.4), now scoped per property (roadmap 2.8). A process-global
     # registry entry rather than a collaborator threaded through the Orchestrator/Receptionist call
@@ -95,7 +102,7 @@ def build_consumer(settings: Settings, database: Database, classifier: Classifie
     # would put four names in the registry with an empty clinic catalogue behind them, and
     # `validate_registry` exists to say that a tool nobody declared should not be there. Where they
     # are absent nothing changes — an intent naming an unregistered tool hands off.
-    if _CLINIC_TOOLS <= {intent.terminal_tool for intent in vocabulary.intents}:
+    if _CLINIC_TOOLS <= {intent.terminal_tool for intent in selected.intents}:
         configure_clinic(
             SqlAlchemyClinicRepository(tenant_scope),
             timezone=settings.tenant_timezone,
@@ -109,11 +116,11 @@ def build_consumer(settings: Settings, database: Database, classifier: Classifie
         SqlAlchemyCrmLookup(tenant_scope),
         policy=settings.tenant_policy(),
         receptionist=handle,
-        conversations=SqlAlchemyConversationStore(tenant_scope),
+        conversations=SqlAlchemyConversationStore(tenant_scope, vocabulary=selected),
         sender=sender,
         classifications=SqlAlchemyClassificationWriter(tenant_scope),
         alerter=alerter,
-        vocabulary=vocabulary,
+        vocabulary=selected,
     )
     consumer = MessageConsumer(SqlAlchemyMessageLoader(tenant_scope), orchestrator)
     return ConsumerGraph(consumer=consumer, sender=sender)

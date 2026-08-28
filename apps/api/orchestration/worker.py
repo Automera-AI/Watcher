@@ -197,6 +197,7 @@ class Orchestrator:
             message.classifiable_text,
             at=message.received_at,
             timezone=self._policy.timezone,
+            vocabulary=self._vocabulary,
         )
         if emergency is not None:
             return await self._emergency(tenant_id, message_id, message, emergency)
@@ -357,12 +358,10 @@ class Orchestrator:
         alerter is unset still leaves a trail that says exactly what it saw and did not deliver.
         """
         self._logger.critical(
-            "EMERGENCY DETECTED: trigger=%s matched=%r tenant=%s message=%s guest=%s",
+            "EMERGENCY DETECTED: trigger=%s tenant=%s message=%s",
             detection.trigger_id,
-            detection.matched,
             tenant_id,
             message_id,
-            turn.channel_identity,
         )
         if self._alerter is None:
             self._logger.critical(

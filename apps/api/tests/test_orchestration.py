@@ -9,12 +9,18 @@ that a few tests poke at, but the ordinary way a classified message is handled.
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from packages.intents.schema import Vocabulary, default_vocabulary, vocabulary_for
+from packages.intents.schema import (
+    Vocabulary,
+    default_vocabulary,
+    shipped_vocabularies,
+    vocabulary_for,
+)
 
 from apps.api.audit.log import AuditEntry
 from apps.api.classifier.service import Classifier
@@ -521,8 +527,10 @@ def _emergency_orchestrator(
     sender: _FakeSender | None = None,
     conversations: _FakeConversations | None = None,
     with_receptionist: bool = True,
+    vocabulary: Vocabulary | None = None,
 ) -> tuple[Orchestrator, _FakeAudit, _FakeInbox, _FakeConversations | None]:
     """An orchestrator whose classifier raises if anything reaches it."""
+    selected = vocabulary or default_vocabulary()
     classifier = Classifier(_ExplodingProvider(), _ExplodingProvider())
     audit, inbox = _FakeAudit(), _FakeInbox()
     store = (conversations or _FakeConversations()) if with_receptionist else None
@@ -535,6 +543,7 @@ def _emergency_orchestrator(
         conversations=store,
         sender=sender,
         alerter=alerter,
+        vocabulary=selected,
     )
     return orch, audit, inbox, store
 
@@ -560,6 +569,39 @@ def test_an_emergency_is_answered_without_ever_being_classified() -> None:
     assert inbox.drafts[0].band is ConfidenceBand.HIGH
     assert inbox.drafts[0].snapshot["trigger_id"] == "gas"
     assert store is not None and store.replies  # the guest was answered, and it is on the record
+
+
+def test_a_clinic_emergency_uses_the_selected_vocabulary_through_the_orchestrator() -> None:
+    clinics = shipped_vocabularies()["clinics"]
+    orch, audit, inbox, _store = _emergency_orchestrator(alerter=_FakeAlerter(), vocabulary=clinics)
+
+    outcome = _converse(orch, "جلدي اتحرق جامد بعد الليزر")
+
+    assert outcome.action is RoutingAction.EMERGENCY
+    assert outcome.emergency is not None and outcome.emergency.trigger_id == "burn"
+    assert audit.entries[0].action == "emergency"
+    assert inbox.drafts[0].status is InboxStatus.NEEDS_REVIEW
+
+
+def test_clinic_emergency_log_omits_patient_text_and_phone(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    clinics = shipped_vocabularies()["clinics"]
+    alerter = _FakeAlerter()
+    orch, _audit, _inbox, _store = _emergency_orchestrator(alerter=alerter, vocabulary=clinics)
+    symptom = "جلدي اتحرق جامد بعد الليزر"
+
+    with caplog.at_level(logging.CRITICAL, logger="apps.api.orchestration.worker"):
+        _converse(orch, symptom)
+
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "trigger=burn" in logged
+    assert TENANT_UUID in logged
+    assert MSG_ID in logged
+    assert "جلدي اتحرق" not in logged
+    assert "+966500000000" not in logged
+    assert alerter.alerts[0].text == symptom
+    assert alerter.alerts[0].guest_identity == "+966500000000"
 
 
 def test_the_guest_is_answered_and_a_person_is_alerted() -> None:

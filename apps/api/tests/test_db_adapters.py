@@ -14,6 +14,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from packages.intents.schema import shipped_vocabularies
 
 from apps.api.audit.log import AuditEntry
 from apps.api.conversations.task import Task, TaskStatus
@@ -439,6 +440,27 @@ def test_the_second_message_finds_the_same_conversation_and_its_task(database: D
     assert second.task.intent == "booking_enquiry"
     assert second.task.slots == {"check_in": "4 June"}  # survived the gap between messages
     assert second.replies_sent == 1  # and so did the clarifying-turn budget
+
+
+def test_the_store_rehydrates_a_clinic_task_with_the_selected_vocabulary(
+    database: Database,
+) -> None:
+    clinics = shipped_vocabularies()["clinics"]
+    store = SqlAlchemyConversationStore(database.tenant_session, vocabulary=clinics)
+
+    first = store.begin(_turn("wamid.clinic.1", text="hi"))
+    store.record_reply(
+        first,
+        _turn("wamid.clinic.1", text="hi"),
+        Task(intent="greeting", vocabulary=clinics),
+        OutboundAction(kind="say", text="Welcome"),
+    )
+
+    resumed = store.begin(_turn("wamid.clinic.2", text="hello again"))
+
+    assert resumed.task is not None
+    assert resumed.task.intent == "greeting"
+    assert resumed.task.vocabulary.vertical == "clinics"
 
 
 def test_a_reply_is_recorded_once_even_if_the_message_is_processed_twice(

@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
+from packages.intents.schema import Vocabulary
 
 from apps.api.channels import ConfigError
 from apps.api.classifier.anthropic import DEFAULT_MAX_OUTPUT_TOKENS, AnthropicProvider
@@ -111,7 +112,12 @@ def build_provider(
     )
 
 
-def build_classifier(settings: Settings, client: httpx.Client | None = None) -> Classifier:
+def build_classifier(
+    settings: Settings,
+    client: httpx.Client | None = None,
+    *,
+    vocabulary: Vocabulary | None = None,
+) -> Classifier:
     """The two-tier classifier described by ``CLASSIFIER_MODEL_*`` (D8-a).
 
     Both tiers share one ``httpx.Client`` so they share its connection pool: the escalation call
@@ -121,8 +127,9 @@ def build_classifier(settings: Settings, client: httpx.Client | None = None) -> 
     http = client if client is not None else _default_client()
     # Assembled once and shared by both tiers: it is ~5k tokens of identical text, and building it
     # twice would also let the two tiers drift apart if the vocabulary were ever reloaded between
-    # the calls.
-    system_prompt = build_system_prompt(settings.vocabulary())
+    # the calls. An explicit ``vocabulary`` wins over the settings' own, so a caller that has
+    # already read it once (main.py, the arq worker) does not read it a second time.
+    system_prompt = build_system_prompt(vocabulary or settings.vocabulary())
     return Classifier(
         build_provider(
             settings, settings.classifier_model_first_pass, http, system_prompt=system_prompt

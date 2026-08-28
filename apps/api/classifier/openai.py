@@ -13,8 +13,9 @@ Differences from the Anthropic provider that are worth knowing:
   is possible here in a way it is not there. It is handled the same way as a missing tool call —
   return ``{}``, let the service's validate-retry-then-unclear policy (§8) deal with it.
 * **Caching is automatic and prefix-based**: there is no ``cache_control`` to set, and the saving
-  is earned by putting the static system block first and never varying it. ``prompt.py`` already
-  guarantees that, and ``usage.prompt_tokens_details.cached_tokens`` reports what it was worth.
+  is earned by putting the selected vertical's injected system block first and never varying it.
+  ``prompt.py`` already guarantees that, and ``usage.prompt_tokens_details.cached_tokens`` reports
+  what it was worth.
 """
 
 from __future__ import annotations
@@ -29,7 +30,6 @@ from apps.api.classifier.prompt import (
     CLASSIFICATION_TOOL_DESCRIPTION,
     CLASSIFICATION_TOOL_NAME,
     CLASSIFICATION_TOOL_SCHEMA,
-    SYSTEM_PROMPT,
     render_user_prompt,
 )
 from apps.api.classifier.transport import TokenUsage, post_json
@@ -52,7 +52,7 @@ class OpenAIProvider:
         base_url: str = "https://api.openai.com/v1",
         timeout_seconds: float = 30.0,
         max_retries: int = 2,
-        system_prompt: str = SYSTEM_PROMPT,
+        system_prompt: str,
     ) -> None:
         self.model_id = model_id
         self._api_key = api_key

@@ -47,6 +47,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import FastAPI
+from packages.intents.schema import Vocabulary
 
 from apps.api.app import create_app
 from apps.api.classifier.factory import build_classifier
@@ -76,10 +77,22 @@ def create_application(settings: Settings | None = None) -> FastAPI:
     checks requirements per subsystem rather than at import.
     """
     resolved = settings if settings is not None else get_settings()
-    return assemble(resolved, build_database(resolved), build_classifier(resolved))
+    vocabulary = resolved.vocabulary()
+    return assemble(
+        resolved,
+        build_database(resolved),
+        build_classifier(resolved, vocabulary=vocabulary),
+        vocabulary=vocabulary,
+    )
 
 
-def assemble(settings: Settings, database: Database, classifier: Classifier) -> FastAPI:
+def assemble(
+    settings: Settings,
+    database: Database,
+    classifier: Classifier,
+    *,
+    vocabulary: Vocabulary | None = None,
+) -> FastAPI:
     """Wire the object graph over an already-built database and classifier.
 
     Separate from :func:`create_application` so the wiring itself can be exercised against SQLite
@@ -94,6 +107,10 @@ def assemble(settings: Settings, database: Database, classifier: Classifier) -> 
     `orchestration/composition.build_consumer` this branch calls when there is no Redis). Building
     them here anyway would leave an idle sender client open in a process that never uses it.
     """
+    # Validate the tenant's runtime policy before choosing a queue. The Redis producer does not
+    # build a consumer graph in this process, but it must still refuse an unsafe clinic setup.
+    settings.tenant_policy()
+
     # The tenant resolver gets the unstamped scope deliberately (B2): it answers the one question
     # asked *before* a tenant is known — which tenant owns this endpoint — and migration 004 gives
     # that lookup a policy of its own. Every tenant-scoped collaborator below (built inside
@@ -117,7 +134,9 @@ def assemble(settings: Settings, database: Database, classifier: Classifier) -> 
         async def _close_queue() -> None:
             await redis_queue.aclose()
     else:
-        graph = build_consumer(settings, database, classifier)
+        graph = build_consumer(
+            settings, database, classifier, vocabulary=vocabulary or settings.vocabulary()
+        )
         pool_queue = ThreadPoolClassificationQueue(graph.consumer)
         queue = pool_queue
         sender = graph.sender
