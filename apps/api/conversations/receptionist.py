@@ -102,6 +102,25 @@ _SERVICE_ASK_INTENTS = frozenset(
     {IntentType.AVAILABILITY_CHECK.value, IntentType.BOOKING_ENQUIRY.value}
 )
 
+#: The intent transitions that continue the task in flight instead of resetting it. A change of
+#: classified intent normally opens a fresh task — the guest asked about something else, and the
+#: old job's slots do not belong to the new one. One directed pair is the exception: a patient who
+#: asked "what's free tomorrow at Maadi?" (``availability_check``) and then names a treatment is on
+#: the same booking journey, and the branch and day they already gave still belong to it. The
+#: classifier relabels that second turn ``booking_enquiry`` — it now expresses an intent to book —
+#: and resetting on the relabel throws the branch and day away and asks for them again, which is the
+#: context loss this guard closes.
+#:
+#: Only this pair, and only in this direction. ``booking_enquiry`` requires everything
+#: ``availability_check`` collects (service, branch, date) plus a time it *offers* rather than asks
+#: for, so every slot carried forward is one the booking still needs — the transition is
+#: superset-safe. This is not generic cross-intent merging: any other relabel
+#: (``price_enquiry``, ``property_question``, a greeting, …) still starts clean and inherits
+#: nothing, so nothing a patient said while booking leaks into an unrelated request.
+_COMPATIBLE_TRANSITIONS: frozenset[tuple[str, str]] = frozenset(
+    {(IntentType.AVAILABILITY_CHECK.value, IntentType.BOOKING_ENQUIRY.value)}
+)
+
 #: Where the durable booking reference is kept once one exists. Not a vocabulary slot — nothing
 #: extracts it from a message — but it lives with the task because that is what survives to the
 #: closing turn, which is the only place it is read (``CloseConversation``).
@@ -229,7 +248,13 @@ async def handle(
         # a booking still reaches `confirm_booking` only through a read-back the patient agreed to.
         confidence = max(confidence, HIGH_CONFIDENCE_THRESHOLD)
 
-    if task is None or task.intent != intent:
+    if task is not None and task.intent != intent and _continues_task(task.intent, intent):
+        # A compatible transition (see ``_COMPATIBLE_TRANSITIONS``): keep the task and everything it
+        # has collected, and adopt the new intent. The branch and day an ``availability_check`` was
+        # already holding stay on the ``booking_enquiry`` that continues it, so the booking is only
+        # missing the time it offers rather than starting from an empty slate.
+        task.intent = intent
+    elif task is None or task.intent != intent:
         task = Task(intent=intent, vocabulary=vocab)
 
     task.absorb({**extracted_slots, **supplied})
@@ -389,6 +414,16 @@ async def _answer_from_knowledge(
 
     task.status = TaskStatus.COMPLETED
     return OutboundAction(kind="say", text=result.human_summary or ""), task
+
+
+def _continues_task(previous_intent: str, new_intent: str) -> bool:
+    """Whether a change of classified intent should continue the task rather than open a new one.
+
+    True only for the one directed, superset-safe pair in ``_COMPATIBLE_TRANSITIONS``
+    (``availability_check`` → ``booking_enquiry``). Every other relabel returns False and gets a
+    fresh task, so this is a single compatible transition and not generic cross-intent merging.
+    """
+    return (previous_intent, new_intent) in _COMPATIBLE_TRANSITIONS
 
 
 def _is_an_answer(text: str | None) -> bool:

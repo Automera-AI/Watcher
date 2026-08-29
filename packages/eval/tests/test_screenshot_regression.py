@@ -23,14 +23,16 @@ question that carries the branch and day the task already holds.
 string, so that an unrelated replacement cannot pass. And turn 2 (``فاشيال``) now supplies **only**
 the service: the branch and day are gone from its label, so the ``19:00`` offer can only be reached
 if they survived in the task from turn 1. That makes the offer a proof that context carried across
-the turn, which the previous label — re-supplying branch and date — could not be.
+the turn, which a label re-supplying branch and date could not be.
 
-The whole flow is scored as one ``booking_enquiry`` task on purpose. The task is what carries the
-branch and day between turns, and the receptionist abandons a task the moment the classified intent
-changes (``db/orchestration_repo.py`` ``record_reply``) — so a turn 2 under a *different* intent
-would reset the task and lose the very context this test now exists to prove. Turn 1's message
-(``عايزة احجز…``, "I want to book…") is a booking either way; running both turns under
-``booking_enquiry`` is what lets the single task span them.
+The flow runs under the labels the live classifier actually produced: turn 1 is
+``availability_check`` (asking what is free) and turn 2 is ``booking_enquiry`` (naming the
+treatment). That intent change used to reset the task and drop the branch and day — the context
+loss this regression is about. The receptionist now continues the task across the one compatible
+transition ``availability_check`` → ``booking_enquiry`` (``receptionist.py``
+``_COMPATIBLE_TRANSITIONS``), keeping the branch and day the availability check already collected,
+so the booking that continues it is only missing the time it offers. Reaching the real,
+workbook-backed ``19:00`` on turn 2 with only the service supplied is the proof that it did.
 """
 
 from __future__ import annotations
@@ -65,7 +67,7 @@ SCREENSHOT = JourneyCase(
         JourneyTurn(
             message="عايزة احجز بكرة في المعادي ايه المتاح؟",
             label=TurnLabel(
-                intent="booking_enquiry",
+                intent="availability_check",
                 confidence=0.94,
                 slots={"branch": "المعادي", "requested_date": "2026-09-02"},
             ),
