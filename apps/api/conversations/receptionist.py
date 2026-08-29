@@ -91,6 +91,17 @@ _TIME_SLOT = "requested_time"
 #: ``_ask_for_service``.
 _SERVICE_SLOT = "service"
 
+#: The intents whose missing ``service`` earns the booking-specific Arabic ask. Both flows end at
+#: the diary — one offers what is free (``availability_check``), one books it (``booking_enquiry``)
+#: — so "which treatment would you like to book, at Maadi, tomorrow?" is the right question. The
+#: other intents that also require ``service`` are *not* booking anything: ``price_enquiry`` is a
+#: quote and ``preparation_aftercare_info`` is a how-to, and asking either "which service would you
+#: like to book?" is wrong. Those keep the generic slot prompt — the ask is gated on the flow, not
+#: on the slot being ``service`` alone.
+_SERVICE_ASK_INTENTS = frozenset(
+    {IntentType.AVAILABILITY_CHECK.value, IntentType.BOOKING_ENQUIRY.value}
+)
+
 #: Where the durable booking reference is kept once one exists. Not a vocabulary slot — nothing
 #: extracts it from a message — but it lives with the task because that is what survives to the
 #: closing turn, which is the only place it is read (``CloseConversation``).
@@ -274,9 +285,11 @@ async def handle(
             # Not an open question. The one detail still missing is *which* appointment, and the
             # only honest way to collect it is to offer what the diary actually holds.
             return await _offer_times(task, turn, conversation_id, vocab)
-        if slot == _SERVICE_SLOT:
-            # The one ask on the booking flow, and the last English leak on it. Asked in Arabic,
-            # carrying the branch and day the task already holds — not the generic slot prompt.
+        if slot == _SERVICE_SLOT and intent in _SERVICE_ASK_INTENTS:
+            # The one ask on the booking/availability flow, and the last English leak on it. Asked
+            # in Arabic, carrying the branch and day the task already holds — not the generic slot
+            # prompt. Gated on the intent so a `price_enquiry` or `preparation_aftercare_info` that
+            # also lacks a service is not asked "which service would you like to book?".
             return (
                 OutboundAction(
                     kind="ask",

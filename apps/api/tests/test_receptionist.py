@@ -431,6 +431,40 @@ def test_a_tenant_may_override_the_missing_service_wording() -> None:
     assert action.text == "تحبي تحجزي ايه في فرع المعادي بكرة؟"
 
 
+@pytest.mark.parametrize(
+    ("intent", "extra_slots"),
+    [
+        ("price_enquiry", {}),
+        ("preparation_aftercare_info", {"instruction_phase": "preparation"}),
+    ],
+)
+def test_a_non_booking_service_intent_keeps_the_generic_ask(
+    intent: str, extra_slots: dict[str, str]
+) -> None:
+    """The contextual "…which service would you like to book?" is for the booking/availability flow
+    only. ``price_enquiry`` (a quote) and ``preparation_aftercare_info`` (a how-to) also require a
+    ``service``, but neither is booking anything — so a missing service on them must fall to the
+    generic slot prompt, never the booking-specific Arabic ask. Gating on the slot alone would give
+    a patient asking a price "which service would you like to book?", which is the wrong question.
+    """
+    action, task = asyncio.run(
+        handle(
+            _turn("عايزة اعرف"),
+            intent,
+            0.95,
+            extra_slots,
+            None,
+            vocabulary=_CLINICS,
+            today=date(2026, 9, 1),
+        )
+    )
+    assert action.kind == "ask"
+    # The booking-specific ask is not taken: the generic slot prompt is, naming the service slot.
+    assert action.text == "Could you please provide the service?"
+    assert "تحجزي" not in (action.text or "")
+    assert task.status == TaskStatus.COLLECTING
+
+
 # ── Tenant conversation copy ─────────────────────────────────────────────────────────────────
 #
 # The wording here is deliberately fake. Real client copy names the client, and this repo's own

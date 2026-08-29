@@ -14,14 +14,23 @@ receptionist and the real tools against the client's own diary fixture.
 **The turn that fails is turn 1.** A patient who gives a branch and a day but no service
 (``…في المعادي بكرة ايه المتاح؟``) is asked for the service in a hardcoded English sentence —
 ``apps/api/conversations/receptionist.py`` ``handle``'s ``"Could you please provide the
-{slot}?"`` — instead of a contextual Arabic question. Turn 2, with a service that resolves
-(``فاشيال`` → ``Facial``), already reaches a real workbook-backed offer, so the machinery
-downstream of the ask works; the defect is the ask itself.
+{slot}?"`` — instead of a contextual Arabic question. The contextual Arabic ask has landed
+(``receptionist.py`` ``_ask_for_service``), so this now passes: turn 1 comes back as the Arabic
+question that carries the branch and day the task already holds.
 
-The contextual Arabic ask has landed (``receptionist.py`` ``_ask_for_service``), so this now
-passes and the ``xfail`` marker has been removed. Turn 1 comes back as the Arabic question that
-carries the branch and day the task already holds, not the English slot prompt. Keep the
-assertions as they are — the exclusion of the English string is what proves the leak is gone.
+**What the assertions pin, and why they were tightened.** Turn 1 is asserted *exactly* —
+``أكيد، تحبي تحجزي أنهي خدمة في فرع المعادي بكرة؟`` — not merely for the absence of the English
+string, so that an unrelated replacement cannot pass. And turn 2 (``فاشيال``) now supplies **only**
+the service: the branch and day are gone from its label, so the ``19:00`` offer can only be reached
+if they survived in the task from turn 1. That makes the offer a proof that context carried across
+the turn, which the previous label — re-supplying branch and date — could not be.
+
+The whole flow is scored as one ``booking_enquiry`` task on purpose. The task is what carries the
+branch and day between turns, and the receptionist abandons a task the moment the classified intent
+changes (``db/orchestration_repo.py`` ``record_reply``) — so a turn 2 under a *different* intent
+would reset the task and lose the very context this test now exists to prove. Turn 1's message
+(``عايزة احجز…``, "I want to book…") is a booking either way; running both turns under
+``booking_enquiry`` is what lets the single task span them.
 """
 
 from __future__ import annotations
@@ -56,13 +65,13 @@ SCREENSHOT = JourneyCase(
         JourneyTurn(
             message="عايزة احجز بكرة في المعادي ايه المتاح؟",
             label=TurnLabel(
-                intent="availability_check",
+                intent="booking_enquiry",
                 confidence=0.94,
                 slots={"branch": "المعادي", "requested_date": "2026-09-02"},
             ),
-            # Intended: an Arabic question that uses the branch and day it already has. The
-            # defect is that this comes back as the English "Could you please provide the
-            # service?" — so the assertion the flow fails on today is this exclusion.
+            # An Arabic question that uses the branch and day the task already holds. The exact
+            # wording is pinned in the test body (below); the exclusion here is a second guard that
+            # the old English slot prompt is gone.
             expect=TurnExpectation(kind="ask", excludes=("Could you please provide",)),
         ),
         JourneyTurn(
@@ -70,13 +79,13 @@ SCREENSHOT = JourneyCase(
             label=TurnLabel(
                 intent="booking_enquiry",
                 confidence=0.95,
-                slots={
-                    "service": "فاشيال",
-                    "branch": "المعادي",
-                    "requested_date": "2026-09-02",
-                },
+                # Only the service. Branch and day are deliberately absent: for the 19:00 offer to
+                # be reached they must survive in the task from the previous turn, which is the
+                # context-carrying this regression exists to prove.
+                slots={"service": "فاشيال"},
             ),
-            # A service that resolves reaches the real, workbook-backed offer already.
+            # The service resolves and, with the surviving branch and day, reaches the real,
+            # workbook-backed offer.
             expect=TurnExpectation(kind="ask", includes=("19:00",)),
         ),
     ),
@@ -87,3 +96,6 @@ def test_the_screenshot_flow_answers_the_missing_service_in_arabic() -> None:
     diary = FixtureDiary.from_path(DIARY)
     outcome = run_journey(SCREENSHOT, diary, vocabulary=CLINICS)
     assert outcome.ok, "first failing turn: " + repr(outcome.first_failure)
+    # The exact contextual Arabic ask — the branch and day come from the task, not this turn's
+    # wording — so an unrelated replacement of the sentence cannot slip through.
+    assert outcome.turns[1].text == "أكيد، تحبي تحجزي أنهي خدمة في فرع المعادي بكرة؟"
