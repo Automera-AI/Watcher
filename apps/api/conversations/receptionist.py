@@ -85,6 +85,49 @@ _BOOKING_TOOL = "confirm_booking"
 #: system did not return" can be kept while still collecting a time.
 _TIME_SLOT = "requested_time"
 
+#: The treatment slot. When it is what is missing, the receptionist asks a contextual question in
+#: the patient's language rather than the generic English slot prompt — the branch and day are
+#: already known, so "which treatment, at Maadi, tomorrow?" is what a receptionist would ask. See
+#: ``_ask_for_service``.
+_SERVICE_SLOT = "service"
+
+#: The intents whose missing ``service`` earns the booking-specific Arabic ask. Both flows end at
+#: the diary — one offers what is free (``availability_check``), one books it (``booking_enquiry``)
+#: — so "which treatment would you like to book, at Maadi, tomorrow?" is the right question. The
+#: other intents that also require ``service`` are *not* booking anything: ``price_enquiry`` is a
+#: quote and ``preparation_aftercare_info`` is a how-to, and asking either "which service would you
+#: like to book?" is wrong. Those keep the generic slot prompt — the ask is gated on the flow, not
+#: on the slot being ``service`` alone.
+_SERVICE_ASK_INTENTS = frozenset(
+    {IntentType.AVAILABILITY_CHECK.value, IntentType.BOOKING_ENQUIRY.value}
+)
+
+#: The intent a successful availability offer continues into. An ``availability_check`` that came
+#: back with concrete, bookable times has answered the patient's question, but on the demo flow the
+#: question is the first half of a booking: the patient's next message names one of the offered
+#: times, and that reply is continued as this intent so the booking it belongs to can collect it.
+#: See ``_answer_from_catalogue``.
+_BOOKING_INTENT = IntentType.BOOKING_ENQUIRY.value
+
+#: The intent transitions that continue the task in flight instead of resetting it. A change of
+#: classified intent normally opens a fresh task — the guest asked about something else, and the
+#: old job's slots do not belong to the new one. One directed pair is the exception: a patient who
+#: asked "what's free tomorrow at Maadi?" (``availability_check``) and then names a treatment is on
+#: the same booking journey, and the branch and day they already gave still belong to it. The
+#: classifier relabels that second turn ``booking_enquiry`` — it now expresses an intent to book —
+#: and resetting on the relabel throws the branch and day away and asks for them again, which is the
+#: context loss this guard closes.
+#:
+#: Only this pair, and only in this direction. ``booking_enquiry`` requires everything
+#: ``availability_check`` collects (service, branch, date) plus a time it *offers* rather than asks
+#: for, so every slot carried forward is one the booking still needs — the transition is
+#: superset-safe. This is not generic cross-intent merging: any other relabel
+#: (``price_enquiry``, ``property_question``, a greeting, …) still starts clean and inherits
+#: nothing, so nothing a patient said while booking leaks into an unrelated request.
+_COMPATIBLE_TRANSITIONS: frozenset[tuple[str, str]] = frozenset(
+    {(IntentType.AVAILABILITY_CHECK.value, IntentType.BOOKING_ENQUIRY.value)}
+)
+
 #: Where the durable booking reference is kept once one exists. Not a vocabulary slot — nothing
 #: extracts it from a message — but it lives with the task because that is what survives to the
 #: closing turn, which is the only place it is read (``CloseConversation``).
@@ -103,6 +146,30 @@ _BOOKED_TEXT = "That's booked. Your reference is {booking_reference}"
 #: The read-back. ``{details}`` carries the labels the default reads with; ``{values}`` is the
 #: same list without them, for a template in a language those English labels do not belong in.
 _READ_BACK_TEXT = "Just to confirm: {details}?"
+
+#: The missing-service question, in Egyptian Arabic. Composed here rather than left to the generic
+#: English slot prompt, because this is the one ask on the demo's booking flow and the branch and
+#: day it should carry are already in the task. ``{branch}`` and ``{date}`` are pre-composed
+#: fragments — "في فرع المعادي", "بكرة", or empty — so the sentence reads whether the turn has
+#: both, one, or neither. The tenant may replace it (``ConversationCopy.ask_service``); the default
+#: is Arabic in code so no configuration is required for the patient to be asked in their language.
+_ASK_SERVICE_TEXT = "أكيد، تحبي تحجزي أنهي خدمة{branch}{date}؟"
+
+#: A stored date spoken back the way the patient said it, in Egyptian Arabic. The task keeps
+#: ``requested_date`` as an ISO string because that is what a booking acts on; reading "2026-09-02"
+#: back is asking someone to confirm a string, and rendering it as "Wednesday 02 September" drops
+#: English day and month names into an Arabic sentence — the pre-existing leak the demo has to
+#: stop, not extend. Relative days cover the demo; a weekday name covers the rest without English.
+_RELATIVE_DAYS_AR: dict[int, str] = {0: "النهاردة", 1: "بكرة", 2: "بعد بكرة"}
+_WEEKDAYS_AR: dict[int, str] = {
+    0: "الاتنين",
+    1: "التلات",
+    2: "الأربع",
+    3: "الخميس",
+    4: "الجمعة",
+    5: "السبت",
+    6: "الأحد",
+}
 
 #: Tools that produce their reply directly from ``human_summary`` and cannot fail. ``greet`` and
 #: ``close_conversation`` are the two ends of a conversation, and neither has anything to look up.
@@ -188,7 +255,13 @@ async def handle(
         # a booking still reaches `confirm_booking` only through a read-back the patient agreed to.
         confidence = max(confidence, HIGH_CONFIDENCE_THRESHOLD)
 
-    if task is None or task.intent != intent:
+    if task is not None and task.intent != intent and _continues_task(task.intent, intent):
+        # A compatible transition (see ``_COMPATIBLE_TRANSITIONS``): keep the task and everything it
+        # has collected, and adopt the new intent. The branch and day an ``availability_check`` was
+        # already holding stay on the ``booking_enquiry`` that continues it, so the booking is only
+        # missing the time it offers rather than starting from an empty slate.
+        task.intent = intent
+    elif task is None or task.intent != intent:
         task = Task(intent=intent, vocabulary=vocab)
 
     task.absorb({**extracted_slots, **supplied})
@@ -244,6 +317,18 @@ async def handle(
             # Not an open question. The one detail still missing is *which* appointment, and the
             # only honest way to collect it is to offer what the diary actually holds.
             return await _offer_times(task, turn, conversation_id, vocab)
+        if slot == _SERVICE_SLOT and intent in _SERVICE_ASK_INTENTS:
+            # The one ask on the booking/availability flow, and the last English leak on it. Asked
+            # in Arabic, carrying the branch and day the task already holds — not the generic slot
+            # prompt. Gated on the intent so a `price_enquiry` or `preparation_aftercare_info` that
+            # also lacks a service is not asked "which service would you like to book?".
+            return (
+                OutboundAction(
+                    kind="ask",
+                    text=_ask_for_service(task, today or turn.received_at.date()),
+                ),
+                task,
+            )
         return (
             OutboundAction(
                 kind="ask",
@@ -338,6 +423,27 @@ async def _answer_from_knowledge(
     return OutboundAction(kind="say", text=result.human_summary or ""), task
 
 
+def _continues_task(previous_intent: str, new_intent: str) -> bool:
+    """Whether a change of classified intent should continue the task rather than open a new one.
+
+    True only for the one directed, superset-safe pair in ``_COMPATIBLE_TRANSITIONS``
+    (``availability_check`` → ``booking_enquiry``). Every other relabel returns False and gets a
+    fresh task, so this is a single compatible transition and not generic cross-intent merging.
+    """
+    return (previous_intent, new_intent) in _COMPATIBLE_TRANSITIONS
+
+
+def _offered_concrete_slots(result: ToolResult) -> bool:
+    """Whether an availability result actually put bookable times in front of the patient.
+
+    True only for a successful offer carrying real times — the one case that is the start of a
+    booking. "Nothing free" (``ok`` False, empty ``times``), an ambiguous service (a "which did you
+    mean?" question) and an unresolved one all return False, so none of them is continued as a
+    pending booking: they complete or re-ask exactly as before.
+    """
+    return result.ok and bool((result.data or {}).get("times"))
+
+
 def _is_an_answer(text: str | None) -> bool:
     """Whether a message is a short yes or no rather than a new request."""
     return reads_as_yes(text or "") or reads_as_no(text or "")
@@ -367,6 +473,45 @@ def _read_as_answer(
         vocabulary=vocab,
         today=today or turn.received_at.date(),
     )
+
+
+def _ask_for_service(task: Task, today: date) -> str:
+    """The missing-service question, rendered from the branch and day the task already holds.
+
+    Both are optional: a booking can reach here with only one of them, or neither, and the sentence
+    has to read in every case. So the branch and day are turned into *fragments* — "في فرع المعادي",
+    "بكرة", or empty — and the template carries the connective words with them, the same way
+    ``_read_back`` composes its own sentence. Nothing is resolved against the catalogue here (that
+    is the tool's job on the next turn): the branch is the patient's own word, kept as they wrote
+    it, so the question stays in their language rather than reading a branch name back in English.
+    """
+    branch = task.slots.get("branch")
+    branch_part = f" في فرع {branch}" if branch else ""
+    spoken = _spoken_day(task.slots.get("requested_date"), today)
+    date_part = f" {spoken}" if spoken else ""
+    template = current_copy().ask_service or _ASK_SERVICE_TEXT
+    return fill_template(template, branch=branch_part, date=date_part) or _ASK_SERVICE_TEXT.format(
+        branch=branch_part, date=date_part
+    )
+
+
+def _spoken_day(value: str | None, today: date) -> str | None:
+    """An ISO date as a patient would say the day in Egyptian Arabic, or ``None``.
+
+    Relative for the days a booking actually lands on ("بكرة"), a weekday name otherwise, and
+    nothing at all for a value that is not a date — an empty fragment the caller drops, rather than
+    a broken sentence or an English date inside an Arabic one.
+    """
+    if not value:
+        return None
+    try:
+        day = date.fromisoformat(value)
+    except ValueError:
+        return None
+    offset = (day - today).days
+    if offset in _RELATIVE_DAYS_AR:
+        return _RELATIVE_DAYS_AR[offset]
+    return f"يوم {_WEEKDAYS_AR[day.weekday()]}"
 
 
 def _readable(task: Task, slot: str) -> str:
@@ -534,6 +679,38 @@ async def _answer_from_catalogue(
         session_count=task.slots.get("session_count"),
     )
     if result.human_summary:
+        if tool_name == _AVAILABILITY_TOOL and _offered_concrete_slots(result):
+            # A successful availability offer with real times is the *start* of a booking, not the
+            # end of a question. Completing the task now would drop it from the active set — both
+            # the store's ``get_active_task`` and the eval mirror key continuity off status — so
+            # the patient's next message (a bare time like "الساعة ٧", classified ``unclear``
+            # because out of context it is two words carrying no service, branch or date) would
+            # begin from an empty slate and hand off. Instead the *same* task is continued as a
+            # ``booking_enquiry``: it already holds the service, branch and date the booking needs
+            # and is now only missing the time it just offered, which the ``unclear``-fragment rule
+            # reads into ``requested_time`` and carries into the read-back. This is the
+            # ``availability_check`` → ``booking_enquiry`` transition of ``_COMPATIBLE_TRANSITIONS``
+            # reached by a real offer rather than by the classifier, and superset-safe for the same
+            # reason. The offer text is unchanged — the patient still reads it as a ``say``.
+            #
+            # The clinical gate first, because this is the transition that makes a booking pending:
+            # an ``availability_check`` is not ``_is_booking`` (its terminal tool is
+            # ``check_availability``, not ``confirm_booking``), so the turn-text screen in
+            # ``handle`` never ran for this turn. Both halves of the gate are applied here before
+            # the task is converted — the patient's words this turn, so a disclosure such as
+            # pregnancy is caught, and the treatment the catalogue just resolved, so a screened
+            # category such as an injectable is stopped — using the same ``screen`` call ``handle``
+            # uses and the same ``_screen_category`` the offer path uses. Either block takes the
+            # existing clinical hand-off and the task is never converted, so hold, read-back and
+            # booking are never reached. The disclosure check runs first, mirroring ``screen``'s
+            # own precedence.
+            if (block := screen(turn.text, vocabulary=vocab)) is not None:
+                return await _blocked(task, block)
+            if (block := _screen_category(result, vocab)) is not None:
+                return await _blocked(task, block)
+            task.intent = _BOOKING_INTENT
+            task.status = TaskStatus.COLLECTING
+            return OutboundAction(kind="say", text=result.human_summary), task
         task.status = TaskStatus.COMPLETED if result.ok else TaskStatus.COLLECTING
         return OutboundAction(kind="say" if result.ok else "ask", text=result.human_summary), task
     return await _hand_off(task, vocab.defaults.on_tool_failure)

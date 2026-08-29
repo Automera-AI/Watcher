@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 from packages.intents.schema import shipped_vocabularies
@@ -17,6 +17,8 @@ from apps.api.conversations.tools import (
     CloseConversation,
     ConversationCopy,
     Greet,
+    configure_conversation_copy,
+    current_copy,
 )
 from apps.api.core.knowledge import Fact
 from apps.api.schemas.envelope import InboundTurn
@@ -359,6 +361,213 @@ def test_a_turn_within_budget_still_asks() -> None:
         )
     )
     assert action.kind == "ask"
+
+
+# ── The contextual missing-service ask (DermaClub diagnosis, first fix) ───────────────────────
+
+
+def test_missing_service_is_asked_in_contextual_arabic() -> None:
+    """The screenshot's first divergence: a branch and a day given, the service missing.
+
+    The generic English "Could you please provide the service?" is replaced by an Egyptian Arabic
+    question that carries the branch and the day the task already holds, and — the point of the
+    seam — the branch and date survive the turn, so the next message resolves against them.
+    """
+    action, task = asyncio.run(
+        handle(
+            _turn("عايزة احجز بكرة في المعادي ايه المتاح؟"),
+            "availability_check",
+            0.94,
+            {"branch": "المعادي", "requested_date": "2026-09-02"},
+            None,
+            vocabulary=_CLINICS,
+            today=date(2026, 9, 1),
+        )
+    )
+    assert action.kind == "ask"
+    assert action.text == "أكيد، تحبي تحجزي أنهي خدمة في فرع المعادي بكرة؟"
+    assert "Could you please provide" not in (action.text or "")
+    assert task.slots["branch"] == "المعادي"
+    assert task.slots["requested_date"] == "2026-09-02"
+
+
+def test_missing_service_ask_degrades_without_context() -> None:
+    """Branch and day are optional context. With neither, the one template still reads."""
+    action, _ = asyncio.run(
+        handle(
+            _turn("عايزة احجز"),
+            "availability_check",
+            0.94,
+            {},
+            None,
+            vocabulary=_CLINICS,
+            today=date(2026, 9, 1),
+        )
+    )
+    assert action.kind == "ask"
+    assert action.text == "أكيد، تحبي تحجزي أنهي خدمة؟"
+
+
+def test_a_tenant_may_override_the_missing_service_wording() -> None:
+    """The ask goes through ``current_copy()``: a tenant's own phrasing wins, with the same
+    branch and day fragments filled in — the Arabic default is only what a tenant that set nothing
+    still says."""
+    previous = current_copy()
+    configure_conversation_copy(ConversationCopy(ask_service="تحبي تحجزي ايه{branch}{date}؟"))
+    try:
+        action, _ = asyncio.run(
+            handle(
+                _turn("احجز"),
+                "availability_check",
+                0.94,
+                {"branch": "المعادي", "requested_date": "2026-09-02"},
+                None,
+                vocabulary=_CLINICS,
+                today=date(2026, 9, 1),
+            )
+        )
+    finally:
+        configure_conversation_copy(previous)
+    assert action.text == "تحبي تحجزي ايه في فرع المعادي بكرة؟"
+
+
+@pytest.mark.parametrize(
+    ("intent", "extra_slots"),
+    [
+        ("price_enquiry", {}),
+        ("preparation_aftercare_info", {"instruction_phase": "preparation"}),
+    ],
+)
+def test_a_non_booking_service_intent_keeps_the_generic_ask(
+    intent: str, extra_slots: dict[str, str]
+) -> None:
+    """The contextual "…which service would you like to book?" is for the booking/availability flow
+    only. ``price_enquiry`` (a quote) and ``preparation_aftercare_info`` (a how-to) also require a
+    ``service``, but neither is booking anything — so a missing service on them must fall to the
+    generic slot prompt, never the booking-specific Arabic ask. Gating on the slot alone would give
+    a patient asking a price "which service would you like to book?", which is the wrong question.
+    """
+    action, task = asyncio.run(
+        handle(
+            _turn("عايزة اعرف"),
+            intent,
+            0.95,
+            extra_slots,
+            None,
+            vocabulary=_CLINICS,
+            today=date(2026, 9, 1),
+        )
+    )
+    assert action.kind == "ask"
+    # The booking-specific ask is not taken: the generic slot prompt is, naming the service slot.
+    assert action.text == "Could you please provide the service?"
+    assert "تحجزي" not in (action.text or "")
+    assert task.status == TaskStatus.COLLECTING
+
+
+# ── Continuing a task across the availability → booking transition ────────────────────────────
+
+
+def test_availability_to_booking_continues_the_task_and_keeps_branch_and_date() -> None:
+    """The compatible transition: an availability check that names a treatment becomes the booking.
+
+    A patient asks what is free at Maadi tomorrow (``availability_check``, branch + day, no
+    service) and the next turn names the treatment. The classifier relabels that turn
+    ``booking_enquiry``. The receptionist continues the *same* task rather than resetting it, so
+    the branch and day the availability check already collected stay on the booking — which is why
+    the booking is only missing the time it offers, not asking for a branch and day the patient
+    gave a turn ago. See ``_COMPATIBLE_TRANSITIONS``.
+
+    The clinic tools are not wired in this unit test, so the offer step ends in a hand-off; the
+    proof that the offer is actually *reached* against a real diary (the ``19:00``) is in
+    ``packages/eval/tests/test_screenshot_regression.py``. What this pins is the state carried
+    across the transition: the intent adopted and the slots kept.
+    """
+    task = Task(
+        intent="availability_check",
+        slots={"branch": "المعادي", "requested_date": "2026-09-02"},
+        vocabulary=_CLINICS,
+    )
+    _action, task = asyncio.run(
+        handle(
+            _turn("فاشيال"),
+            "booking_enquiry",
+            0.95,
+            {"service": "فاشيال"},
+            task,
+            vocabulary=_CLINICS,
+            conversation_id="conv-continues",
+            today=date(2026, 9, 1),
+        )
+    )
+    assert task.intent == "booking_enquiry"
+    assert task.slots["branch"] == "المعادي"
+    assert task.slots["requested_date"] == "2026-09-02"
+    assert task.slots["service"] == "فاشيال"
+
+
+@pytest.mark.parametrize(
+    "next_intent",
+    ["price_enquiry", "service_question", "greeting", "thanks_closing"],
+)
+def test_an_unrelated_intent_change_does_not_inherit_booking_state(next_intent: str) -> None:
+    """The other side of the guard: only the one compatible pair continues a task.
+
+    A booking task holding a branch, a day and a service must not have any of it survive into an
+    unrelated request. If the patient stops booking and asks a price, greets, or thanks and leaves,
+    the new task starts clean — the branch and day were part of the booking, not the new subject.
+    A reset that leaked them would quote or answer against a context the patient never gave for
+    that question, which is exactly the generic cross-intent merging this change does not build.
+    """
+    task = Task(
+        intent="booking_enquiry",
+        slots={"branch": "المعادي", "requested_date": "2026-09-02", "service": "فاشيال"},
+        vocabulary=_CLINICS,
+    )
+    _action, task = asyncio.run(
+        handle(
+            _turn("سؤال تاني"),
+            next_intent,
+            0.95,
+            {},
+            task,
+            vocabulary=_CLINICS,
+            today=date(2026, 9, 1),
+        )
+    )
+    assert task.intent == next_intent
+    assert "branch" not in task.slots
+    assert "requested_date" not in task.slots
+    assert "service" not in task.slots
+
+
+def test_the_reverse_transition_does_not_continue_the_task() -> None:
+    """The compatible pair is directed: ``availability_check`` → ``booking_enquiry`` only.
+
+    A booking that is relabelled ``availability_check`` is not the same journey continuing — the
+    time it had started to pin is not a slot an availability check collects — so it resets rather
+    than dragging a half-finished booking's state into a browse.
+    """
+    task = Task(
+        intent="booking_enquiry",
+        slots={"branch": "المعادي", "requested_date": "2026-09-02", "service": "فاشيال"},
+        vocabulary=_CLINICS,
+    )
+    _action, task = asyncio.run(
+        handle(
+            _turn("ايه المتاح تاني؟"),
+            "availability_check",
+            0.94,
+            {},
+            task,
+            vocabulary=_CLINICS,
+            today=date(2026, 9, 1),
+        )
+    )
+    assert task.intent == "availability_check"
+    assert "branch" not in task.slots
+    assert "requested_date" not in task.slots
+    assert "service" not in task.slots
 
 
 # ── Tenant conversation copy ─────────────────────────────────────────────────────────────────
