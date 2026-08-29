@@ -659,7 +659,7 @@ async def _answer_from_catalogue(
     """Run ``check_availability`` or ``quote_price`` and say what came back.
 
     An unresolved or ambiguous service is not a failure to be hidden: the tool composes the
-    question ("Which did you mean: Basic Facial / Facial?") and it is asked, because picking one
+    question ("تحبي أنهي واحدة فيهم: Basic Facial / Facial؟") and it is asked, because picking one
     would quote a real price for a treatment nobody asked about. A tool that came back with
     nothing to say at all falls through to ``on_tool_failure``, which fetches a person — the
     vocabulary's own answer, and the only safe one when a quote cannot be sourced.

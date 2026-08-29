@@ -368,6 +368,18 @@ def _money(minor: int, currency: str) -> str:
     return f"{major:,}.{remainder:02d} {currency}" if remainder else f"{major:,} {currency}"
 
 
+#: Which of several catalogue items the patient meant, in Egyptian Arabic. Reached when the words
+#: match more than one row — bare "برايم ليز" is the single session, the six-session package and
+#: the twelve-session one, and picking any of them books a treatment the patient did not name, so
+#: the only safe answer is to ask. The tenant may replace it (``ConversationCopy.choose_one`` /
+#: ``TENANT_CHOOSE_ONE``); the default is Arabic in code, like the missing-service ask
+#: (``_ASK_SERVICE_TEXT``), so the clarifying question is asked in the patient's language without
+#: any configuration rather than in the English constant it used to fall back to. ``{options}`` is
+#: the candidate names joined with " / "; those names stay English, the pre-existing gap the demo
+#: does not widen.
+_CHOOSE_ONE_TEXT = "تحبي أنهي واحدة فيهم: {options}؟"
+
+
 class _ClinicTool(Tool):
     """Shared wiring for the four tools that read the imported catalogue.
 
@@ -398,13 +410,13 @@ class _ClinicTool(Tool):
     def _choose(self, options: Sequence[str]) -> ToolResult:
         """Ask which of several catalogue items was meant. Never pick one."""
         listed = " / ".join(options)
-        template = self._copy.choose_one or "Which did you mean: {options}?"
+        template = self._copy.choose_one or _CHOOSE_ONE_TEXT
         return ToolResult(
             ok=False,
             error="ambiguous",
             data={"options": list(options)},
             human_summary=fill_template(template, options=listed)
-            or f"Which did you mean: {listed}?",
+            or _CHOOSE_ONE_TEXT.format(options=listed),
         )
 
     def _resolve(
