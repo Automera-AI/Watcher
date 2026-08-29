@@ -1,12 +1,14 @@
 """Task 4: the smallest safe handling of a laser request for the DermaClub demo.
 
-The Minimum Conversation plan assumed a bare "ليزر" reached several laser packages and so already
-asked "which one?". The later diagnosis found it did not: against the client's own workbook-derived
-diary the bare word resolves to *nothing at all* — the three Primelase rows carry "برايم ليز…"
-aliases, not "ليزر" — so it hands off rather than clarifying. That fact is taken as authoritative
-here and is **not** fixed by adding aliases, editing the catalogue, or changing resolution; it is
-pinned by ``test_bare_laser_is_unresolved_on_current_data`` so a later "fix" that quietly makes it
-resolve trips this test and has to be a decision rather than an accident.
+The authoritative behaviour of a bare "ليزر" belongs to the full DermaClub workbook, where the word
+is *ambiguous* across the clinic's laser services and must never silently choose one. That invariant
+is pinned at the authoritative-data level, against the workbook itself, in
+``apps/api/tests/test_clinic_workbook_integration.py`` — not here. The reduced eval diary in
+``packages/eval/fixtures/clinic_diary.json`` is only a two-branch, one-day *cut* of that workbook,
+and happens to carry none of those laser rows, so a claim about what bare "ليزر" does against the
+cut is an accident of the subset, not a contract: regenerating the fixture from a fuller slice could
+change it without any production behaviour changing. So this file makes no assertion about the bare
+word.
 
 What Task 4 does change is one thing: the genuinely ambiguous laser path — bare "برايم ليز", which
 *is* three packages — now asks its "which one?" in Egyptian Arabic through the existing
@@ -23,8 +25,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from apps.api.clinic.catalogue import resolve_service
-
 from packages.eval.journeys import (
     FixtureDiary,
     JourneyCase,
@@ -38,20 +38,6 @@ from packages.intents.schema import vocabulary_for
 ROOT = Path(__file__).resolve().parents[1]
 DIARY = ROOT / "fixtures/clinic_diary.json"
 CLINICS = vocabulary_for("clinics")
-
-
-def test_bare_laser_is_unresolved_on_current_data() -> None:
-    """Records the diagnosis's authoritative finding: bare "ليزر" reaches no catalogue row.
-
-    This is the fact the demo is built around, not a bug to repair. If it ever starts resolving
-    (an alias added, the catalogue edited, resolution loosened) this assertion fails, which is the
-    point — such a change is out of Task 4's scope and must be a deliberate decision.
-    """
-    diary = FixtureDiary.from_path(DIARY)
-    match = resolve_service("ليزر", diary.services)
-    assert match.found is None
-    assert match.ambiguous is False
-    assert match.candidates == ()
 
 
 #: A genuinely ambiguous laser request: bare "برايم ليز" is the single session, the six-session
