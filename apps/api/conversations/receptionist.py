@@ -692,6 +692,22 @@ async def _answer_from_catalogue(
             # ``availability_check`` → ``booking_enquiry`` transition of ``_COMPATIBLE_TRANSITIONS``
             # reached by a real offer rather than by the classifier, and superset-safe for the same
             # reason. The offer text is unchanged — the patient still reads it as a ``say``.
+            #
+            # The clinical gate first, because this is the transition that makes a booking pending:
+            # an ``availability_check`` is not ``_is_booking`` (its terminal tool is
+            # ``check_availability``, not ``confirm_booking``), so the turn-text screen in
+            # ``handle`` never ran for this turn. Both halves of the gate are applied here before
+            # the task is converted — the patient's words this turn, so a disclosure such as
+            # pregnancy is caught, and the treatment the catalogue just resolved, so a screened
+            # category such as an injectable is stopped — using the same ``screen`` call ``handle``
+            # uses and the same ``_screen_category`` the offer path uses. Either block takes the
+            # existing clinical hand-off and the task is never converted, so hold, read-back and
+            # booking are never reached. The disclosure check runs first, mirroring ``screen``'s
+            # own precedence.
+            if (block := screen(turn.text, vocabulary=vocab)) is not None:
+                return await _blocked(task, block)
+            if (block := _screen_category(result, vocab)) is not None:
+                return await _blocked(task, block)
             task.intent = _BOOKING_INTENT
             task.status = TaskStatus.COLLECTING
             return OutboundAction(kind="say", text=result.human_summary), task

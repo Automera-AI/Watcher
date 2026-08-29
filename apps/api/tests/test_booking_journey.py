@@ -239,6 +239,56 @@ def directory(monkeypatch: pytest.MonkeyPatch) -> _FakeDirectory:
     return fake
 
 
+#: An injectable — a ``screened_categories`` entry in ``clinics.yaml``. Booking one is a
+#: clinician's decision whatever the patient says, so an availability offer for it must hand off at
+#: catalogue resolution rather than be continued as a pending booking. Given a real alias and a
+#: free slot so the offer path reaches a concrete result carrying ``service_category``.
+_FILLER = Service(
+    code="DT050",
+    name="Filler",
+    price_minor=500_000,
+    duration_minutes=30,
+    category="Injectables",
+    aliases=("فيلر",),
+)
+
+
+class _InjectableDirectory(_FakeDirectory):
+    """A diary that offers the catalogue plus one free injectable slot."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            slots=[
+                AvailabilitySlot(
+                    external_id="F00001",
+                    branch_external_id="DC01",
+                    service_code="DT050",
+                    starts_at=_cairo(15),
+                    ends_at=_cairo(15, 30),
+                )
+            ]
+        )
+
+    def list_services(self, tenant_id: str, *, active_only: bool = True) -> list[Service]:
+        return [*SERVICES, _FILLER]
+
+
+@pytest.fixture
+def injectable_directory(monkeypatch: pytest.MonkeyPatch) -> _InjectableDirectory:
+    """The booking tools wired to a diary whose only free slot is a screened injectable."""
+    fake = _InjectableDirectory()
+    copy = ConversationCopy(closing_booking_confirmed="Booked ✅ ref {booking_reference}.")
+    for tool in (
+        CloseConversation(copy),
+        CheckAvailability(fake, timezone=CAIRO, copy=copy, clock=lambda: NOW),
+        QuotePrice(fake, timezone=CAIRO, copy=copy, clock=lambda: NOW),
+        HoldSlot(fake, timezone=CAIRO, copy=copy, clock=lambda: NOW),
+        ConfirmBooking(fake, timezone=CAIRO, reference_prefix="DC", copy=copy, clock=lambda: NOW),
+    ):
+        monkeypatch.setitem(REGISTRY, tool.name, tool)
+    return fake
+
+
 def _turn(text: str) -> InboundTurn:
     return InboundTurn(
         tenant_id=TENANT_ID,
@@ -569,6 +619,58 @@ def test_an_unrelated_intent_after_an_offer_starts_fresh_and_inherits_no_booking
     assert "requested_date" not in task.slots
     assert action.kind == "say"
     assert "15,000" in (action.text or "")
+
+
+# ── Task 3 safety: the clinical gate on the availability → pending-booking transition ─────────
+
+
+def test_a_disclosure_on_a_successful_availability_offer_hands_off_and_never_books(
+    directory: _FakeDirectory,
+) -> None:
+    """A pregnancy disclosure on the availability turn must stop the booking before it begins.
+
+    "أنا حامل، في ميعاد فاشيال ...؟" is an ``availability_check`` — its terminal tool is
+    ``check_availability``, not ``confirm_booking`` — so it is not ``_is_booking`` and the turn-text
+    screen in ``handle`` never ran for it. The facial has free slots, so the offer is concrete and
+    would otherwise be continued as a pending ``booking_enquiry``. The disclosure has to be caught
+    at that transition: the conversation hands off, the task is never relabelled a booking, and
+    nothing is written.
+    """
+    action, task = _say(
+        "أنا حامل، في ميعاد فاشيال بيسك في المعادي بكرة؟",
+        "availability_check",
+        {"service": "فاشيال بيسك", "branch": "المعادي", "requested_date": "2026-09-02"},
+    )
+
+    assert action.kind == "handoff"
+    assert task.status is TaskStatus.HANDED_OFF
+    assert task.intent == "availability_check"  # never converted to a pending booking
+    assert directory.holds == {}
+    assert directory.bookings == []
+
+
+def test_a_screened_category_availability_offer_hands_off_before_hold_or_read_back(
+    injectable_directory: _InjectableDirectory,
+) -> None:
+    """A screened treatment (an injectable) with real availability must hand off at resolution.
+
+    Injectables are ``screened_categories`` in ``clinics.yaml`` — a clinician's decision whatever
+    the patient says. The diary holds a free filler slot, so the availability check returns a
+    concrete offer carrying ``service_category`` "Injectables". That offer must not be continued as
+    a pending booking: the category is screened the moment the catalogue names it, so the
+    conversation hands off immediately, and hold and read-back are never reached.
+    """
+    action, task = _say(
+        "في ميعاد فيلر في المعادي بكرة؟",
+        "availability_check",
+        {"service": "فيلر", "branch": "المعادي", "requested_date": "2026-09-02"},
+    )
+
+    assert action.kind == "handoff"
+    assert task.status is TaskStatus.HANDED_OFF
+    assert task.intent == "availability_check"  # not converted to a pending booking
+    assert injectable_directory.holds == {}  # never reached the hold placed at read-back
+    assert injectable_directory.bookings == []
 
 
 def test_confirming_twice_gives_the_same_appointment_back(directory: _FakeDirectory) -> None:
