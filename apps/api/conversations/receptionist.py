@@ -102,6 +102,13 @@ _SERVICE_ASK_INTENTS = frozenset(
     {IntentType.AVAILABILITY_CHECK.value, IntentType.BOOKING_ENQUIRY.value}
 )
 
+#: The intent a successful availability offer continues into. An ``availability_check`` that came
+#: back with concrete, bookable times has answered the patient's question, but on the demo flow the
+#: question is the first half of a booking: the patient's next message names one of the offered
+#: times, and that reply is continued as this intent so the booking it belongs to can collect it.
+#: See ``_answer_from_catalogue``.
+_BOOKING_INTENT = IntentType.BOOKING_ENQUIRY.value
+
 #: The intent transitions that continue the task in flight instead of resetting it. A change of
 #: classified intent normally opens a fresh task — the guest asked about something else, and the
 #: old job's slots do not belong to the new one. One directed pair is the exception: a patient who
@@ -426,6 +433,17 @@ def _continues_task(previous_intent: str, new_intent: str) -> bool:
     return (previous_intent, new_intent) in _COMPATIBLE_TRANSITIONS
 
 
+def _offered_concrete_slots(result: ToolResult) -> bool:
+    """Whether an availability result actually put bookable times in front of the patient.
+
+    True only for a successful offer carrying real times — the one case that is the start of a
+    booking. "Nothing free" (``ok`` False, empty ``times``), an ambiguous service (a "which did you
+    mean?" question) and an unresolved one all return False, so none of them is continued as a
+    pending booking: they complete or re-ask exactly as before.
+    """
+    return result.ok and bool((result.data or {}).get("times"))
+
+
 def _is_an_answer(text: str | None) -> bool:
     """Whether a message is a short yes or no rather than a new request."""
     return reads_as_yes(text or "") or reads_as_no(text or "")
@@ -661,6 +679,22 @@ async def _answer_from_catalogue(
         session_count=task.slots.get("session_count"),
     )
     if result.human_summary:
+        if tool_name == _AVAILABILITY_TOOL and _offered_concrete_slots(result):
+            # A successful availability offer with real times is the *start* of a booking, not the
+            # end of a question. Completing the task now would drop it from the active set — both
+            # the store's ``get_active_task`` and the eval mirror key continuity off status — so
+            # the patient's next message (a bare time like "الساعة ٧", classified ``unclear``
+            # because out of context it is two words carrying no service, branch or date) would
+            # begin from an empty slate and hand off. Instead the *same* task is continued as a
+            # ``booking_enquiry``: it already holds the service, branch and date the booking needs
+            # and is now only missing the time it just offered, which the ``unclear``-fragment rule
+            # reads into ``requested_time`` and carries into the read-back. This is the
+            # ``availability_check`` → ``booking_enquiry`` transition of ``_COMPATIBLE_TRANSITIONS``
+            # reached by a real offer rather than by the classifier, and superset-safe for the same
+            # reason. The offer text is unchanged — the patient still reads it as a ``say``.
+            task.intent = _BOOKING_INTENT
+            task.status = TaskStatus.COLLECTING
+            return OutboundAction(kind="say", text=result.human_summary), task
         task.status = TaskStatus.COMPLETED if result.ok else TaskStatus.COLLECTING
         return OutboundAction(kind="say" if result.ok else "ask", text=result.human_summary), task
     return await _hand_off(task, vocab.defaults.on_tool_failure)
