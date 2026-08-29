@@ -150,6 +150,21 @@ class ConversationCopy:
     booking_taken: str | None = None
     """The slot went while the patient was answering. ``{service}``, ``{branch}``, ``{date}``."""
 
+    ask_service: str | None = None
+    """The question asked when a booking is missing only its service. ``{branch}``, ``{date}``.
+
+    Composed by the receptionist rather than a tool, like the read-back and the confirmation, and
+    for the same reason it was the last English leak on the demo turns: the patient names a branch
+    and a day but no treatment, and the generic "Could you please provide the service?" answered
+    that in English, context-blind, in the middle of an otherwise-configured Arabic conversation.
+
+    Both placeholders are *pre-composed fragments*, not raw values: the receptionist fills them
+    with the branch and day it already holds — "في فرع المعادي", "بكرة" — including the connective
+    words, and with an empty string when that detail is not known yet, so the one template reads
+    correctly whether it has both, one, or neither. A tenant overriding this writes the sentence
+    around ``{branch}{date}`` and lets those fragments carry whatever context the turn has.
+    """
+
     confirm_read_back: str | None = None
     """The read-back before an appointment is written. ``{details}``, ``{values}``.
 

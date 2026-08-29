@@ -159,6 +159,12 @@ class Settings(ChannelCredentials):
     tenant_choose_one: str | None = None
     tenant_booking_taken: str | None = None
 
+    # The missing-service question, composed by the receptionist from the branch and day it already
+    # holds. Its Arabic default lives in `receptionist.py` — no env var is required for the demo to
+    # ask it in the patient's language — and this exists only so a tenant can set the phrasing in
+    # its own voice, the same seam every other line above goes through.
+    tenant_ask_service: str | None = None
+
     # The two sentences the receptionist composes itself rather than getting from a tool: the
     # read-back before an appointment is written, and the confirmation that it was. They had no
     # tenant wording until the booking journey was run end to end and it turned out that two of
@@ -320,6 +326,7 @@ class Settings(ChannelCredentials):
             price_quote=self.tenant_price_quote,
             choose_one=self.tenant_choose_one,
             booking_taken=self.tenant_booking_taken,
+            ask_service=self.tenant_ask_service,
             confirm_read_back=self.tenant_confirm_read_back,
             booking_confirmed=self.tenant_booking_confirmed,
         )

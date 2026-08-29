@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 from packages.intents.schema import shipped_vocabularies
@@ -17,6 +17,8 @@ from apps.api.conversations.tools import (
     CloseConversation,
     ConversationCopy,
     Greet,
+    configure_conversation_copy,
+    current_copy,
 )
 from apps.api.core.knowledge import Fact
 from apps.api.schemas.envelope import InboundTurn
@@ -359,6 +361,74 @@ def test_a_turn_within_budget_still_asks() -> None:
         )
     )
     assert action.kind == "ask"
+
+
+# ── The contextual missing-service ask (DermaClub diagnosis, first fix) ───────────────────────
+
+
+def test_missing_service_is_asked_in_contextual_arabic() -> None:
+    """The screenshot's first divergence: a branch and a day given, the service missing.
+
+    The generic English "Could you please provide the service?" is replaced by an Egyptian Arabic
+    question that carries the branch and the day the task already holds, and — the point of the
+    seam — the branch and date survive the turn, so the next message resolves against them.
+    """
+    action, task = asyncio.run(
+        handle(
+            _turn("عايزة احجز بكرة في المعادي ايه المتاح؟"),
+            "availability_check",
+            0.94,
+            {"branch": "المعادي", "requested_date": "2026-09-02"},
+            None,
+            vocabulary=_CLINICS,
+            today=date(2026, 9, 1),
+        )
+    )
+    assert action.kind == "ask"
+    assert action.text == "أكيد، تحبي تحجزي أنهي خدمة في فرع المعادي بكرة؟"
+    assert "Could you please provide" not in (action.text or "")
+    assert task.slots["branch"] == "المعادي"
+    assert task.slots["requested_date"] == "2026-09-02"
+
+
+def test_missing_service_ask_degrades_without_context() -> None:
+    """Branch and day are optional context. With neither, the one template still reads."""
+    action, _ = asyncio.run(
+        handle(
+            _turn("عايزة احجز"),
+            "availability_check",
+            0.94,
+            {},
+            None,
+            vocabulary=_CLINICS,
+            today=date(2026, 9, 1),
+        )
+    )
+    assert action.kind == "ask"
+    assert action.text == "أكيد، تحبي تحجزي أنهي خدمة؟"
+
+
+def test_a_tenant_may_override_the_missing_service_wording() -> None:
+    """The ask goes through ``current_copy()``: a tenant's own phrasing wins, with the same
+    branch and day fragments filled in — the Arabic default is only what a tenant that set nothing
+    still says."""
+    previous = current_copy()
+    configure_conversation_copy(ConversationCopy(ask_service="تحبي تحجزي ايه{branch}{date}؟"))
+    try:
+        action, _ = asyncio.run(
+            handle(
+                _turn("احجز"),
+                "availability_check",
+                0.94,
+                {"branch": "المعادي", "requested_date": "2026-09-02"},
+                None,
+                vocabulary=_CLINICS,
+                today=date(2026, 9, 1),
+            )
+        )
+    finally:
+        configure_conversation_copy(previous)
+    assert action.text == "تحبي تحجزي ايه في فرع المعادي بكرة؟"
 
 
 # ── Tenant conversation copy ─────────────────────────────────────────────────────────────────

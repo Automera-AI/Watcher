@@ -18,17 +18,15 @@ receptionist and the real tools against the client's own diary fixture.
 (``فاشيال`` → ``Facial``), already reaches a real workbook-backed offer, so the machinery
 downstream of the ask works; the defect is the ask itself.
 
-Marked ``xfail(strict=True)`` deliberately, the same way the journey set carries a declared
-gap: it documents the intended behaviour, fails today, and the strict marker turns an
-unexpected pass into a failure — so when the Arabic contextual ask lands, this marker has to
-come off. Do not make it pass by weakening the assertions.
+The contextual Arabic ask has landed (``receptionist.py`` ``_ask_for_service``), so this now
+passes and the ``xfail`` marker has been removed. Turn 1 comes back as the Arabic question that
+carries the branch and day the task already holds, not the English slot prompt. Keep the
+assertions as they are — the exclusion of the English string is what proves the leak is gone.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-
-import pytest
 
 from packages.eval.journeys import (
     FixtureDiary,
@@ -85,12 +83,6 @@ SCREENSHOT = JourneyCase(
 )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="receptionist asks for a missing service in hardcoded English "
-    "(receptionist.py handle: 'Could you please provide the {slot}?'); "
-    "when the contextual Arabic ask lands, remove this marker",
-)
 def test_the_screenshot_flow_answers_the_missing_service_in_arabic() -> None:
     diary = FixtureDiary.from_path(DIARY)
     outcome = run_journey(SCREENSHOT, diary, vocabulary=CLINICS)

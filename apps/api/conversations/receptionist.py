@@ -85,6 +85,12 @@ _BOOKING_TOOL = "confirm_booking"
 #: system did not return" can be kept while still collecting a time.
 _TIME_SLOT = "requested_time"
 
+#: The treatment slot. When it is what is missing, the receptionist asks a contextual question in
+#: the patient's language rather than the generic English slot prompt — the branch and day are
+#: already known, so "which treatment, at Maadi, tomorrow?" is what a receptionist would ask. See
+#: ``_ask_for_service``.
+_SERVICE_SLOT = "service"
+
 #: Where the durable booking reference is kept once one exists. Not a vocabulary slot — nothing
 #: extracts it from a message — but it lives with the task because that is what survives to the
 #: closing turn, which is the only place it is read (``CloseConversation``).
@@ -103,6 +109,30 @@ _BOOKED_TEXT = "That's booked. Your reference is {booking_reference}"
 #: The read-back. ``{details}`` carries the labels the default reads with; ``{values}`` is the
 #: same list without them, for a template in a language those English labels do not belong in.
 _READ_BACK_TEXT = "Just to confirm: {details}?"
+
+#: The missing-service question, in Egyptian Arabic. Composed here rather than left to the generic
+#: English slot prompt, because this is the one ask on the demo's booking flow and the branch and
+#: day it should carry are already in the task. ``{branch}`` and ``{date}`` are pre-composed
+#: fragments — "في فرع المعادي", "بكرة", or empty — so the sentence reads whether the turn has
+#: both, one, or neither. The tenant may replace it (``ConversationCopy.ask_service``); the default
+#: is Arabic in code so no configuration is required for the patient to be asked in their language.
+_ASK_SERVICE_TEXT = "أكيد، تحبي تحجزي أنهي خدمة{branch}{date}؟"
+
+#: A stored date spoken back the way the patient said it, in Egyptian Arabic. The task keeps
+#: ``requested_date`` as an ISO string because that is what a booking acts on; reading "2026-09-02"
+#: back is asking someone to confirm a string, and rendering it as "Wednesday 02 September" drops
+#: English day and month names into an Arabic sentence — the pre-existing leak the demo has to
+#: stop, not extend. Relative days cover the demo; a weekday name covers the rest without English.
+_RELATIVE_DAYS_AR: dict[int, str] = {0: "النهاردة", 1: "بكرة", 2: "بعد بكرة"}
+_WEEKDAYS_AR: dict[int, str] = {
+    0: "الاتنين",
+    1: "التلات",
+    2: "الأربع",
+    3: "الخميس",
+    4: "الجمعة",
+    5: "السبت",
+    6: "الأحد",
+}
 
 #: Tools that produce their reply directly from ``human_summary`` and cannot fail. ``greet`` and
 #: ``close_conversation`` are the two ends of a conversation, and neither has anything to look up.
@@ -244,6 +274,16 @@ async def handle(
             # Not an open question. The one detail still missing is *which* appointment, and the
             # only honest way to collect it is to offer what the diary actually holds.
             return await _offer_times(task, turn, conversation_id, vocab)
+        if slot == _SERVICE_SLOT:
+            # The one ask on the booking flow, and the last English leak on it. Asked in Arabic,
+            # carrying the branch and day the task already holds — not the generic slot prompt.
+            return (
+                OutboundAction(
+                    kind="ask",
+                    text=_ask_for_service(task, today or turn.received_at.date()),
+                ),
+                task,
+            )
         return (
             OutboundAction(
                 kind="ask",
@@ -367,6 +407,45 @@ def _read_as_answer(
         vocabulary=vocab,
         today=today or turn.received_at.date(),
     )
+
+
+def _ask_for_service(task: Task, today: date) -> str:
+    """The missing-service question, rendered from the branch and day the task already holds.
+
+    Both are optional: a booking can reach here with only one of them, or neither, and the sentence
+    has to read in every case. So the branch and day are turned into *fragments* — "في فرع المعادي",
+    "بكرة", or empty — and the template carries the connective words with them, the same way
+    ``_read_back`` composes its own sentence. Nothing is resolved against the catalogue here (that
+    is the tool's job on the next turn): the branch is the patient's own word, kept as they wrote
+    it, so the question stays in their language rather than reading a branch name back in English.
+    """
+    branch = task.slots.get("branch")
+    branch_part = f" في فرع {branch}" if branch else ""
+    spoken = _spoken_day(task.slots.get("requested_date"), today)
+    date_part = f" {spoken}" if spoken else ""
+    template = current_copy().ask_service or _ASK_SERVICE_TEXT
+    return fill_template(template, branch=branch_part, date=date_part) or _ASK_SERVICE_TEXT.format(
+        branch=branch_part, date=date_part
+    )
+
+
+def _spoken_day(value: str | None, today: date) -> str | None:
+    """An ISO date as a patient would say the day in Egyptian Arabic, or ``None``.
+
+    Relative for the days a booking actually lands on ("بكرة"), a weekday name otherwise, and
+    nothing at all for a value that is not a date — an empty fragment the caller drops, rather than
+    a broken sentence or an English date inside an Arabic one.
+    """
+    if not value:
+        return None
+    try:
+        day = date.fromisoformat(value)
+    except ValueError:
+        return None
+    offset = (day - today).days
+    if offset in _RELATIVE_DAYS_AR:
+        return _RELATIVE_DAYS_AR[offset]
+    return f"يوم {_WEEKDAYS_AR[day.weekday()]}"
 
 
 def _readable(task: Task, slot: str) -> str:
