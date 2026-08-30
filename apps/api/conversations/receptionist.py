@@ -53,7 +53,7 @@ The remaining ``terminal_tool`` values (``lookup_reservation``, ``lookup_appoint
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 
 from packages.intents.schema import Vocabulary, default_vocabulary
 
@@ -442,6 +442,47 @@ def _offered_concrete_slots(result: ToolResult) -> bool:
     pending booking: they complete or re-ask exactly as before.
     """
     return result.ok and bool((result.data or {}).get("times"))
+
+
+def resumed_offer_is_stale(
+    task: Task, offered_at: datetime | None, now: datetime, vocab: Vocabulary
+) -> bool:
+    """Whether a resumed booking's availability offer has aged past the clinic's freshness window.
+
+    The narrow guard for the one state a concrete availability offer leaves behind (see
+    ``_answer_from_catalogue``): a ``booking_enquiry`` kept ``COLLECTING`` with service, branch and
+    date already held and only ``requested_time`` still missing — the pending booking waiting for
+    the patient to name one of the times just offered. A much later bare reply such as "الساعة ٧"
+    must not be read against that old offer, because the diary it quoted has moved on: resuming it
+    would let stale service/branch/date context reach a hold, read-back or booking.
+
+    Every other task returns ``False`` and is resumed exactly as before — an ``availability_check``,
+    a booking still missing its service or branch (``next_step`` asks for those, not the time), a
+    read-back awaiting a yes/no, or any finished job — so an ordinary clarification never expires on
+    this rule; only the concrete-offer "waiting for ``requested_time``" state does.
+
+    The window is the clinic's existing ``quoting.max_age_seconds`` — the same contract the offer is
+    quoted under, not a second TTL — and age is measured from when the offer was persisted
+    (``offered_at``) to the inbound turn's own timestamp (``now``), so the decision is deterministic
+    and never reads the machine clock. A missing timestamp is treated as fresh: with nothing to
+    measure, dropping a live booking would be the worse failure.
+    """
+    if task.intent != _BOOKING_INTENT or task.status != TaskStatus.COLLECTING:
+        return False
+    if task.next_step() != ("ask", _TIME_SLOT):
+        return False
+    if offered_at is None:
+        return False
+    return _seconds_between(offered_at, now) > vocab.quoting.max_age_seconds
+
+
+def _seconds_between(earlier: datetime, later: datetime) -> float:
+    """Elapsed seconds, tolerating the naive datetimes SQLite hands back (read as UTC)."""
+    if earlier.tzinfo is None:
+        earlier = earlier.replace(tzinfo=UTC)
+    if later.tzinfo is None:
+        later = later.replace(tzinfo=UTC)
+    return (later - earlier).total_seconds()
 
 
 def _is_an_answer(text: str | None) -> bool:

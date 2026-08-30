@@ -31,6 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.audit.log import AuditEntry
+from apps.api.conversations.receptionist import resumed_offer_is_stale
 from apps.api.conversations.task import Task, TaskStatus
 from apps.api.db.conversation_repo import ConversationRepository, task_from_row, task_to_row
 from apps.api.db.engine import TenantScope
@@ -282,9 +283,31 @@ class SqlAlchemyConversationStore:
             conversation.last_turn_at = turn.received_at
 
             row = repo.get_active_task(conversation.id)
+            task = task_from_row(row, vocabulary=self._vocabulary) if row is not None else None
+
+            if (
+                row is not None
+                and task is not None
+                and resumed_offer_is_stale(
+                    task, row.updated_at or row.created_at, turn.received_at, self._vocabulary
+                )
+            ):
+                # A concrete availability offer this booking is still waiting on has aged past the
+                # clinic's `quoting.max_age_seconds`. The diary it quoted has moved on, so the offer
+                # is not resumed: the stale task leaves the active set here, at the continuity
+                # boundary, before the receptionist sees it. The new turn is then handled fresh and
+                # cannot inherit the old service/branch/date into a hold, read-back or booking. Only
+                # this one post-offer "waiting for requested_time" state is affected — an ordinary
+                # clarification (a booking still missing its service or branch, any other collecting
+                # job) is left untouched. See `resumed_offer_is_stale`.
+                row.status = TaskStatus.ABANDONED.value
+                repo.save_task(row)
+                row = None
+                task = None
+
             return ConversationState(
                 conversation_id=str(conversation.id),
-                task=(task_from_row(row, vocabulary=self._vocabulary) if row is not None else None),
+                task=task,
                 # Only replies sent in service of the job now in flight count against its
                 # clarifying-turn budget; see `count_outbound_turns`. With no job in flight,
                 # nothing has been spent yet: the budget belongs to the task the next message is
