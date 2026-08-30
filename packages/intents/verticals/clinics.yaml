@@ -365,7 +365,15 @@ defaults:
   # Read-only and handoff intents do not inherit confirmation requirements. Each autonomous
   # mutating intent declares its own exact confirmation slots.
   confirm_before_acting: []
-  max_clarifying_turns: 2
+  # Pre-demo Step 2 (demo-safe clarification limit). The full booking journey spends a reply on
+  # every step it must pass through — service, branch, date, the availability offer that collects
+  # the time, and the read-back — so a task's clarifying-turn budget has to be large enough that a
+  # *progressing* booking is never cut short at the date or the offer. Five is the smallest value
+  # that lets `service → branch → date → availability → time → confirmation` complete, and it is
+  # deliberately clinic-specific: the holiday-home default stays lower. This is an interim
+  # measure. It counts every reply, progressing or not, so a genuinely stuck patient still reaches
+  # the hand-off — just after more turns; true progress-aware accounting is post-demo work.
+  max_clarifying_turns: 5
   on_max_turns: handoff_to_human
   on_tool_failure: handoff_to_human
   on_no_knowledge: handoff_to_human

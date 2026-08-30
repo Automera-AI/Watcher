@@ -20,6 +20,7 @@ from apps.api.conversations.slots import (
     normalise_slots,
     parse_date,
     parse_time,
+    strip_unsupported_temporal_slots,
 )
 
 #: A Monday. The demo week runs 31 Aug – 6 Sep with Friday 4 Sep absent from the diary.
@@ -239,6 +240,171 @@ def test_the_holiday_home_vertical_still_normalises_its_own_dates() -> None:
         today=TODAY,
     )
     assert resolved == {"check_in": "2026-09-04", "check_out": "2026-09-01", "guests": "4"}
+
+
+# ── the temporal provenance guard (pre-demo Step 3) ──────────────────────────────────────────
+
+
+def test_a_date_the_message_does_not_state_is_dropped() -> None:
+    """The live failure: a classifier reports a date the patient never wrote. It must not pass."""
+    guarded = strip_unsupported_temporal_slots(
+        {"service": "فاشيال", "branch": "المعادي", "requested_date": "2026-09-02"},
+        "المواعيد المتاحة ايه",
+        today=TODAY,
+    )
+    assert guarded == {"service": "فاشيال", "branch": "المعادي"}
+
+
+def test_a_date_the_message_states_as_a_standalone_word_is_kept() -> None:
+    guarded = strip_unsupported_temporal_slots(
+        {"requested_date": "2026-09-01"}, "بكرة", today=TODAY
+    )
+    assert guarded == {"requested_date": "2026-09-01"}
+
+
+def test_a_date_stated_inside_a_longer_sentence_is_kept() -> None:
+    """A relative day the parser only knows as a whole value is still found in a sentence."""
+    guarded = strip_unsupported_temporal_slots(
+        {"service": "ليزر", "branch": "الشيخ زايد", "requested_date": "2026-09-01"},
+        "عاوزة أحجز ليزر في الشيخ زايد بكرة",
+        today=TODAY,
+    )
+    assert guarded["requested_date"] == "2026-09-01"
+
+
+def test_a_multi_word_relative_day_in_a_sentence_is_kept() -> None:
+    guarded = strip_unsupported_temporal_slots(
+        {"requested_date": "2026-09-02"}, "احجزيلي بعد بكرة", today=TODAY
+    )
+    assert guarded == {"requested_date": "2026-09-02"}
+
+
+def test_a_date_that_resolves_to_a_different_day_than_the_message_is_dropped() -> None:
+    """A message says tomorrow; a fabricated value says a different day. The value loses."""
+    guarded = strip_unsupported_temporal_slots(
+        {"requested_date": "2026-09-05"}, "بكرة", today=TODAY
+    )
+    assert guarded == {}
+
+
+def test_a_time_the_message_states_is_kept_and_a_fabricated_one_is_dropped() -> None:
+    kept = strip_unsupported_temporal_slots(
+        {"requested_time": "18:00"}, "احجزيلي الساعة ٦", today=TODAY
+    )
+    assert kept == {"requested_time": "18:00"}
+
+    dropped = strip_unsupported_temporal_slots(
+        {"requested_time": "18:00"}, "المواعيد المتاحة ايه", today=TODAY
+    )
+    assert dropped == {}
+
+
+def test_service_and_branch_are_never_touched_by_the_temporal_guard() -> None:
+    """The guard is temporal only: earlier-established, non-temporal slots pass through intact."""
+    guarded = strip_unsupported_temporal_slots(
+        {"service": "فاشيال", "branch": "المعادي"}, "المواعيد المتاحة ايه", today=TODAY
+    )
+    assert guarded == {"service": "فاشيال", "branch": "المعادي"}
+
+
+def test_an_empty_message_drops_any_temporal_slot() -> None:
+    guarded = strip_unsupported_temporal_slots(
+        {"requested_date": "2026-09-02", "requested_time": "18:00", "service": "فاشيال"},
+        None,
+        today=TODAY,
+    )
+    assert guarded == {"service": "فاشيال"}
+
+
+# ── temporal provenance: a number that is not a time (Codex remediation) ─────────────────────
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # originally reported
+        "6 أكتوبر",
+        "6 جلسات",
+        "جلسة رقم 6",
+        # the substring mechanism the fix closes: a bare number beside a word that merely *starts*
+        # with a meem or saad, which the old " م"/" ص" markers matched anywhere.
+        "6 مناطق",
+        "6 مرات",
+        "6 مرضى",
+        "6 مواعيد",
+        "6 صور",
+        # a real time word elsewhere in the message no longer licenses an unrelated count.
+        "مساء الخير، عايزة 6 جلسات",
+    ],
+)
+def test_a_bare_number_that_is_not_a_time_drops_a_fabricated_requested_time(message: str) -> None:
+    """The blocker: ``parse_time`` reads the "6" out of each of these as 18:00. Provenance must not.
+
+    Every case carries a bare number that is not the patient stating an appointment time — a day, a
+    count, an ordinal, or a number next to a word that only happens to begin with a time letter — so
+    a classifier-invented ``requested_time`` gets no support and is dropped.
+    """
+    guarded = strip_unsupported_temporal_slots(
+        {"service": "فاشيال", "requested_time": "18:00"}, message, today=TODAY
+    )
+    assert guarded == {"service": "فاشيال"}
+
+
+def test_a_mixed_message_ties_the_value_to_the_bounded_span_not_a_stray_number() -> None:
+    """Codex blocker: "6 جلسات الساعة 8" states 08:00 via "الساعة 8", not 18:00 from the count "6".
+
+    A fabricated ``requested_time=18:00`` — what greedy ``parse_time`` reads from the leading "6" —
+    must be dropped, because no bounded span in the message resolves to 18:00. The genuinely-stated
+    08:00 (from the bounded "الساعة 8") is kept.
+    """
+    dropped = strip_unsupported_temporal_slots(
+        {"service": "فاشيال", "requested_time": "18:00"}, "6 جلسات الساعة 8", today=TODAY
+    )
+    assert dropped == {"service": "فاشيال"}
+
+    kept = strip_unsupported_temporal_slots(
+        {"requested_time": "08:00"}, "6 جلسات الساعة 8", today=TODAY
+    )
+    assert kept == {"requested_time": "08:00"}
+
+
+@pytest.mark.parametrize("message", ["6 مساء", "6 م", "6 ص", "6 صباح"])
+def test_arabic_meridiem_words_are_not_accepted_as_time_markers(message: str) -> None:
+    """Decision: only the English am/pm mark a number as a time; the Arabic meridiem words do not.
+
+    "6 مساء" states 18:00 to a human, so the guard dropping it is a deliberate false-negative — a
+    known Egyptian-Arabic limitation accepted for the demo (downstream, the receptionist re-asks, or
+    hands off on the active-offer ``unclear`` path). Kept as an explicit test so the choice is
+    visible and not re-widened by accident.
+    """
+    guarded = strip_unsupported_temporal_slots({"requested_time": "18:00"}, message, today=TODAY)
+    assert guarded == {}
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("الساعة 6", "18:00"),
+        ("الساعة ٦", "18:00"),
+        ("6:00", "18:00"),
+        ("18:00", "18:00"),
+        ("٦:٠٠", "18:00"),
+        ("6pm", "18:00"),
+        ("6 pm", "18:00"),
+        ("9am", "09:00"),
+        ("12 am", "00:00"),
+    ],
+)
+def test_an_explicit_time_expression_survives_provenance(message: str, expected: str) -> None:
+    guarded = strip_unsupported_temporal_slots({"requested_time": expected}, message, today=TODAY)
+    assert guarded == {"requested_time": expected}
+
+
+@pytest.mark.parametrize("message", ["6", "٦", "6.", "  ٦ ", "18"])
+def test_a_bare_hour_as_the_whole_answer_survives_provenance(message: str) -> None:
+    """A bare hour is a real answer when it is effectively all the patient said (6/٦/18 → 18:00)."""
+    guarded = strip_unsupported_temporal_slots({"requested_time": "18:00"}, message, today=TODAY)
+    assert guarded == {"requested_time": "18:00"}
 
 
 def test_declared_slots_is_the_union_of_required_and_optional() -> None:

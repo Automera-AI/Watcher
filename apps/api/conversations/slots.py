@@ -82,6 +82,11 @@ _ABSENCES = frozenset({"null", "none", "nil", "unknown", "n/a", "na", "-", "--",
 #: written: "الساعة ٦" is a perfectly ordinary way to type a time.
 _DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 
+#: Word tokens — Arabic and Latin letters and digits — with punctuation dropped. Used by the
+#: provenance guard to scan a message for a date word the exact relative-day lookup would miss if
+#: it were glued to a "؟" or a full stop.
+_WORD = re.compile(r"[^\W_]+", re.UNICODE)
+
 _ISO_DATE = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})$")
 _CLOCK = re.compile(r"(\d{1,2})\s*[:.٫]\s*(\d{2})")
 _BARE_HOUR = re.compile(r"(?<!\d)(\d{1,2})(?!\d)")
@@ -264,6 +269,159 @@ def parse_time(text: str, *, assume_pm_before_hour: int = ASSUME_PM_BEFORE_HOUR)
     if hour > 23:
         return None
     return f"{hour:02d}:{minute:02d}"
+
+
+#: The two temporal slots the provenance guard covers (pre-demo Step 3). Deliberately just these:
+#: they are the ones a fabricated value books a patient into a wrong day or time on, and the ones
+#: the classifier was seen to invent. Service and branch are *not* guarded — the active task, not a
+#: re-extraction of the message, is what preserves those across turns, and generalised slot
+#: provenance is post-demo work.
+_GUARDED_DATE_SLOT = "requested_date"
+_GUARDED_TIME_SLOT = "requested_time"
+
+
+def _message_states_date(message: str, target: str, *, today: date) -> bool:
+    """Whether the patient's own words in ``message`` deterministically resolve to ``target``.
+
+    ``parse_date`` recognises a relative day ("بكرة") only as a whole value, so a date sitting
+    inside a longer sentence ("عاوزة أحجز ... بكرة") would not resolve if the whole message were
+    handed to it. The message is therefore scanned token-window by token-window with the *same*
+    parser: windows of up to three tokens cover every multi-word form the parser knows ("بعد بكرة",
+    "يوم الأربع", "day after tomorrow"), and the parser's own in-sentence weekday scan covers the
+    rest. Nothing here is a new date grammar — it is the existing parser, asked about the message's
+    own spans rather than a value the classifier reported.
+
+    Known, intentionally-unfixed limitation (documented post-demo debt): an *embedded ISO date*
+    such as "عايزة أحجز يوم 2026-09-02." is not recognised here — ``[^\\W_]+`` splits "2026-09-02"
+    on its hyphens, and ``parse_date`` only reads an ISO date as a whole, exactly-matched value. So
+    a classifier ``requested_date`` that happens to be correct is dropped and the receptionist asks
+    for the day again. That is the safe failure (ask, do not book the wrong day), so it is left as
+    debt rather than widened in this pre-demo pass.
+    """
+    if parse_date(message, today=today) == target:
+        return True
+    # Word tokens only: punctuation glued to a date word ("بكرة؟", "tomorrow.") would otherwise
+    # hide it from the exact relative-day lookup. ``[^\W_]+`` keeps Arabic and Latin letters and
+    # digits and drops the rest, so the windows below are the bare words the parser recognises.
+    tokens = _WORD.findall(_fold(message))
+    for size in (1, 2, 3):
+        for start in range(len(tokens) - size + 1):
+            if parse_date(" ".join(tokens[start : start + size]), today=today) == target:
+                return True
+    return False
+
+
+#: The one word that marks the number *after* it as a time: "الساعة" (o'clock), folded. Matched as
+#: a whole token immediately before the number, never as a substring — "الساعة ٦".
+_TIME_WORD_BEFORE: frozenset[str] = frozenset({"الساعه"})
+
+#: The markers that make the number *before* them a time: the English meridiem only (decision:
+#: am/pm, not the Arabic time-of-day words). Matched as a whole token immediately after the number
+#: — "6 pm" — or glued to it — "6pm". The Arabic "مساء"/"صباح"/"م"/"ص" are deliberately excluded, so
+#: "6 مساء" is not read as a time here and its value is dropped rather than guessed — a known
+#: Egyptian-Arabic limitation accepted for the demo (downstream, that drop means the receptionist
+#: re-asks, or hands off if it lands on the active-offer ``unclear`` path).
+_TIME_WORD_AFTER: frozenset[str] = frozenset({"am", "pm"})
+
+#: A number glued to a meridiem marker as one token — "6pm", "9am" (folded).
+_GLUED_TIME = re.compile(r"^(\d{1,2})(am|pm)$")
+
+
+def _bounded_time_spans(folded: str) -> list[str]:
+    """Every *bounded* time expression in ``folded`` — the exact spans, not a message-wide flag.
+
+    Each returned string is a self-contained time span whose own number is the one being read: an
+    explicit clock, ``الساعة N``, ``N am``/``N pm`` (spaced or glued), or a lone hour that is the
+    whole answer. Returning the spans rather than a boolean is the point of this remediation:
+    ``_message_states_time`` parses each span on its own and compares *that* value to the target, so
+    an unrelated number elsewhere ("6 جلسات الساعة 8" — the "6" is not in any span) can neither
+    license nor supply the accepted time.
+    """
+    spans: list[str] = [match.group(0) for match in _CLOCK.finditer(folded)]
+    tokens = _WORD.findall(folded)
+    for index, token in enumerate(tokens):
+        if _GLUED_TIME.match(token):  # "6pm", "9am"
+            spans.append(token)
+            continue
+        if not (token.isdigit() and len(token) <= 2):
+            continue
+        if len(tokens) == 1:  # a lone hour: the whole answer
+            spans.append(token)
+        if index > 0 and tokens[index - 1] in _TIME_WORD_BEFORE:  # "الساعة N"
+            spans.append(f"{tokens[index - 1]} {token}")
+        if index + 1 < len(tokens) and tokens[index + 1] in _TIME_WORD_AFTER:  # "N pm"
+            spans.append(f"{token} {tokens[index + 1]}")
+    return spans
+
+
+def _message_states_time(message: str, target: str, *, assume_pm_before_hour: int) -> bool:
+    """Whether the patient's words state a time equal to ``target`` — provenance-strength.
+
+    Deliberately narrower than :func:`parse_time`, which is left unchanged for the application code
+    that reads a patient's own answer. ``parse_time`` reads the bare "6" out of "6 أكتوبر",
+    "6 جلسات", "جلسة رقم 6" or "6 مناطق" and returns a wall-clock time — which let a classifier's
+    invented ``requested_time`` survive against a number that was never a time and, in an active
+    booking, reach a hold, a read-back and a real appointment. Provenance accepts a time only when
+    the message actually *states* one, as a bounded expression:
+
+    * an explicit clock — a colon/dot form such as "6:00", "18:00", "٦:٠٠"; or
+    * a number tied to a marker token beside it — "الساعة ٦", "6 pm", "6pm"; or
+    * a bare hour that is effectively the whole answer — "6", "٦" — whitespace and punctuation
+      aside.
+
+    The value is read from each bounded span *individually* and compared to ``target``; a boolean
+    "some time exists" followed by ``parse_time`` on the whole message is not enough, because
+    ``parse_time`` would greedily resolve an unrelated earlier number — "6 جلسات الساعة 8" states
+    08:00 via "الساعة 8", not the 18:00 that the leading session count "6" resolves to. A marker
+    merely *present* somewhere never counts (that was the earlier bug: "6 مناطق", "6 مرات" and
+    "مساء الخير، عايزة 6 جلسات" all validated). Everything unbounded is rejected. The false-negative
+    (ask again) is the safe failure here; the false-positive holds and books the wrong slot. This is
+    a separate, stricter gate used only for provenance validation — ``parse_time`` is untouched.
+    """
+    folded = _fold(message)
+    if not folded:
+        return False
+    return any(
+        parse_time(span, assume_pm_before_hour=assume_pm_before_hour) == target
+        for span in _bounded_time_spans(folded)
+    )
+
+
+def strip_unsupported_temporal_slots(
+    resolved: Mapping[str, str],
+    message: str | None,
+    *,
+    today: date,
+    assume_pm_before_hour: int = ASSUME_PM_BEFORE_HOUR,
+) -> dict[str, str]:
+    """Drop a ``requested_date``/``requested_time`` the current message does not itself support.
+
+    The temporal provenance guard (pre-demo Step 3). ``normalise_slots`` turns whatever the
+    classifier emitted into a value a task can act on, but it cannot tell a date the patient wrote
+    from one the model invented — both resolve to a clean ``YYYY-MM-DD``. This is the check that
+    can: a resolved temporal value survives only when re-parsing *this* patient message with the
+    same deterministic parser yields the identical value, and is dropped otherwise. A dropped date
+    costs one "which day?" question; an invented one books the wrong day and calls it confirmed —
+    so every uncertainty here drops.
+
+    Runs after normalisation and before the value reaches task state. It touches only the two
+    guarded temporal slots and passes every other key through untouched: the active task, not this
+    message, stays responsible for the service, branch and date earlier turns already established.
+    """
+    guarded = dict(resolved)
+    text = message or ""
+
+    date_value = guarded.get(_GUARDED_DATE_SLOT)
+    if date_value is not None and not _message_states_date(text, date_value, today=today):
+        del guarded[_GUARDED_DATE_SLOT]
+
+    time_value = guarded.get(_GUARDED_TIME_SLOT)
+    if time_value is not None and not _message_states_time(
+        text, time_value, assume_pm_before_hour=assume_pm_before_hour
+    ):
+        del guarded[_GUARDED_TIME_SLOT]
+
+    return guarded
 
 
 def declared_slots(intent: str, vocabulary: Vocabulary) -> frozenset[str]:

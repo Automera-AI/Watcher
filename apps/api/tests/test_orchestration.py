@@ -771,6 +771,84 @@ def test_the_date_is_resolved_on_the_tenants_clock_not_the_servers() -> None:
     assert store.task.slots["requested_date"] == "2026-09-02"
 
 
+def test_a_fabricated_date_never_reaches_task_state_and_the_missing_day_is_asked() -> None:
+    """Journey B (demo step 3): an availability follow-up with no date must not invent one.
+
+    An active task already holds service and branch. The patient asks "what times are free?"
+    without naming a day, but the classifier emits a ``requested_date`` all the same. The provenance
+    guard drops it because this message states no such day, so the task keeps the service and
+    branch it had, invents no date, and asks for the missing one — rather than checking a diary
+    against a day the patient never chose, or handing off.
+    """
+    active = Task(
+        intent="availability_check",
+        slots={"service": "فاشيال", "branch": "المعادي"},
+        vocabulary=vocabulary_for("clinics"),
+    )
+    orch, _audit, _inbox, store = _conversing(
+        "availability_check",
+        0.95,
+        slots={"requested_date": "بكرة"},  # a day the message below never states
+        conversations=_FakeConversations(task=active),
+        vocabulary=vocabulary_for("clinics"),
+        policy=TenantPolicy(timezone="Africa/Cairo"),
+    )
+    outcome = asyncio.run(
+        orch.process(
+            TENANT_UUID,
+            MSG_ID,
+            _clinic_message("المواعيد المتاحة ايه", datetime(2026, 8, 31, 12, tzinfo=UTC)),
+        )
+    )
+
+    assert store.task is not None
+    assert store.task.slots["service"] == "فاشيال"
+    assert store.task.slots["branch"] == "المعادي"
+    assert "requested_date" not in store.task.slots
+    assert outcome.action is not RoutingAction.HANDOFF
+    assert outcome.outbound_action is not None
+    assert outcome.outbound_action.kind == "ask"
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["جلسة رقم 6", "6 مناطق", "مساء الخير، عايزة 6 جلسات", "6 جلسات الساعة 8"],
+)
+def test_a_fabricated_time_from_a_bare_number_never_reaches_task_state(message: str) -> None:
+    """Codex blocker, worker path: a classifier emits ``requested_time`` for a non-time number.
+
+    A session ordinal ("جلسة رقم 6"), a number beside a meem-initial word ("6 مناطق"), a stray time
+    word licensing an unrelated count ("مساء الخير، عايزة 6 جلسات"), and a mixed message whose real
+    time is 08:00 but whose leading count "6" greedily parses to 18:00 ("6 جلسات الساعة 8") each let
+    the greedy parser produce a fabricated 18:00. The provenance guard drops it before it reaches
+    task state, so an active booking already holding service, branch and date is not silently given
+    an appointment time the patient never stated.
+    """
+    active = Task(
+        intent="booking_enquiry",
+        slots={"service": "فاشيال", "branch": "المعادي", "requested_date": "2026-09-02"},
+        vocabulary=vocabulary_for("clinics"),
+    )
+    orch, _audit, _inbox, store = _conversing(
+        "booking_enquiry",
+        0.95,
+        slots={"requested_time": "18:00"},  # a time the message below never states
+        conversations=_FakeConversations(task=active),
+        vocabulary=vocabulary_for("clinics"),
+        policy=TenantPolicy(timezone="Africa/Cairo"),
+    )
+    asyncio.run(
+        orch.process(
+            TENANT_UUID,
+            MSG_ID,
+            _clinic_message(message, datetime(2026, 9, 1, 12, tzinfo=UTC)),
+        )
+    )
+
+    assert store.task is not None
+    assert "requested_time" not in store.task.slots
+
+
 def test_the_model_is_told_todays_date_on_the_tenants_clock() -> None:
     """It has no clock of its own; without this "بكرة" resolves against a training cut."""
     seen: list[Any] = []

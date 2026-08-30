@@ -289,6 +289,56 @@ def injectable_directory(monkeypatch: pytest.MonkeyPatch) -> _InjectableDirector
     return fake
 
 
+#: The single-session Primelase the demo script books ("برايم ليز جلسة واحدة"). Given the bare
+#: "برايم ليز" alias so the classifier's split into a service and a session count resolves: the
+#: catalogue also holds the six-session package, and the count is what tells them apart.
+_PRIMELASE_SINGLE = Service(
+    code="DT030",
+    name="Primelase Single Session",
+    price_minor=310_000,
+    duration_minutes=60,
+    session_count=1,
+    aliases=("برايم ليز",),
+)
+
+
+class _PrimelaseDirectory(_FakeDirectory):
+    """A diary with free single-session Primelase slots at Maadi on the demo's Wednesday."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            slots=[
+                AvailabilitySlot(
+                    external_id=f"P{index:05d}",
+                    branch_external_id="DC01",
+                    service_code="DT030",
+                    starts_at=start,
+                    ends_at=start + timedelta(minutes=60),
+                )
+                for index, start in enumerate((_cairo(17), _cairo(18)), start=1)
+            ]
+        )
+
+    def list_services(self, tenant_id: str, *, active_only: bool = True) -> list[Service]:
+        return [*SERVICES, _PRIMELASE_SINGLE]
+
+
+@pytest.fixture
+def primelase_directory(monkeypatch: pytest.MonkeyPatch) -> _PrimelaseDirectory:
+    """The booking tools wired to a diary that can actually book the demo script's service."""
+    fake = _PrimelaseDirectory()
+    copy = ConversationCopy(closing_booking_confirmed="Booked ✅ ref {booking_reference}.")
+    for tool in (
+        CloseConversation(copy),
+        CheckAvailability(fake, timezone=CAIRO, copy=copy, clock=lambda: NOW),
+        QuotePrice(fake, timezone=CAIRO, copy=copy, clock=lambda: NOW),
+        HoldSlot(fake, timezone=CAIRO, copy=copy, clock=lambda: NOW),
+        ConfirmBooking(fake, timezone=CAIRO, reference_prefix="DC", copy=copy, clock=lambda: NOW),
+    ):
+        monkeypatch.setitem(REGISTRY, tool.name, tool)
+    return fake
+
+
 def _turn(text: str) -> InboundTurn:
     return InboundTurn(
         tenant_id=TENANT_ID,
@@ -321,6 +371,134 @@ def _say(
             turns_taken=turns_taken,
         )
     )
+
+
+# ── Demo-safe clarification limit (pre-demo Step 2) ──────────────────────────────────────────
+
+
+def test_normal_booking_progress_is_not_cut_off_at_the_date_step(
+    primelase_directory: _PrimelaseDirectory,
+) -> None:
+    """The demo script, one slot per turn, must reach real availability without a hand-off.
+
+    ``service → branch → date → availability`` spends a reply on each step, so the old budget of
+    two clarifying turns handed off the moment the date was asked for — one turn before the diary
+    was ever consulted. The turn counter is advanced exactly as the worker advances it (one reply
+    per turn), so this is the real budget the live path applies.
+    """
+    ask_service, task = _say("عايزة احجز", "booking_enquiry", {}, None, turns_taken=0)
+    assert ask_service.kind == "ask"
+
+    ask_branch, task = _say(
+        "برايم ليز جلسة واحدة",
+        "booking_enquiry",
+        {"service": "برايم ليز", "session_count": "1"},
+        task,
+        turns_taken=1,
+    )
+    assert ask_branch.kind == "ask"
+
+    ask_date, task = _say("المعادي", "booking_enquiry", {"branch": "المعادي"}, task, turns_taken=2)
+    # The turn the old limit cut off: a branch was just given, the date is still outstanding.
+    assert ask_date.kind == "ask"
+    assert task.status is not TaskStatus.HANDED_OFF
+
+    offer, task = _say(
+        "بكرة", "booking_enquiry", {"requested_date": "2026-09-02"}, task, turns_taken=3
+    )
+    # Real diary availability, offered rather than handed off.
+    assert offer.kind == "ask"
+    assert task.status is not TaskStatus.HANDED_OFF
+    assert "17:00" in (offer.text or "") and "18:00" in (offer.text or "")
+
+
+def _to_primelase_offer(turns_taken_start: int = 0) -> tuple[OutboundAction, Task]:
+    """Play the demo booking to the point where 17:00 / 18:00 have just been offered."""
+    _, task = _say("عايزة احجز", "booking_enquiry", {}, None, turns_taken=turns_taken_start)
+    _, task = _say(
+        "برايم ليز جلسة واحدة",
+        "booking_enquiry",
+        {"service": "برايم ليز", "session_count": "1"},
+        task,
+        turns_taken=turns_taken_start + 1,
+    )
+    _, task = _say(
+        "المعادي", "booking_enquiry", {"branch": "المعادي"}, task, turns_taken=turns_taken_start + 2
+    )
+    offer, task = _say(
+        "بكرة",
+        "booking_enquiry",
+        {"requested_date": "2026-09-02"},
+        task,
+        turns_taken=turns_taken_start + 3,
+    )
+    return offer, task
+
+
+@pytest.mark.parametrize("message", ["جلسة رقم 6", "6 مناطق", "6 جلسات الساعة 8"])
+def test_a_bare_number_that_is_not_a_time_never_books_in_an_active_booking(
+    primelase_directory: _PrimelaseDirectory, message: str
+) -> None:
+    """Codex blocker: a bare "6" beside other words is what ``parse_time`` read as 18:00.
+
+    "جلسة رقم 6" (a session ordinal), "6 مناطق" (the substring-marker case: "مناطق" only *starts*
+    with a meem) and "6 جلسات الساعة 8" (a stated 08:00, but the greedy read grabs the leading count
+    "6" → 18:00) all carry a number that does not state the offered 18:00. In an active booking with
+    17:00 / 18:00 already offered, that fabricated time must not be selected, held, read back or
+    booked. A bare fragment out of context is classified ``unclear``, so this is the
+    ``_read_as_answer`` path — the provenance guard drops the value there, and the turn does not
+    advance to a hold or a confirmation.
+    """
+    offer, task = _to_primelase_offer()
+    assert "17:00" in (offer.text or "") and "18:00" in (offer.text or "")
+
+    action, after = _say(message, "unclear", {}, task, turns_taken=4)
+
+    # No time was accepted, so nothing was held, nothing was read back, nothing was booked.
+    assert "requested_time" not in after.slots
+    assert action.kind != "confirm"
+    assert primelase_directory.holds == {}
+    assert primelase_directory.bookings == []
+
+    # And an explicit "أيوه" afterwards has no read-back to agree to — still no booking.
+    _confirmed, final = _say("أيوه", "thanks_closing", {}, after, turns_taken=5)
+    assert "booking_reference" not in final.slots
+    assert primelase_directory.bookings == []
+
+
+def test_an_explicit_time_after_an_offer_still_books(
+    primelase_directory: _PrimelaseDirectory,
+) -> None:
+    """The positive side: an explicit "الساعة ٦" is still read, held, confirmed and booked.
+
+    Proves the narrowed time provenance did not break the real selection path — the guard keeps a
+    time the message actually states.
+    """
+    _offer, task = _to_primelase_offer()
+
+    read_back, task = _say("الساعة ٦", "unclear", {}, task, turns_taken=4)
+    assert read_back.kind == "confirm"
+    assert "18:00" in (read_back.text or "")
+    assert primelase_directory.holds  # the slot was held while the patient confirms
+
+    booked, task = _say("أيوه", "thanks_closing", {}, task, turns_taken=5)
+    assert booked.kind == "say"
+    assert task.slots.get("booking_reference")
+    assert len(primelase_directory.bookings) == 1
+
+
+def test_repeated_non_progress_still_reaches_the_handoff_boundary() -> None:
+    """The budget is larger, not gone: an answer that never fills a slot still ends with a person.
+
+    Within budget the task keeps asking; at the configured limit it hands off, so a patient who
+    never answers the outstanding question is not looped at forever.
+    """
+    within_budget, _task = _say("؟", "availability_check", {}, None, turns_taken=4)
+    assert within_budget.kind == "ask"
+
+    handed_off, task = _say("؟", "availability_check", {}, None, turns_taken=5)
+    assert handed_off.kind == "handoff"
+    assert task.status is TaskStatus.HANDED_OFF
 
 
 # ── The journey ────────────────────────────────────────────────────────────────────────────

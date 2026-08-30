@@ -49,9 +49,23 @@ from apps.api.orchestration.worker import Orchestrator
 
 _logger = logging.getLogger(__name__)
 
-#: The tools a vertical must declare before its clinic catalogue is wired up. All four, not any:
-#: a vocabulary that books but cannot check availability is not a vertical this supports.
-_CLINIC_TOOLS = frozenset({"check_availability", "quote_price", "hold_slot", "confirm_booking"})
+#: The terminal capabilities that mark a vertical as supporting the clinic booking flow. A
+#: *terminal capability* is one an intent's ``terminal_tool`` actually names — the endpoint a
+#: classified request resolves to. ``hold_slot`` is deliberately absent: it is an internal booking
+#: operation the receptionist runs mid-flow (at the read-back), and no intent ever declares it as
+#: its terminal tool. Requiring it here as though it were a terminal capability was the bug — the
+#: subset test below could never pass, so ``configure_clinic`` never ran and real availability
+#: requests fell through to the unbuilt-tool hand-off.
+_CLINIC_TERMINAL_CAPABILITIES = frozenset({"check_availability", "quote_price", "confirm_booking"})
+
+#: The runtime tools ``configure_clinic`` registers, and what runtime completeness is verified
+#: against after wiring. All four, including ``hold_slot``: the booking journey cannot complete
+#: without the hold placed at the read-back, so a process that registered the other three would
+#: read a slot back and then confirm a booking it never reserved. The startup diagnostic reports
+#: any of these still missing after a clinic vertical is wired.
+_CLINIC_RUNTIME_TOOLS = frozenset(
+    {"check_availability", "quote_price", "hold_slot", "confirm_booking"}
+)
 
 #: Environment variables a platform may expose the deployed commit under, best-effort and in
 #: order of preference. Render sets ``RENDER_GIT_COMMIT``; the others are common fallbacks.
@@ -121,11 +135,15 @@ def build_consumer(
     copy = settings.conversation_copy()
     configure_conversation_copy(copy)
     # The booking journey (demo step 6), for the verticals that have one. Registered only when the
-    # tenant's vocabulary actually declares these tools: registering them for a holiday-home deploy
-    # would put four names in the registry with an empty clinic catalogue behind them, and
-    # `validate_registry` exists to say that a tool nobody declared should not be there. Where they
-    # are absent nothing changes — an intent naming an unregistered tool hands off.
-    if _CLINIC_TOOLS <= {intent.terminal_tool for intent in selected.intents}:
+    # tenant's vocabulary declares the clinic *terminal capabilities* — the tools an intent names
+    # as its endpoint. ``hold_slot`` is not one of those (no intent declares it; it runs mid-flow
+    # at the read-back), so it is not part of the decision — including it was what kept this subset
+    # test from ever passing. Where the capabilities are absent nothing changes: an intent naming
+    # an unregistered tool hands off, and there is no clinic catalogue to read.
+    clinic_flow_supported = _CLINIC_TERMINAL_CAPABILITIES <= {
+        intent.terminal_tool for intent in selected.intents
+    }
+    if clinic_flow_supported:
         configure_clinic(
             SqlAlchemyClinicRepository(tenant_scope),
             timezone=settings.tenant_timezone,
@@ -155,13 +173,20 @@ def build_consumer(
     # which commit, which vertical, and which tools this process actually wired — no secrets, no
     # message content, and no database round-trip (row counts need a tenant and belong to an
     # operator command, not the boot path).
-    missing_clinic_tools = sorted(_CLINIC_TOOLS - set(REGISTRY))
+    #
+    # Completeness is measured against the four *runtime* tools (``hold_slot`` included), and only
+    # for a vertical whose clinic flow is supported: a holiday-home deploy has no clinic tools and
+    # reports ``clinic_tools_registered=False`` honestly, while a clinic deploy that wired all four
+    # reports ``True`` with an empty ``missing_clinic_tools`` — the release-blocking startup line.
+    missing_clinic_tools = (
+        sorted(_CLINIC_RUNTIME_TOOLS - set(REGISTRY)) if clinic_flow_supported else []
+    )
     _logger.info(
         "consumer wired: git_sha=%s vertical=%s clinic_tools_registered=%s "
         "missing_clinic_tools=%s registered_tools=%s",
         _deployed_sha(),
         selected.vertical,
-        not missing_clinic_tools,
+        clinic_flow_supported and not missing_clinic_tools,
         missing_clinic_tools,
         sorted(REGISTRY),
     )

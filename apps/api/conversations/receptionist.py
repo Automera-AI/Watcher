@@ -58,7 +58,7 @@ from datetime import UTC, date, datetime
 from packages.intents.schema import Vocabulary, default_vocabulary
 
 from apps.api.conversations.confirmation import reads_as_no, reads_as_yes
-from apps.api.conversations.slots import normalise_slots
+from apps.api.conversations.slots import normalise_slots, strip_unsupported_temporal_slots
 from apps.api.conversations.task import Task, TaskStatus
 from apps.api.conversations.tools import REGISTRY, ToolResult, current_copy, fill_template
 from apps.api.core.autonomy import Autonomy, decide_autonomy
@@ -255,6 +255,16 @@ async def handle(
     supplied: dict[str, str] = {}
     if not answering and task is not None and intent == _UNCLEAR:
         supplied = _read_as_answer(task, turn, vocab, today)
+        # The same temporal provenance guard the worker applies to the classifier's slots (step 3),
+        # now on the value this path reads straight out of the fragment. ``_read_as_answer`` fills
+        # the awaited slot with ``normalise_slots``, whose ``parse_time`` will take the bare "6" out
+        # of "جلسة رقم 6" and call it 18:00 — a fabricated time that would otherwise be held, read
+        # back and booked. Re-checked against the same message it was read from, so a genuine
+        # "الساعة ٦" or a bare-hour answer survives while an embedded number is dropped and the task
+        # simply keeps waiting on the slot.
+        supplied = strip_unsupported_temporal_slots(
+            supplied, turn.text, today=today or turn.received_at.date()
+        )
 
     if answering or supplied:
         assert task is not None
