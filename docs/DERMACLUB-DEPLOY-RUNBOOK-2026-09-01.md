@@ -115,6 +115,31 @@ TENANT_CONFIRM_READ_BACK=تأكيد الحجز: {values} — صح كده؟
 TENANT_BOOKING_CONFIRMED=تم الحجز ✅ رقم الحجز: {booking_reference}. مستنينك في الفرع.
 ```
 
+These eight complete the deterministic Arabic fallback (step 4). The branch/date/time asks already
+have Egyptian-Arabic defaults in `receptionist.py`, so they are Arabic with nothing set — set these
+only to change the phrasing. The hand-off, unbuilt, read-back-decline and the two read-back buttons
+are neutral **English** in code (they are shared with every vertical), so these are what makes the
+clinic path Arabic on its safety exits and on the buttons beside the read-back. None carries a
+placeholder.
+
+```
+TENANT_ASK_BRANCH=تمام، تحبي تحجزي في أنهي فرع؟
+
+TENANT_ASK_DATE=تمام، تحبي الحجز يكون يوم ايه؟
+
+TENANT_ASK_TIME=تمام، تحبي الميعاد الساعة كام؟
+
+TENANT_HANDOFF=هحوّلك لزميلي اللي هيقدر يساعدك حالاً.
+
+TENANT_UNBUILT=خليني أراجع ده مع الفريق وأرجعلك حالاً.
+
+TENANT_CLARIFY_CHANGE=معلش، تحبي أغيّر أنهي تفصيلة؟
+
+TENANT_CONFIRM_YES=أيوه
+
+TENANT_CONFIRM_NO=لأ
+```
+
 Three things about these that are rules rather than preferences:
 
 * **`{price}` already carries the currency.** It renders `15,000 EGP`. A template that also uses

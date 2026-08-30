@@ -53,6 +53,7 @@ The remaining ``terminal_tool`` values (``lookup_reservation``, ``lookup_appoint
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 
 from packages.intents.schema import Vocabulary, default_vocabulary
@@ -60,7 +61,13 @@ from packages.intents.schema import Vocabulary, default_vocabulary
 from apps.api.conversations.confirmation import reads_as_no, reads_as_yes
 from apps.api.conversations.slots import normalise_slots, strip_unsupported_temporal_slots
 from apps.api.conversations.task import Task, TaskStatus
-from apps.api.conversations.tools import REGISTRY, ToolResult, current_copy, fill_template
+from apps.api.conversations.tools import (
+    REGISTRY,
+    ConversationCopy,
+    ToolResult,
+    current_copy,
+    fill_template,
+)
 from apps.api.core.autonomy import Autonomy, decide_autonomy
 from apps.api.core.screening import ScreeningBlock, screen
 from apps.api.schemas.common import HIGH_CONFIDENCE_THRESHOLD
@@ -168,6 +175,41 @@ _READ_BACK_TEXT = "Just to confirm: {details}?"
 #: is Arabic in code so no configuration is required for the patient to be asked in their language.
 _ASK_SERVICE_TEXT = "أكيد، تحبي تحجزي أنهي خدمة{branch}{date}؟"
 
+#: The other three booking asks, in Egyptian Arabic. ``service`` earns a contextual sentence because
+#: it carries the branch and day already held; ``branch``, ``requested_date`` and ``requested_time``
+#: are single questions and do not. They are the two turns the step-by-step journey used to answer
+#: in English — ``برايم ليز`` is followed by a branch ask and then a date ask — and, like
+#: ``_ASK_SERVICE_TEXT``, the default is Arabic in code so the demo needs no configuration to ask in
+#: the patient's language. Keyed by slot rather than intent: these three slots exist only on the
+#: clinic vocabulary (a holiday-home booking asks ``check_in``/``unit_type``, never ``branch``), so
+#: an Arabic default keyed to them cannot reach another vertical's booking. A tenant overrides each
+#: through ``ConversationCopy.ask_branch`` / ``ask_date`` / ``ask_time``. No placeholders.
+_ASK_BRANCH_TEXT = "تمام، تحبي تحجزي في أنهي فرع؟"
+_ASK_DATE_TEXT = "تمام، تحبي الحجز يكون يوم ايه؟"
+_ASK_TIME_TEXT = "تمام، تحبي الميعاد الساعة كام؟"
+
+#: The clinic booking slots whose missing-value question is asked in Arabic, mapped to their default
+#: wording and the ``ConversationCopy`` field a tenant overrides them with. ``requested_time`` is
+#: here for completeness — the demo *offers* a time rather than asking for one — so its fallback is
+#: Arabic on the rare turn it is reached directly. See ``_ask_for_slot``.
+_CLINIC_SLOT_ASKS: dict[str, str] = {
+    "branch": _ASK_BRANCH_TEXT,
+    "requested_date": _ASK_DATE_TEXT,
+    _TIME_SLOT: _ASK_TIME_TEXT,
+}
+
+#: Asked after a patient declines a read-back: which detail to change. Reached on the booking
+#: journey (a "لأ" to the confirmation), so a clinic wants it in Arabic — but it is also reached
+#: by a holiday-home read-back, so the in-code default stays neutral English and a clinic sets
+#: Arabic through ``ConversationCopy.clarify_change``. No placeholders.
+_CLARIFY_CHANGE_TEXT = "Sorry — which detail should I change?"
+
+#: The read-back quick-reply buttons when a tenant configures none. English by default because the
+#: read-back's own default wording is English too; a clinic sets both these and
+#: ``confirm_read_back`` to Arabic together (``ConversationCopy.confirm_yes`` / ``confirm_no``).
+_CONFIRM_YES_TEXT = "Yes"
+_CONFIRM_NO_TEXT = "No"
+
 #: A stored date spoken back the way the patient said it, in Egyptian Arabic. The task keeps
 #: ``requested_date`` as an ISO string because that is what a booking acts on; reading "2026-09-02"
 #: back is asking someone to confirm a string, and rendering it as "Wednesday 02 September" drops
@@ -216,7 +258,7 @@ async def _hand_off(task: Task, tool_name: str) -> tuple[OutboundAction, Task]:
     tool = REGISTRY.get(tool_name)
     if tool is not None:
         await tool.run()
-    return OutboundAction(kind="handoff", text=HANDOFF_TEXT), task
+    return OutboundAction(kind="handoff", text=current_copy().handoff or HANDOFF_TEXT), task
 
 
 async def handle(
@@ -300,7 +342,7 @@ async def handle(
             return (
                 OutboundAction(
                     kind="ask",
-                    text="Sorry — which detail should I change?",
+                    text=current_copy().clarify_change or _CLARIFY_CHANGE_TEXT,
                 ),
                 task,
             )
@@ -352,6 +394,10 @@ async def handle(
                 ),
                 task,
             )
+        if (contextual := _ask_for_slot(slot)) is not None:
+            # The branch/date/time asks between the service and the diary. Arabic for the clinic
+            # booking slots (see `_CLINIC_SLOT_ASKS`); every other slot keeps the generic prompt.
+            return OutboundAction(kind="ask", text=contextual), task
         return (
             OutboundAction(
                 kind="ask",
@@ -390,7 +436,7 @@ async def handle(
     if take_message is not None:
         await take_message.run()
     task.status = TaskStatus.HANDED_OFF
-    return OutboundAction(kind="handoff", text=_UNBUILT_TEXT), task
+    return OutboundAction(kind="handoff", text=current_copy().unbuilt or _UNBUILT_TEXT), task
 
 
 async def _run_direct(
@@ -600,6 +646,32 @@ def _ask_for_service(task: Task, today: date) -> str:
     )
 
 
+#: Which ``ConversationCopy`` field overrides each clinic slot ask. Kept beside
+#: ``_CLINIC_SLOT_ASKS`` so adding a slot is one entry in each.
+_CLINIC_SLOT_COPY: dict[str, Callable[[ConversationCopy], str | None]] = {
+    "branch": lambda copy: copy.ask_branch,
+    "requested_date": lambda copy: copy.ask_date,
+    _TIME_SLOT: lambda copy: copy.ask_time,
+}
+
+
+def _ask_for_slot(slot: str) -> str | None:
+    """The Arabic question for a missing clinic booking slot, or ``None`` for any other slot.
+
+    ``None`` means "not one of the clinic booking slots" and the caller falls back to the generic
+    English prompt — the branch/date/time slots are clinic-only, so returning a sentence here for
+    ``check_in`` would put Arabic in a holiday-home booking. The tenant's own wording wins through
+    ``current_copy()``, exactly as ``_ask_for_service`` does, and a template that will not render
+    degrades to the Arabic default rather than raising mid-booking.
+    """
+    default = _CLINIC_SLOT_ASKS.get(slot)
+    if default is None:
+        return None
+    override = _CLINIC_SLOT_COPY[slot](current_copy())
+    template = override or default
+    return fill_template(template) or default
+
+
 def _spoken_day(value: str | None, today: date) -> str | None:
     """An ISO date as a patient would say the day in Egyptian Arabic, or ``None``.
 
@@ -735,13 +807,20 @@ async def _read_back(
     outstanding = tuple(task.unconfirmed)
     details = ", ".join(f"{slot.replace('_', ' ')} {_readable(task, slot)}" for slot in outstanding)
     values = "، ".join(_readable(task, slot) for slot in outstanding)
-    template = current_copy().confirm_read_back or _READ_BACK_TEXT
+    copy = current_copy()
+    template = copy.confirm_read_back or _READ_BACK_TEXT
     return (
         OutboundAction(
             kind="confirm",
             text=fill_template(template, details=details, values=values)
             or _READ_BACK_TEXT.format(details=details),
-            quick_replies=["Yes", "No"],
+            # The buttons beside an Arabic read-back were the last English on the turn. A tenant
+            # sets them in its own language (`confirm_yes`/`confirm_no`); `confirmation.py` reads
+            # "أيوه"/"لأ" as agreement/refusal, so an Arabic button still books or corrects.
+            quick_replies=[
+                copy.confirm_yes or _CONFIRM_YES_TEXT,
+                copy.confirm_no or _CONFIRM_NO_TEXT,
+            ],
         ),
         task,
     )
@@ -907,7 +986,7 @@ async def _unbuilt(task: Task) -> tuple[OutboundAction, Task]:
     if take_message is not None:
         await take_message.run()
     task.status = TaskStatus.HANDED_OFF
-    return OutboundAction(kind="handoff", text=_UNBUILT_TEXT), task
+    return OutboundAction(kind="handoff", text=current_copy().unbuilt or _UNBUILT_TEXT), task
 
 
 def _is_booking(intent: str, vocab: Vocabulary) -> bool:

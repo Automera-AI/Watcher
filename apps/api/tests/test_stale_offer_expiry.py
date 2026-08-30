@@ -235,7 +235,7 @@ def test_a_no_availability_booking_is_never_expired_however_long_it_waits(
         key="offer",
     )
     assert ask.kind == "ask"
-    assert "nothing free" in (ask.text or "")
+    assert "مفيش مواعيد فاضية" in (ask.text or "")
     row = _active_row(database)
     assert row is not None
     assert "availability_offered_at" not in row.slots  # no proof, because nothing was offered
@@ -288,7 +288,7 @@ def test_a_new_day_with_no_availability_clears_the_earlier_offer_proof(
         key="change-day",
     )
     assert reoffer.kind == "ask"
-    assert "nothing free" in (reoffer.text or "")
+    assert "مفيش مواعيد فاضية" in (reoffer.text or "")
     row = _active_row(database)
     assert row is not None
     assert "availability_offered_at" not in row.slots  # A's proof was cleared, not orphaned onto B

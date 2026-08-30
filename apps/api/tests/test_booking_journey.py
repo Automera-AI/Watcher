@@ -30,6 +30,7 @@ from apps.api.conversations.tools import (
     CloseConversation,
     ConfirmBooking,
     ConversationCopy,
+    Greet,
     HoldSlot,
     QuotePrice,
 )
@@ -630,7 +631,7 @@ def test_a_day_with_nothing_free_is_answered_rather_than_handed_off(
         {"service": "فاشيال بيسك", "branch": "المعادي", "requested_date": "2026-09-03"},
     )
     assert action.kind == "ask"
-    assert "nothing free" in (action.text or "")
+    assert "مفيش مواعيد فاضية" in (action.text or "")
 
 
 def test_two_services_a_patient_cannot_tell_apart_are_asked_about_never_chosen(
@@ -745,7 +746,7 @@ def test_a_day_with_nothing_free_is_not_continued_as_a_pending_booking(
     )
 
     assert action.kind == "ask"
-    assert "nothing free" in (action.text or "")
+    assert "مفيش مواعيد فاضية" in (action.text or "")
     assert task.intent == "availability_check"
 
 
@@ -1070,3 +1071,244 @@ def _booked_slots() -> dict[str, str]:
 def _complete_task() -> Task:
     """A booking task with everything collected and the read-back outstanding."""
     return Task(intent="booking_enquiry", slots=_booked_slots(), vocabulary=CLINICS)
+
+
+# ── Step 4: the deterministic Arabic fallback ────────────────────────────────────────────────
+#
+# The renderer (step 5) is only safe if what it falls back to is safe and presentation-ready, and
+# the primary DermaClub booking path must not fall back to English. These tests run the scripted
+# journey and its safety exits with a clinic that has configured its wording in Egyptian Arabic —
+# the deterministic layer beneath any future generation — and assert no generic English *system*
+# sentence survives. Catalogue names ("Primelase Single Session", "Maadi") and the English date
+# formatter ("Wednesday 02 September") are acknowledged display-name gaps (deploy runbook §5.2),
+# not system sentences, so the check is for the English *templates*, never for the absence of every
+# Latin character.
+
+#: A clinic whose whole conversation is configured in Egyptian Arabic — every seam a tenant can
+#: set, including the four step-4 additions (branch/date/time asks are Arabic in code, so these
+#: exercise the override; handoff/unbuilt/clarify_change/quick-replies are English in code, so these
+#: are what makes the clinic path Arabic). No brand name is asserted; the point is the language.
+_DERMACLUB_COPY = ConversationCopy(
+    opening="أهلاً بيكي! تحبي أساعدك في ايه؟",
+    opening_named="أهلاً {customer_name}! تحبي أساعدك في ايه؟",
+    closing="شكراً ليكي! يومك سعيد.",
+    closing_booking_confirmed="تم ✅ رقم الحجز {booking_reference}. مستنينك في الفرع.",
+    availability_offer=(
+        "متاح عندنا {times} لـ {service} في فرع {branch} يوم {date}. تحبي أحجزلك إمتى؟"
+    ),
+    availability_none=(
+        "معلش، مفيش مواعيد فاضية لـ {service} في فرع {branch} يوم {date}. تحبي يوم تاني؟"
+    ),
+    choose_one="تقصدي أنهي واحدة؟ {options}",
+    booking_taken="معلش، الميعاد ده اتحجز حالاً. تحبي أشوفلك المتاح؟",
+    ask_service="تحبي تحجزي أنهي خدمة{branch}{date}؟",
+    ask_branch="تحبي تحجزي في أنهي فرع؟",
+    ask_date="الحجز يكون يوم ايه؟",
+    ask_time="تحبي الميعاد الساعة كام؟",
+    confirm_read_back="تأكيد الحجز: {values} — صح كده؟",
+    booking_confirmed="تم الحجز ✅ رقم الحجز: {booking_reference}. مستنينك في الفرع.",
+    handoff="هحوّلك لزميلي اللي هيقدر يساعدك حالاً.",
+    unbuilt="خليني أراجع ده مع الفريق وأرجعلك حالاً.",
+    clarify_change="تحبي أغيّر أنهي تفصيلة؟",
+    confirm_yes="أيوه",
+    confirm_no="لأ",
+)
+
+#: The English *system* sentences that must never appear on the configured Arabic path. Each is a
+#: template this branch replaced or routed through the tenant seam — not a catalogue name or a date.
+_ENGLISH_SYSTEM_MARKERS = (
+    "Could you please provide",
+    "connect you with someone",
+    "check that with the team",
+    "Just to confirm",
+    "That's booked",
+    "which detail should I change",
+    "I can offer",
+    "nothing free",
+    "Which would you like",
+    "How can I help",
+    "You're very welcome",
+    "Hello",
+    "Thanks — I've noted",
+)
+
+
+def _assert_no_english_system_text(action: OutboundAction) -> None:
+    text = action.text or ""
+    for marker in _ENGLISH_SYSTEM_MARKERS:
+        assert marker not in text, f"English system text {marker!r} leaked: {text!r}"
+    assert action.quick_replies != ["Yes", "No"], "English quick replies leaked"
+
+
+@pytest.fixture
+def dermaclub(monkeypatch: pytest.MonkeyPatch) -> _PrimelaseDirectory:
+    """The demo's own service and diary, wired with DermaClub's Arabic wording everywhere.
+
+    The clinic tools carry their copy at construction (the offer, the no-availability answer); the
+    receptionist reads ``current_copy()`` for the sentences it composes itself (the asks, the
+    read-back, the confirmation, the hand-off), so both are set to the same copy — otherwise half
+    the journey would be Arabic and half the neutral default.
+    """
+    fake = _PrimelaseDirectory()
+    copy = _DERMACLUB_COPY
+    for tool in (
+        Greet(copy),
+        CloseConversation(copy),
+        CheckAvailability(fake, timezone=CAIRO, copy=copy, clock=lambda: NOW),
+        QuotePrice(fake, timezone=CAIRO, copy=copy, clock=lambda: NOW),
+        HoldSlot(fake, timezone=CAIRO, copy=copy, clock=lambda: NOW),
+        ConfirmBooking(fake, timezone=CAIRO, reference_prefix="DC", copy=copy, clock=lambda: NOW),
+    ):
+        monkeypatch.setitem(REGISTRY, tool.name, tool)
+    monkeypatch.setattr(tools, "_COPY", copy)
+    return fake
+
+
+def test_the_scripted_arabic_booking_journey_has_no_generic_english_system_text(
+    dermaclub: _PrimelaseDirectory,
+) -> None:
+    """The release gate: the whole demo script, turn by turn, in Egyptian Arabic.
+
+        صباح الخير / عايزة احجز / برايم ليز جلسة واحدة / المعادي / بكرة
+        → real availability → one real time → read-back → explicit yes → booking reference
+
+    Every system sentence is checked against ``_ENGLISH_SYSTEM_MARKERS``: the greeting, the three
+    slot asks between the service and the diary (the two that used to be answered in English), the
+    availability offer, the read-back and its quick-reply buttons, and the confirmation. Exactly one
+    real booking is written and a durable reference comes back.
+    """
+    greet, _ = _say("صباح الخير", "greeting", {}, None)
+    assert greet.kind == "say"
+    _assert_no_english_system_text(greet)
+
+    ask_service, task = _say("عايزة احجز", "booking_enquiry", {}, None, turns_taken=0)
+    assert ask_service.kind == "ask"
+    _assert_no_english_system_text(ask_service)
+
+    ask_branch, task = _say(
+        "برايم ليز جلسة واحدة",
+        "booking_enquiry",
+        {"service": "برايم ليز", "session_count": "1"},
+        task,
+        turns_taken=1,
+    )
+    assert ask_branch.kind == "ask"
+    _assert_no_english_system_text(ask_branch)
+
+    ask_date, task = _say("المعادي", "booking_enquiry", {"branch": "المعادي"}, task, turns_taken=2)
+    assert ask_date.kind == "ask"
+    _assert_no_english_system_text(ask_date)
+
+    offer, task = _say(
+        "بكرة", "booking_enquiry", {"requested_date": "2026-09-02"}, task, turns_taken=3
+    )
+    assert offer.kind == "ask"
+    assert "17:00" in (offer.text or "") and "18:00" in (offer.text or "")
+    _assert_no_english_system_text(offer)
+
+    read_back, task = _say("الساعة ٥", "unclear", {}, task, turns_taken=4)
+    assert read_back.kind == "confirm"
+    assert "17:00" in (read_back.text or "")
+    assert read_back.quick_replies == ["أيوه", "لأ"]
+    _assert_no_english_system_text(read_back)
+
+    booked, task = _say("أيوه", "thanks_closing", {}, task, turns_taken=5)
+    assert booked.kind == "say"
+    assert "DC-0266" in (booked.text or "")
+    _assert_no_english_system_text(booked)
+
+    assert [b.reference for b in dermaclub.bookings] == ["DC-0266"]
+    assert task.slots["booking_reference"] == "DC-0266"
+
+
+def test_no_availability_answers_in_configured_arabic(dermaclub: _PrimelaseDirectory) -> None:
+    """A day with nothing free is a real answer, and on the DermaClub path it is Arabic.
+
+    The single-session Primelase diary holds only the demo's Wednesday, so the Thursday is empty —
+    the no-availability answer, not a hand-off.
+    """
+    action, task = _say(
+        "احجزيلي برايم ليز جلسة واحدة في المعادي الخميس",
+        "booking_enquiry",
+        {
+            "service": "برايم ليز",
+            "session_count": "1",
+            "branch": "المعادي",
+            "requested_date": "2026-09-03",
+        },
+    )
+    assert action.kind == "ask"
+    assert "مفيش مواعيد فاضية" in (action.text or "")
+    _assert_no_english_system_text(action)
+    assert task.status is not TaskStatus.HANDED_OFF
+    assert dermaclub.bookings == []
+
+
+def test_the_generic_handoff_is_arabic_when_configured(dermaclub: _PrimelaseDirectory) -> None:
+    """The hand-off is a deterministic safety surface (never renderer-owned) and must be Arabic.
+
+    Repeated non-progress on the same outstanding question reaches the configured hand-off boundary;
+    the sentence it says is the tenant's Arabic ``handoff``, not the neutral English default.
+    """
+    action, task = _say("؟", "availability_check", {}, None, turns_taken=5)
+    assert action.kind == "handoff"
+    assert task.status is TaskStatus.HANDED_OFF
+    assert action.text == _DERMACLUB_COPY.handoff
+    _assert_no_english_system_text(action)
+
+
+def test_the_unbuilt_fallback_is_arabic_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A built-flow intent whose tool is not registered takes the unbuilt path — in Arabic.
+
+    This is the safety net under step 1: with the clinic tools registered a real availability
+    request reaches the diary, but if ``check_availability`` is *not* wired (the bug step 1 fixed)
+    an otherwise-actionable ``availability_check`` falls through to the unbuilt hand-off rather than
+    claiming success. That fallback is a deterministic safety surface the renderer never owns, and
+    on a configured clinic it must be Arabic. No diary fixture here on purpose: the tool is absent.
+    """
+    monkeypatch.setattr(tools, "_COPY", _DERMACLUB_COPY)
+    assert "check_availability" not in REGISTRY  # the unbuilt precondition
+    task = Task(
+        intent="availability_check",
+        slots={"service": "برايم ليز", "branch": "المعادي", "requested_date": "2026-09-02"},
+        confirmed={"service", "branch", "requested_date"},
+        vocabulary=CLINICS,
+    )
+    action, task = asyncio.run(
+        handle(
+            _turn("المواعيد المتاحة"),
+            "availability_check",
+            0.95,
+            {},
+            task,
+            vocabulary=CLINICS,
+            conversation_id=CONVERSATION,
+        )
+    )
+    assert action.kind == "handoff"
+    assert task.status is TaskStatus.HANDED_OFF
+    assert action.text == _DERMACLUB_COPY.unbuilt
+    _assert_no_english_system_text(action)
+
+
+def test_declining_the_read_back_asks_which_detail_in_arabic(
+    dermaclub: _PrimelaseDirectory,
+) -> None:
+    """A "لأ" to the confirmation is on the Arabic booking path, so the follow-up is Arabic too."""
+    _offer, task = _say("عايزة احجز", "booking_enquiry", {}, None, turns_taken=0)
+    _, task = _say(
+        "برايم ليز جلسة واحدة",
+        "booking_enquiry",
+        {"service": "برايم ليز", "session_count": "1"},
+        task,
+        turns_taken=1,
+    )
+    _, task = _say("المعادي", "booking_enquiry", {"branch": "المعادي"}, task, turns_taken=2)
+    _, task = _say("بكرة", "booking_enquiry", {"requested_date": "2026-09-02"}, task, turns_taken=3)
+    read_back, task = _say("الساعة ٥", "unclear", {}, task, turns_taken=4)
+    assert read_back.kind == "confirm"
+
+    declined, _ = _say("لأ", "unclear", {}, task, turns_taken=5)
+    assert declined.kind == "ask"
+    assert declined.text == _DERMACLUB_COPY.clarify_change
+    _assert_no_english_system_text(declined)
