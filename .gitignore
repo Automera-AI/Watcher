@@ -28,3 +28,6 @@ packages/intents/build/
 node_modules/
 .next/
 .coverage
+
+# uv lockfile — not committed for this project
+uv.lock

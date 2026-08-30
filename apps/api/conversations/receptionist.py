@@ -53,7 +53,7 @@ The remaining ``terminal_tool`` values (``lookup_reservation``, ``lookup_appoint
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 
 from packages.intents.schema import Vocabulary, default_vocabulary
 
@@ -132,6 +132,19 @@ _COMPATIBLE_TRANSITIONS: frozenset[tuple[str, str]] = frozenset(
 #: extracts it from a message — but it lives with the task because that is what survives to the
 #: closing turn, which is the only place it is read (``CloseConversation``).
 _REFERENCE_SLOT = "booking_reference"
+
+#: The proof that a **concrete** availability offer was actually put in front of the patient, kept
+#: with the task the same way ``booking_reference`` is: not a vocabulary slot (nothing extracts it,
+#: and it is not ``required`` so it never reaches a read-back), but persisted in the task's own
+#: slots — the smallest existing surface that survives a process restart with no new column or
+#: migration. Its *presence* is what distinguishes a pending booking that is genuinely waiting on
+#: offered times from an ordinary booking clarification that merely happens to be
+#: ``booking_enquiry / COLLECTING`` with no time yet (a day with nothing free stays in that shape
+#: but was never offered anything). Its *value* is the inbound turn's ``received_at`` at the moment
+#: the offer was made — the event timestamp the freshness window is measured from, not the
+#: wall-clock time the row was written. Both are only ever set where the availability result carries
+#: real slots; see ``_mark_concrete_offer`` and ``resumed_offer_is_stale``.
+_OFFER_AT_SLOT = "availability_offered_at"
 
 #: Said when an appointment has actually been written, and only then. The reference is part of the
 #: sentence rather than an afterthought: it is the thing that makes the claim checkable, and a
@@ -444,6 +457,88 @@ def _offered_concrete_slots(result: ToolResult) -> bool:
     return result.ok and bool((result.data or {}).get("times"))
 
 
+def _mark_concrete_offer(task: Task, turn: InboundTurn) -> None:
+    """Record, on the task, that a concrete availability offer was just made and when.
+
+    Called only where the availability result actually carries bookable slots (see
+    ``_answer_from_catalogue`` and ``_offer_times``). The value is the *offer turn's* own
+    ``received_at`` — the event timestamp, persisted with the task so the freshness window survives
+    a process restart and never depends on when the row happened to be written. A "nothing free"
+    answer, an ambiguous service, or any result without concrete times must never call this, because
+    its presence is the proof that later distinguishes a real offer from an ordinary clarification.
+    """
+    task.slots[_OFFER_AT_SLOT] = turn.received_at.isoformat()
+
+
+def _clear_concrete_offer(task: Task) -> None:
+    """Drop any prior offer proof before a fresh booking-availability evaluation.
+
+    An offer's freshness belongs to the exact service, branch and date it was made for. When the
+    booking re-evaluates availability — the patient changed the day, or is being re-offered times —
+    the earlier proof is superseded and must be cleared *before* the new result is known, so a
+    re-evaluation that returns no concrete times (a day with nothing free) leaves the task with no
+    proof at all rather than an orphaned one from the previous service/branch/date. Without this, an
+    offer for A followed by a no-availability B would keep A's marker and later expire B, discarding
+    the service/branch/date the patient gave for B.
+    """
+    task.slots.pop(_OFFER_AT_SLOT, None)
+
+
+def resumed_offer_is_stale(task: Task, now: datetime, vocab: Vocabulary) -> bool:
+    """Whether a resumed booking's concrete availability offer has aged past the freshness window.
+
+    The guard for the one state a **concrete** availability offer leaves behind: a
+    ``booking_enquiry`` kept ``COLLECTING`` with service, branch and date held, only
+    ``requested_time`` still missing, **and** the persisted proof that real slots were offered
+    (``_OFFER_AT_SLOT``, written by ``_mark_concrete_offer`` and cleared by
+    ``_clear_concrete_offer`` on every re-evaluation). A much later bare reply such as "الساعة ٧"
+    must not be read against that old offer, because the diary it quoted has moved on: resuming it
+    would let stale service/branch/date context reach a hold, read-back or booking.
+
+    The offer proof is required, not inferred. Intent, status and a missing ``requested_time`` are
+    not enough on their own — a booking whose day had nothing free sits in exactly that shape yet
+    was never offered concrete times, and expiring it would wrongly discard the service, branch and
+    date the patient did give. Only a task carrying ``_OFFER_AT_SLOT`` was genuinely offered slots,
+    so only it is subject to the window; every other task (an ``availability_check``, a booking
+    still missing service/branch, a no-availability clarification, a read-back awaiting yes/no, any
+    finished job) returns ``False`` and is resumed exactly as before.
+
+    The window is the clinic's existing ``quoting.max_age_seconds`` — the same contract the offer is
+    quoted under, not a second TTL — and age is measured from the persisted offer timestamp to the
+    inbound turn's own timestamp (``now``), so the decision is deterministic and never reads the
+    machine clock.
+
+    Once a task *is* a post-offer pending booking, a marker that is present but unusable — a
+    non-string that JSON drift could leave behind, or a string that will not parse as a timestamp —
+    is treated as **stale**, not fresh: its offer age cannot be trusted, and resuming it
+    indefinitely (or raising on a wrong type) is the worse failure than dropping one booking whose
+    metadata is already corrupt. A genuinely absent marker is the "no offer" case and stays fresh.
+    """
+    marker: object = task.slots.get(_OFFER_AT_SLOT)
+    if marker is None:
+        return False
+    if task.intent != _BOOKING_INTENT or task.status != TaskStatus.COLLECTING:
+        return False
+    if task.next_step() != ("ask", _TIME_SLOT):
+        return False
+    if not isinstance(marker, str):
+        return True
+    try:
+        offered_at = datetime.fromisoformat(marker)
+    except ValueError:
+        return True
+    return _seconds_between(offered_at, now) > vocab.quoting.max_age_seconds
+
+
+def _seconds_between(earlier: datetime, later: datetime) -> float:
+    """Elapsed seconds, tolerating the naive datetimes SQLite hands back (read as UTC)."""
+    if earlier.tzinfo is None:
+        earlier = earlier.replace(tzinfo=UTC)
+    if later.tzinfo is None:
+        later = later.replace(tzinfo=UTC)
+    return (later - earlier).total_seconds()
+
+
 def _is_an_answer(text: str | None) -> bool:
     """Whether a message is a short yes or no rather than a new request."""
     return reads_as_yes(text or "") or reads_as_no(text or "")
@@ -571,12 +666,22 @@ async def _offer_times(
     answer to a real question, and the patient's next move is another day. Only a tool that could
     not say anything at all — unwired, or a service name that reached nothing — fetches a person.
     """
+    # Re-evaluating availability for this booking: any earlier offer proof is superseded. Clear it
+    # first, so a result with no concrete times (a changed day with nothing free) leaves no marker
+    # rather than an orphaned one from the previous service/branch/date.
+    _clear_concrete_offer(task)
     result = await _availability(task, turn, conversation_id)
     if result is None:
         return await _hand_off(task, "handoff_to_human")
     if (block := _screen_category(result, vocab)) is not None:
         return await _blocked(task, block)
     if result.human_summary:
+        # Only a result carrying real slots is a concrete offer. "Nothing free on Thursday" also
+        # has a human_summary and leaves the task in the same ``COLLECTING`` / waiting-for-time
+        # shape, but it offered nothing — so it must *not* be re-marked, or its later resume would
+        # be expired and the patient's service/branch/date discarded.
+        if _offered_concrete_slots(result):
+            _mark_concrete_offer(task, turn)
         return OutboundAction(kind="ask", text=result.human_summary), task
     return await _hand_off(task, "handoff_to_human")
 
@@ -659,7 +764,7 @@ async def _answer_from_catalogue(
     """Run ``check_availability`` or ``quote_price`` and say what came back.
 
     An unresolved or ambiguous service is not a failure to be hidden: the tool composes the
-    question ("Which did you mean: Basic Facial / Facial?") and it is asked, because picking one
+    question ("تحبي أنهي واحدة فيهم: Basic Facial / Facial؟") and it is asked, because picking one
     would quote a real price for a treatment nobody asked about. A tool that came back with
     nothing to say at all falls through to ``on_tool_failure``, which fetches a person — the
     vocabulary's own answer, and the only safe one when a quote cannot be sourced.
@@ -667,6 +772,11 @@ async def _answer_from_catalogue(
     tool = REGISTRY.get(tool_name)
     if tool is None:
         return await _unbuilt(task)
+
+    if tool_name == _AVAILABILITY_TOOL:
+        # Re-evaluating availability: supersede any earlier offer proof before this result is known,
+        # so only a concrete offer below re-marks the task (see ``_clear_concrete_offer``).
+        _clear_concrete_offer(task)
 
     result = await tool.run(
         tenant_id=str(turn.tenant_id),
@@ -708,6 +818,10 @@ async def _answer_from_catalogue(
                 return await _blocked(task, block)
             if (block := _screen_category(result, vocab)) is not None:
                 return await _blocked(task, block)
+            # Concrete slots really were offered this turn: record the proof and the offer's own
+            # timestamp on the task (see ``_mark_concrete_offer``), so a later resume can tell this
+            # pending booking from an ordinary clarification and measure the offer's age.
+            _mark_concrete_offer(task, turn)
             task.intent = _BOOKING_INTENT
             task.status = TaskStatus.COLLECTING
             return OutboundAction(kind="say", text=result.human_summary), task

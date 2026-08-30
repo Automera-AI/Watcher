@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+from apps.api.clinic.catalogue import resolve_service
 from apps.api.clinic.importer import CataloguePlan
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -95,6 +96,23 @@ def test_the_six_session_package_is_priced_above_the_single_session(plan: Catalo
 
 def test_the_highest_booking_reference_step_six_must_issue_after(plan: CataloguePlan) -> None:
     assert plan.report.highest_reference == {"DC": 265}
+
+
+def test_bare_laser_is_ambiguous_against_the_authoritative_workbook(plan: CataloguePlan) -> None:
+    """The authoritative "ليزر" contract: the bare word is ambiguous, never one silent choice.
+
+    The full 35-service workbook — the file the demo actually imports, not the two-branch eval cut —
+    is where this belongs, because only here is the whole laser catalogue present. Bare "ليزر"
+    reaches several laser services at once, so the resolver must report ambiguity and leave the
+    choice to the receptionist's "which one?" rather than picking a row on the tenant's behalf. The
+    candidate count is deliberately not pinned: which laser packages the workbook carries can change
+    without touching the invariant, which is only that the bare word never resolves to a single
+    service.
+    """
+    match = resolve_service("ليزر", plan.services)
+    assert match.found is None, f"bare ليزر silently chose {match.found}"
+    assert match.ambiguous, "bare ليزر must be ambiguous across the workbook's laser services"
+    assert len(match.candidates) > 1
 
 
 def test_the_journey_evals_diary_still_agrees_with_the_workbook(plan: CataloguePlan) -> None:
