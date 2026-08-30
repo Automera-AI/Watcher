@@ -465,6 +465,152 @@ def test_a_non_booking_service_intent_keeps_the_generic_ask(
     assert task.status == TaskStatus.COLLECTING
 
 
+# ── The missing branch / date / time asks (step 4) ───────────────────────────────────────────
+
+
+def test_missing_branch_is_asked_in_arabic() -> None:
+    """The turn after the service: ``برايم ليز`` given, the branch outstanding.
+
+    The step-by-step booking journey asks for the branch and then the day between the service and
+    the diary, and both used to be answered by the generic English ``Could you please provide the
+    …?``. The branch ask is now Egyptian Arabic with no configuration, keyed to the clinic-only
+    ``branch`` slot, and the service it already holds survives the turn.
+    """
+    action, task = asyncio.run(
+        handle(
+            _turn("برايم ليز"),
+            "booking_enquiry",
+            0.95,
+            {"service": "برايم ليز"},
+            None,
+            vocabulary=_CLINICS,
+            today=date(2026, 9, 1),
+        )
+    )
+    assert action.kind == "ask"
+    assert action.text == "تمام، تحبي تحجزي في أنهي فرع؟"
+    assert "Could you please provide" not in (action.text or "")
+    assert task.slots["service"] == "برايم ليز"
+
+
+def test_missing_date_is_asked_in_arabic() -> None:
+    """Service and branch given, the day outstanding — asked in Arabic, not the generic prompt."""
+    action, _ = asyncio.run(
+        handle(
+            _turn("المعادي"),
+            "booking_enquiry",
+            0.95,
+            {"service": "برايم ليز", "branch": "المعادي"},
+            None,
+            vocabulary=_CLINICS,
+            today=date(2026, 9, 1),
+        )
+    )
+    assert action.kind == "ask"
+    assert action.text == "تمام، تحبي الحجز يكون يوم ايه؟"
+    assert "Could you please provide" not in (action.text or "")
+
+
+def test_a_tenant_may_override_the_branch_and_date_asks() -> None:
+    """The branch/date asks go through ``current_copy()``: a tenant's own phrasing wins."""
+    previous = current_copy()
+    configure_conversation_copy(
+        ConversationCopy(ask_branch="في أنهي فرع؟", ask_date="امتى تحبي الميعاد؟")
+    )
+    try:
+        branch, _ = asyncio.run(
+            handle(
+                _turn("برايم ليز"),
+                "booking_enquiry",
+                0.95,
+                {"service": "برايم ليز"},
+                None,
+                vocabulary=_CLINICS,
+                today=date(2026, 9, 1),
+            )
+        )
+        date_ask, _ = asyncio.run(
+            handle(
+                _turn("المعادي"),
+                "booking_enquiry",
+                0.95,
+                {"service": "برايم ليز", "branch": "المعادي"},
+                None,
+                vocabulary=_CLINICS,
+                today=date(2026, 9, 1),
+            )
+        )
+    finally:
+        configure_conversation_copy(previous)
+    assert branch.text == "في أنهي فرع؟"
+    assert date_ask.text == "امتى تحبي الميعاد؟"
+
+
+def test_a_non_clinic_booking_slot_keeps_the_generic_english_ask() -> None:
+    """The Arabic asks are keyed to the clinic booking slots, not to the booking intent.
+
+    A holiday-home ``booking_enquiry`` asks for ``check_in`` / ``unit_type`` — slots the clinic
+    vocabulary never has — so it must keep the generic English prompt rather than pick up an Arabic
+    sentence meant for a clinic. This is what keeps a shared code path from leaking Arabic into the
+    other vertical (``_ask_for_slot`` returns ``None`` for any non-clinic slot).
+    """
+    holiday = shipped_vocabularies()["holiday_homes"]
+    action, _ = asyncio.run(
+        handle(
+            _turn("I'd like to book the 2 bed"),
+            "booking_enquiry",
+            0.95,
+            {"unit_type": "2 bed", "check_out": "Jan 20", "guests": "4"},
+            None,
+            vocabulary=holiday,
+        )
+    )
+    assert action.kind == "ask"
+    assert action.text == "Could you please provide the check in?"
+
+
+# ── The safety exits stay deterministic, English by default, Arabic when set (step 4) ────────
+
+
+def test_handoff_and_unbuilt_default_to_english_and_take_the_tenants_arabic() -> None:
+    """Two safety surfaces the renderer never owns: a clinic makes them Arabic through the seam.
+
+    Their in-code defaults are neutral English because they are shared with every vertical — a
+    global Arabic default would put Arabic in a holiday-home hand-off. So the default is English and
+    the clinic's configured wording overrides it, the same seam every other line goes through.
+    """
+    default_handoff, _ = asyncio.run(
+        handle(_turn("؟"), "availability_check", 0.95, {}, None, vocabulary=_CLINICS, turns_taken=5)
+    )
+    assert default_handoff.kind == "handoff"
+    assert default_handoff.text == HANDOFF_TEXT  # neutral English default
+
+    previous = current_copy()
+    configure_conversation_copy(
+        ConversationCopy(handoff="هحوّلك لزميلي حالاً.", unbuilt="هراجع وأرجعلك.")
+    )
+    try:
+        arabic_handoff, _ = asyncio.run(
+            handle(
+                _turn("؟"), "availability_check", 0.95, {}, None, vocabulary=_CLINICS, turns_taken=5
+            )
+        )
+        task = Task(
+            intent="availability_check",
+            slots={"service": "س", "branch": "ب", "requested_date": "2026-09-02"},
+            confirmed={"service", "branch", "requested_date"},
+            vocabulary=_CLINICS,
+        )
+        unbuilt, _ = asyncio.run(
+            handle(_turn("المواعيد"), "availability_check", 0.95, {}, task, vocabulary=_CLINICS)
+        )
+    finally:
+        configure_conversation_copy(previous)
+    assert arabic_handoff.text == "هحوّلك لزميلي حالاً."
+    assert unbuilt.text == "هراجع وأرجعلك."
+    assert unbuilt.text != _UNBUILT_TEXT
+
+
 # ── Continuing a task across the availability → booking transition ────────────────────────────
 
 

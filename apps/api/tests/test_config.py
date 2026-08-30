@@ -368,3 +368,44 @@ def test_a_price_template_may_state_the_quantity_in_either_form() -> None:
 def test_an_unset_price_template_keeps_the_neutral_default() -> None:
     """A deploy that configures nothing still quotes correctly — the check is on what is set."""
     assert Settings().conversation_copy().price_quote is None
+
+
+def test_the_step_4_fallback_wording_round_trips_through_config() -> None:
+    """The seams the Arabic fallback added (demo step 4) reach ``ConversationCopy`` from the env.
+
+    The branch/date/time asks have Arabic defaults in the receptionist, and the hand-off, unbuilt,
+    read-back-decline and quick-reply defaults are neutral English there — this only proves a clinic
+    can set each in its own voice, the same way every other line is configured. Unset, they are
+    ``None`` and the deterministic in-code default is used.
+    """
+    unset = Settings().conversation_copy()
+    for field in (
+        "ask_branch",
+        "ask_date",
+        "ask_time",
+        "handoff",
+        "unbuilt",
+        "clarify_change",
+        "confirm_yes",
+        "confirm_no",
+    ):
+        assert getattr(unset, field) is None
+
+    configured = Settings(
+        tenant_ask_branch="في أنهي فرع؟",
+        tenant_ask_date="يوم ايه؟",
+        tenant_ask_time="الساعة كام؟",
+        tenant_handoff="هحوّلك لزميلي.",
+        tenant_unbuilt="هراجع وأرجعلك.",
+        tenant_clarify_change="أغيّر ايه؟",
+        tenant_confirm_yes="أيوه",
+        tenant_confirm_no="لأ",
+    ).conversation_copy()
+    assert configured.ask_branch == "في أنهي فرع؟"
+    assert configured.ask_date == "يوم ايه؟"
+    assert configured.ask_time == "الساعة كام؟"
+    assert configured.handoff == "هحوّلك لزميلي."
+    assert configured.unbuilt == "هراجع وأرجعلك."
+    assert configured.clarify_change == "أغيّر ايه؟"
+    assert configured.confirm_yes == "أيوه"
+    assert configured.confirm_no == "لأ"

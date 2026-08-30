@@ -172,6 +172,22 @@ class Settings(ChannelCredentials):
     tenant_confirm_read_back: str | None = None
     tenant_booking_confirmed: str | None = None
 
+    # The remaining receptionist-composed surfaces the step-by-step journey and its safety exits
+    # reach (demo step 4). The branch/date/time asks have Arabic defaults in `receptionist.py`, so
+    # the demo asks them in the patient's language with nothing set; these exist so a tenant can set
+    # its own phrasing. The hand-off, unbuilt, read-back-decline and quick-reply defaults are
+    # neutral *English* — shared with every vertical, so a clinic makes them Arabic here rather than
+    # a global default doing it for a holiday home too. None of these are ever renderer-owned: they
+    # are the deterministic wording a patient reads when the conversation leaves autonomy.
+    tenant_ask_branch: str | None = None
+    tenant_ask_date: str | None = None
+    tenant_ask_time: str | None = None
+    tenant_handoff: str | None = None
+    tenant_unbuilt: str | None = None
+    tenant_clarify_change: str | None = None
+    tenant_confirm_yes: str | None = None
+    tenant_confirm_no: str | None = None
+
     # ── The clinic's booking reference prefix (demo step 6) ───────────────────────────────
     #
     # The letters before the serial in `DC-0042`. The clinic's own initials, so it belongs with
@@ -329,6 +345,14 @@ class Settings(ChannelCredentials):
             ask_service=self.tenant_ask_service,
             confirm_read_back=self.tenant_confirm_read_back,
             booking_confirmed=self.tenant_booking_confirmed,
+            ask_branch=self.tenant_ask_branch,
+            ask_date=self.tenant_ask_date,
+            ask_time=self.tenant_ask_time,
+            handoff=self.tenant_handoff,
+            unbuilt=self.tenant_unbuilt,
+            clarify_change=self.tenant_clarify_change,
+            confirm_yes=self.tenant_confirm_yes,
+            confirm_no=self.tenant_confirm_no,
         )
 
     def database_dsn(self) -> str:

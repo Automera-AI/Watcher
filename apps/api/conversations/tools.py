@@ -199,6 +199,55 @@ class ConversationCopy:
     this text is unreachable, which is the correct behaviour rather than a gap.
     """
 
+    ask_branch: str | None = None
+    """The question asked when a booking is missing only its branch. No placeholders.
+
+    Composed by the receptionist, like ``ask_service``, and the branch/date/time asks are the ones
+    the step-by-step booking journey hits between the service and the diary — ``برايم ليز`` then
+    ``المعادي`` then ``بكرة`` is three separate turns, and each of the second and third used to be
+    answered by the generic English ``Could you please provide the …?``. The Arabic default lives in
+    ``receptionist.py`` (``_ASK_BRANCH_TEXT``); this seam only lets a tenant set the phrasing in its
+    own voice. Only reached for the clinic booking slots — a vertical whose bookings ask for other
+    slots keeps the generic prompt (``receptionist._ask_for_slot``)."""
+
+    ask_date: str | None = None
+    """The question asked when a booking is missing only its date. No placeholders. See
+    ``ask_branch``; Arabic default ``receptionist._ASK_DATE_TEXT``."""
+
+    ask_time: str | None = None
+    """The question asked when a booking is missing only its time and one is asked for directly. No
+    placeholders. On the demo flow the time is *offered* rather than asked (``check_availability``),
+    so this is the rarely-reached ask; it exists so the fallback is Arabic if it is. Arabic default
+    ``receptionist._ASK_TIME_TEXT``."""
+
+    handoff: str | None = None
+    """The generic hand-off sentence: said whenever a person is fetched — the autonomy ceiling, the
+    clarification limit, a clinical block, an unresolvable tool. **A safety surface**: the renderer
+    never phrases it (plan §8), so this deterministic wording is the only thing a patient reads when
+    the conversation leaves autonomy. The in-code default (``receptionist.HANDOFF_TEXT``) is neutral
+    English that names nobody; a clinic sets it in Arabic so its own hand-offs are not the one
+    English sentence in an Arabic conversation. No placeholders."""
+
+    unbuilt: str | None = None
+    """Said when a capability is not built yet: the message is recorded and a person is fetched.
+    Like ``handoff`` this is a safety surface the renderer never owns, and its in-code default
+    (``receptionist._UNBUILT_TEXT``) is neutral English. No placeholders."""
+
+    clarify_change: str | None = None
+    """Asked after a read-back is declined: which detail to change. Reached on the booking journey
+    when a patient answers the confirmation with "no", so a clinic wants it in Arabic; the in-code
+    default (``receptionist._CLARIFY_CHANGE_TEXT``) is neutral English. No placeholders."""
+
+    confirm_yes: str | None = None
+    """The affirmative quick-reply button shown with a read-back. The reply text is already the
+    tenant's (``confirm_read_back``), and the two buttons beside it were the last English on the
+    read-back turn — "Yes" / "No" under an Arabic question. A clinic sets these to "أيوه" / "لأ",
+    which ``conversations/confirmation.py`` reads as agreement/refusal. Defaults to "Yes"."""
+
+    confirm_no: str | None = None
+    """The negative quick-reply button shown with a read-back. See ``confirm_yes``. Defaults to
+    "No"."""
+
 
 class Greet(Tool):
     """Open the conversation: say hello, say what can be done here, invite the request.
@@ -379,6 +428,23 @@ def _money(minor: int, currency: str) -> str:
 #: does not widen.
 _CHOOSE_ONE_TEXT = "تحبي أنهي واحدة فيهم: {options}؟"
 
+#: The availability answers, in Egyptian Arabic, for a clinic that configured no wording of its own.
+#: These four tools are registered only for the clinic vertical (``configure_clinic``), so an Arabic
+#: default here can never reach a holiday-home reply — it is the same reasoning that lets
+#: ``_CHOOSE_ONE_TEXT`` be Arabic in code. A tenant still overrides each through its ``copy`` field;
+#: the default is only what the clinic path says when nothing is set, and it must be Arabic so the
+#: booking journey does not fall back to English when generation is unavailable (plan §7).
+#: ``{times}``/``{service}``/``{branch}``/``{date}`` are filled from the scheduling system on the
+#: turn — the service and branch names stay as the catalogue holds them, a pre-existing display-name
+#: gap the demo does not widen.
+_AVAILABILITY_OFFER_TEXT = (
+    "متاح عندنا {times} لـ {service} في فرع {branch} يوم {date}. تحبي أحجزلك إمتى؟"
+)
+_AVAILABILITY_NONE_TEXT = (
+    "معلش، مفيش مواعيد فاضية لـ {service} في فرع {branch} يوم {date}. تحبي أشوفلك يوم تاني؟"
+)
+_BOOKING_TAKEN_TEXT = "معلش، الميعاد ده اتحجز حالاً. تحبي أشوفلك المتاح؟"
+
 
 class _ClinicTool(Tool):
     """Shared wiring for the four tools that read the imported catalogue.
@@ -530,10 +596,7 @@ class CheckAvailability(_ClinicTool):
         )
         spoken_date = wanted.strftime("%A %d %B")
         if not slots:
-            template = (
-                self._copy.availability_none
-                or "I'm sorry — there is nothing free for {service} at {branch} on {date}."
-            )
+            template = self._copy.availability_none or _AVAILABILITY_NONE_TEXT
             return ToolResult(
                 ok=False,
                 error="none_available",
@@ -544,15 +607,12 @@ class CheckAvailability(_ClinicTool):
                     branch=resolved.branch.name,
                     date=spoken_date,
                 )
-                or f"There is nothing free on {spoken_date}.",
+                or f"معلش، مفيش مواعيد فاضية يوم {spoken_date}.",
             )
 
         times = [self._local(slot.starts_at).strftime("%H:%M") for slot in slots]
         listed = " / ".join(times)
-        template = (
-            self._copy.availability_offer
-            or "I can offer {times} for {service} at {branch} on {date}. Which would you like?"
-        )
+        template = self._copy.availability_offer or _AVAILABILITY_OFFER_TEXT
         return ToolResult(
             ok=True,
             data={
@@ -573,7 +633,7 @@ class CheckAvailability(_ClinicTool):
                 branch=resolved.branch.name,
                 date=spoken_date,
             )
-            or f"I can offer {listed} on {spoken_date}. Which would you like?",
+            or f"متاح عندنا {listed} يوم {spoken_date}. تحبي أحجزلك إمتى؟",
         )
 
 
@@ -719,10 +779,7 @@ class ConfirmBooking(_ClinicTool):
             now=self._clock(),
         )
         if outcome.booking is None:
-            template = (
-                self._copy.booking_taken
-                or "I'm sorry — that time has just been taken. Shall I look at what else is free?"
-            )
+            template = self._copy.booking_taken or _BOOKING_TAKEN_TEXT
             return ToolResult(
                 ok=False,
                 error=outcome.reason,
