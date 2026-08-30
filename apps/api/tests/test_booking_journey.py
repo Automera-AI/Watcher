@@ -435,20 +435,23 @@ def _to_primelase_offer(turns_taken_start: int = 0) -> tuple[OutboundAction, Tas
     return offer, task
 
 
+@pytest.mark.parametrize("message", ["جلسة رقم 6", "6 مناطق"])
 def test_a_bare_number_that_is_not_a_time_never_books_in_an_active_booking(
-    primelase_directory: _PrimelaseDirectory,
+    primelase_directory: _PrimelaseDirectory, message: str
 ) -> None:
-    """Codex blocker: "جلسة رقم 6" carries a bare "6" that ``parse_time`` reads as 18:00.
+    """Codex blocker: a bare "6" beside other words is what ``parse_time`` read as 18:00.
 
-    In an active booking with 17:00 / 18:00 already offered, that fabricated time must not be
-    selected, held, read back or booked. A bare fragment out of context is classified ``unclear``,
-    so this is the ``_read_as_answer`` path — the provenance guard drops the value there, and the
-    turn does not advance to a hold or a confirmation.
+    "جلسة رقم 6" (a session ordinal) and "6 مناطق" (the substring-marker case: "مناطق" only *starts*
+    with a meem) both carry a number that is not a stated time. In an active booking with 17:00 /
+    18:00 already offered, that fabricated time must not be selected, held, read back or booked. A
+    bare fragment out of context is classified ``unclear``, so this is the ``_read_as_answer`` path
+    — the provenance guard drops the value there, and the turn does not advance to a hold or a
+    confirmation.
     """
     offer, task = _to_primelase_offer()
     assert "17:00" in (offer.text or "") and "18:00" in (offer.text or "")
 
-    action, after = _say("جلسة رقم 6", "unclear", {}, task, turns_taken=4)
+    action, after = _say(message, "unclear", {}, task, turns_taken=4)
 
     # No time was accepted, so nothing was held, nothing was read back, nothing was booked.
     assert "requested_time" not in after.slots

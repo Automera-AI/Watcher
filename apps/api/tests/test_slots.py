@@ -319,18 +319,47 @@ def test_an_empty_message_drops_any_temporal_slot() -> None:
 # ── temporal provenance: a number that is not a time (Codex remediation) ─────────────────────
 
 
-@pytest.mark.parametrize("message", ["6 أكتوبر", "6 جلسات", "جلسة رقم 6"])
+@pytest.mark.parametrize(
+    "message",
+    [
+        # originally reported
+        "6 أكتوبر",
+        "6 جلسات",
+        "جلسة رقم 6",
+        # the substring mechanism the fix closes: a bare number beside a word that merely *starts*
+        # with a meem or saad, which the old " م"/" ص" markers matched anywhere.
+        "6 مناطق",
+        "6 مرات",
+        "6 مرضى",
+        "6 مواعيد",
+        "6 صور",
+        # a real time word elsewhere in the message no longer licenses an unrelated count.
+        "مساء الخير، عايزة 6 جلسات",
+    ],
+)
 def test_a_bare_number_that_is_not_a_time_drops_a_fabricated_requested_time(message: str) -> None:
-    """The blocker: ``parse_time`` reads the "6" out of these as 18:00. Provenance must not.
+    """The blocker: ``parse_time`` reads the "6" out of each of these as 18:00. Provenance must not.
 
-    A day ("6 أكتوبر"), a session count ("6 جلسات") and a session ordinal ("جلسة رقم 6") each carry
-    a bare number that is not the patient stating an appointment time, so a classifier-invented
-    ``requested_time`` gets no support from them and is dropped.
+    Every case carries a bare number that is not the patient stating an appointment time — a day, a
+    count, an ordinal, or a number next to a word that only happens to begin with a time letter — so
+    a classifier-invented ``requested_time`` gets no support and is dropped.
     """
     guarded = strip_unsupported_temporal_slots(
         {"service": "فاشيال", "requested_time": "18:00"}, message, today=TODAY
     )
     assert guarded == {"service": "فاشيال"}
+
+
+@pytest.mark.parametrize("message", ["6 مساء", "6 م", "6 ص", "6 صباح"])
+def test_arabic_meridiem_words_are_not_accepted_as_time_markers(message: str) -> None:
+    """Decision: only the English am/pm mark a number as a time; the Arabic meridiem words do not.
+
+    "6 مساء" states 18:00 to a human, so dropping it is a deliberate false-negative — the
+    receptionist asks again rather than reading the Arabic meridiem as a time marker. Kept as an
+    explicit test so the choice is visible and not re-widened by accident.
+    """
+    guarded = strip_unsupported_temporal_slots({"requested_time": "18:00"}, message, today=TODAY)
+    assert guarded == {}
 
 
 @pytest.mark.parametrize(
@@ -341,8 +370,10 @@ def test_a_bare_number_that_is_not_a_time_drops_a_fabricated_requested_time(mess
         ("6:00", "18:00"),
         ("18:00", "18:00"),
         ("٦:٠٠", "18:00"),
-        ("6 مساء", "18:00"),
         ("6pm", "18:00"),
+        ("6 pm", "18:00"),
+        ("9am", "09:00"),
+        ("12 am", "00:00"),
     ],
 )
 def test_an_explicit_time_expression_survives_provenance(message: str, expected: str) -> None:

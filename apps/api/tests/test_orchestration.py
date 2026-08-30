@@ -810,13 +810,15 @@ def test_a_fabricated_date_never_reaches_task_state_and_the_missing_day_is_asked
     assert outcome.outbound_action.kind == "ask"
 
 
-def test_a_fabricated_time_from_a_bare_number_never_reaches_task_state() -> None:
-    """Codex blocker, worker path: a classifier emits ``requested_time`` for "جلسة رقم 6".
+@pytest.mark.parametrize("message", ["جلسة رقم 6", "6 مناطق", "مساء الخير، عايزة 6 جلسات"])
+def test_a_fabricated_time_from_a_bare_number_never_reaches_task_state(message: str) -> None:
+    """Codex blocker, worker path: a classifier emits ``requested_time`` for a non-time number.
 
-    The message is a session ordinal, not a time — its bare "6" is exactly what the greedy parser
-    read as 18:00. The provenance guard drops the fabricated time before it reaches task state, so
-    an active booking already holding service, branch and date is not silently given an appointment
-    time the patient never stated.
+    A session ordinal ("جلسة رقم 6"), a number beside a meem-initial word ("6 مناطق"), and a stray
+    time word licensing an unrelated count ("مساء الخير، عايزة 6 جلسات") each carry a bare "6" the
+    greedy parser read as 18:00. The provenance guard drops the fabricated time before it reaches
+    task state, so an active booking already holding service, branch and date is not silently given
+    an appointment time the patient never stated.
     """
     active = Task(
         intent="booking_enquiry",
@@ -835,7 +837,7 @@ def test_a_fabricated_time_from_a_bare_number_never_reaches_task_state() -> None
         orch.process(
             TENANT_UUID,
             MSG_ID,
-            _clinic_message("جلسة رقم 6", datetime(2026, 9, 1, 12, tzinfo=UTC)),
+            _clinic_message(message, datetime(2026, 9, 1, 12, tzinfo=UTC)),
         )
     )
 

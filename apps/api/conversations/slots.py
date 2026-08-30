@@ -311,10 +311,44 @@ def _message_states_date(message: str, target: str, *, today: date) -> bool:
     return False
 
 
-#: Words and markers that make a number in a message an *explicit* time rather than a quantity:
-#: "الساعة" (o'clock) plus the am/pm markers ``parse_time`` already recognises. Folded forms,
-#: because they are matched against the folded message.
-_EXPLICIT_TIME_MARKERS: tuple[str, ...] = ("الساعه", *_PM_MARKERS, *_AM_MARKERS)
+#: The one word that marks the number *after* it as a time: "الساعة" (o'clock), folded. Matched as
+#: a whole token immediately before the number, never as a substring — "الساعة ٦".
+_TIME_WORD_BEFORE: frozenset[str] = frozenset({"الساعه"})
+
+#: The markers that make the number *before* them a time: the English meridiem only (decision:
+#: am/pm, not the Arabic time-of-day words). Matched as a whole token immediately after the number
+#: — "6 pm" — or glued to it — "6pm". The Arabic "مساء"/"صباح"/"م"/"ص" are deliberately excluded, so
+#: "6 مساء" is not read as a time here and the receptionist asks again rather than guessing.
+_TIME_WORD_AFTER: frozenset[str] = frozenset({"am", "pm"})
+
+#: A number glued to a meridiem marker as one token — "6pm", "9am" (folded).
+_GLUED_TIME = re.compile(r"^(\d{1,2})(am|pm)$")
+
+
+def _has_bounded_time(tokens: list[str]) -> bool:
+    """Whether ``tokens`` contain a *bounded* time: a number tied to a marker, or a lone hour.
+
+    The provenance fix (Codex remediation). The earlier check asked only whether a time marker
+    appeared *anywhere* in the message, which the ``" م"``/``" ص"`` abbreviations turned into "any
+    word starting with meem or saad", and which let a stray "مساء" license an unrelated count. A
+    time is bounded here: the marker has to be the token immediately beside the number.
+
+    * ``الساعة N`` — the before-marker is the token just before the number;
+    * ``N am`` / ``N pm`` / ``Npm`` — a meridiem marker is the token just after, or glued on;
+    * a lone hour — the number is the whole answer.
+    """
+    for index, token in enumerate(tokens):
+        if _GLUED_TIME.match(token):
+            return True
+        if not (token.isdigit() and len(token) <= 2):
+            continue
+        if len(tokens) == 1:
+            return True
+        if index > 0 and tokens[index - 1] in _TIME_WORD_BEFORE:
+            return True
+        if index + 1 < len(tokens) and tokens[index + 1] in _TIME_WORD_AFTER:
+            return True
+    return False
 
 
 def _message_states_time(message: str, target: str, *, assume_pm_before_hour: int) -> bool:
@@ -322,30 +356,25 @@ def _message_states_time(message: str, target: str, *, assume_pm_before_hour: in
 
     Deliberately narrower than :func:`parse_time`, which is left unchanged for the application code
     that reads a patient's own answer. ``parse_time`` reads the bare "6" out of "6 أكتوبر",
-    "6 جلسات" or "جلسة رقم 6" and returns a wall-clock time — which let a classifier's invented
-    ``requested_time`` survive against a number that was never a time and, in an active booking,
-    reach a hold, a read-back and a real appointment. Provenance accepts a time only when the
-    message actually *states* one:
+    "6 جلسات", "جلسة رقم 6" or "6 مناطق" and returns a wall-clock time — which let a classifier's
+    invented ``requested_time`` survive against a number that was never a time and, in an active
+    booking, reach a hold, a read-back and a real appointment. Provenance accepts a time only when
+    the message actually *states* one, as a bounded expression:
 
     * an explicit clock — a colon/dot form such as "6:00", "18:00", "٦:٠٠"; or
-    * a number carrying an explicit time marker — "الساعة ٦", "6 مساء", "6pm"; or
+    * a number tied to a marker token beside it — "الساعة ٦", "6 pm", "6pm"; or
     * a bare hour that is effectively the whole answer — "6", "٦" — whitespace and punctuation
       aside.
 
-    Every other shape is rejected, including a bare number embedded in other words. The
-    false-negative (ask again) is the safe failure here; the false-positive holds and books the
-    wrong slot. This is a separate, stricter gate used only for provenance validation.
+    A marker merely *present* somewhere no longer counts (that was the bug: "6 مناطق", "6 مرات" and
+    "مساء الخير، عايزة 6 جلسات" all validated). Everything unbounded is rejected. The false-negative
+    (ask again) is the safe failure here; the false-positive holds and books the wrong slot. This is
+    a separate, stricter gate used only for provenance validation — ``parse_time`` is untouched.
     """
     folded = _fold(message)
     if not folded:
         return False
-    tokens = _WORD.findall(folded)
-    padded = f" {folded} "
-    stated = (
-        _CLOCK.search(folded) is not None
-        or any(marker in padded for marker in _EXPLICIT_TIME_MARKERS)
-        or (len(tokens) == 1 and tokens[0].isdigit())
-    )
+    stated = _CLOCK.search(folded) is not None or _has_bounded_time(_WORD.findall(folded))
     if not stated:
         return False
     return parse_time(message, assume_pm_before_hour=assume_pm_before_hour) == target
