@@ -250,3 +250,100 @@ def test_a_no_availability_booking_is_never_expired_however_long_it_waits(
     assert resumed.task.slots["branch"] == "المعادي"
     assert resumed.task.slots["requested_date"] == "2026-09-03"
     assert _active_row(database) is not None  # still active, not abandoned
+
+
+def test_a_new_day_with_no_availability_clears_the_earlier_offer_proof(
+    database: Database, diary: _FakeDirectory
+) -> None:
+    """Blocker (round 3): an offer for A must not survive a re-evaluation for B that offers nothing.
+
+    A concrete offer for the demo Wednesday marks the task. The patient then moves the booking to a
+    Thursday with nothing free — a fresh availability evaluation that returns no concrete times. The
+    earlier proof must be cleared then and there, not left orphaned on the task: otherwise a much
+    later bare time would expire this booking (using A's stale timestamp) and discard the
+    service/branch/date the patient gave for B.
+    """
+    store = SqlAlchemyConversationStore(database.tenant_session, vocabulary=CLINICS)
+
+    offer, _ = _step(
+        store,
+        text="في ميعاد فاشيال بيسك في المعادي بكرة؟",
+        intent="availability_check",
+        slots=_OFFER_SLOTS,
+        received_at=NOW,
+        key="offer",
+    )
+    assert offer.kind == "say"
+    marked = _active_row(database)
+    assert marked is not None
+    assert marked.slots["availability_offered_at"] == NOW.isoformat()
+
+    # Move to a Thursday with nothing free: a real re-evaluation, no concrete times offered.
+    reoffer, _ = _step(
+        store,
+        text="لأ خليها الخميس",
+        intent="booking_enquiry",
+        slots={"requested_date": "2026-09-03"},
+        received_at=NOW + timedelta(seconds=60),
+        key="change-day",
+    )
+    assert reoffer.kind == "ask"
+    assert "nothing free" in (reoffer.text or "")
+    row = _active_row(database)
+    assert row is not None
+    assert "availability_offered_at" not in row.slots  # A's proof was cleared, not orphaned onto B
+    assert row.slots["requested_date"] == "2026-09-03"
+
+    # A much later bare time (well past the window measured from A's offer) must NOT expire B.
+    long_after = NOW + timedelta(seconds=MAX_AGE + 200)
+    resumed = store.begin(_turn("الساعة ٦", received_at=long_after, key="late-time"))
+    assert resumed.task is not None  # B was not wrongly abandoned
+    assert resumed.task.slots["requested_date"] == "2026-09-03"
+    assert resumed.task.slots["service"] == "فاشيال بيسك"
+    assert resumed.task.slots["branch"] == "المعادي"
+    assert _active_row(database) is not None
+
+
+def _corrupt_offer_marker(database: Database, value: object) -> None:
+    """Overwrite the persisted offer marker with a malformed value, as storage/JSON drift might."""
+    with database.session() as session:
+        row = session.query(TaskRow).filter(TaskRow.status == "collecting").one()
+        slots: dict[str, object] = dict(row.slots)
+        slots["availability_offered_at"] = value
+        row.slots = slots  # type: ignore[assignment]  # deliberately malformed for the test
+
+
+@pytest.mark.parametrize(
+    "bad_marker", ["not-a-timestamp", 1725181200], ids=["unparseable", "wrong_type"]
+)
+def test_a_malformed_offer_marker_is_treated_as_stale_not_resumed_forever(
+    database: Database, diary: _FakeDirectory, bad_marker: object
+) -> None:
+    """Blocker (round 3): a present-but-unusable marker must expire, never resume indefinitely.
+
+    A real concrete offer is persisted, then its marker is corrupted to a value that cannot be read
+    as a timestamp — an unparseable string, or a non-string a JSON round-trip could leave behind.
+    On the next turn the task is still the post-offer waiting-for-time shape, so its offer age
+    matters; because that age can no longer be trusted, the booking is expired (dropped from active
+    continuity) rather than resumed forever or raising a ``TypeError``.
+    """
+    store = SqlAlchemyConversationStore(database.tenant_session, vocabulary=CLINICS)
+
+    _step(
+        store,
+        text="في ميعاد فاشيال بيسك في المعادي بكرة؟",
+        intent="availability_check",
+        slots=_OFFER_SLOTS,
+        received_at=NOW,
+        key="offer",
+    )
+    _corrupt_offer_marker(database, bad_marker)
+
+    # Even inside the freshness window, an unusable marker cannot prove freshness, so it is stale.
+    within = NOW + timedelta(seconds=MAX_AGE - 100)
+    resumed = store.begin(_turn("الساعة ٦", received_at=within, key="time"))
+
+    assert resumed.task is None  # not resumed; no TypeError raised
+    with database.session() as session:
+        row = session.query(TaskRow).one()
+        assert row.status == TaskStatus.ABANDONED.value
