@@ -412,6 +412,77 @@ def test_normal_booking_progress_is_not_cut_off_at_the_date_step(
     assert "17:00" in (offer.text or "") and "18:00" in (offer.text or "")
 
 
+def _to_primelase_offer(turns_taken_start: int = 0) -> tuple[OutboundAction, Task]:
+    """Play the demo booking to the point where 17:00 / 18:00 have just been offered."""
+    _, task = _say("عايزة احجز", "booking_enquiry", {}, None, turns_taken=turns_taken_start)
+    _, task = _say(
+        "برايم ليز جلسة واحدة",
+        "booking_enquiry",
+        {"service": "برايم ليز", "session_count": "1"},
+        task,
+        turns_taken=turns_taken_start + 1,
+    )
+    _, task = _say(
+        "المعادي", "booking_enquiry", {"branch": "المعادي"}, task, turns_taken=turns_taken_start + 2
+    )
+    offer, task = _say(
+        "بكرة",
+        "booking_enquiry",
+        {"requested_date": "2026-09-02"},
+        task,
+        turns_taken=turns_taken_start + 3,
+    )
+    return offer, task
+
+
+def test_a_bare_number_that_is_not_a_time_never_books_in_an_active_booking(
+    primelase_directory: _PrimelaseDirectory,
+) -> None:
+    """Codex blocker: "جلسة رقم 6" carries a bare "6" that ``parse_time`` reads as 18:00.
+
+    In an active booking with 17:00 / 18:00 already offered, that fabricated time must not be
+    selected, held, read back or booked. A bare fragment out of context is classified ``unclear``,
+    so this is the ``_read_as_answer`` path — the provenance guard drops the value there, and the
+    turn does not advance to a hold or a confirmation.
+    """
+    offer, task = _to_primelase_offer()
+    assert "17:00" in (offer.text or "") and "18:00" in (offer.text or "")
+
+    action, after = _say("جلسة رقم 6", "unclear", {}, task, turns_taken=4)
+
+    # No time was accepted, so nothing was held, nothing was read back, nothing was booked.
+    assert "requested_time" not in after.slots
+    assert action.kind != "confirm"
+    assert primelase_directory.holds == {}
+    assert primelase_directory.bookings == []
+
+    # And an explicit "أيوه" afterwards has no read-back to agree to — still no booking.
+    _confirmed, final = _say("أيوه", "thanks_closing", {}, after, turns_taken=5)
+    assert "booking_reference" not in final.slots
+    assert primelase_directory.bookings == []
+
+
+def test_an_explicit_time_after_an_offer_still_books(
+    primelase_directory: _PrimelaseDirectory,
+) -> None:
+    """The positive side: an explicit "الساعة ٦" is still read, held, confirmed and booked.
+
+    Proves the narrowed time provenance did not break the real selection path — the guard keeps a
+    time the message actually states.
+    """
+    _offer, task = _to_primelase_offer()
+
+    read_back, task = _say("الساعة ٦", "unclear", {}, task, turns_taken=4)
+    assert read_back.kind == "confirm"
+    assert "18:00" in (read_back.text or "")
+    assert primelase_directory.holds  # the slot was held while the patient confirms
+
+    booked, task = _say("أيوه", "thanks_closing", {}, task, turns_taken=5)
+    assert booked.kind == "say"
+    assert task.slots.get("booking_reference")
+    assert len(primelase_directory.bookings) == 1
+
+
 def test_repeated_non_progress_still_reaches_the_handoff_boundary() -> None:
     """The budget is larger, not gone: an answer that never fills a slot still ends with a person.
 

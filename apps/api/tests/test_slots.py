@@ -316,6 +316,47 @@ def test_an_empty_message_drops_any_temporal_slot() -> None:
     assert guarded == {"service": "فاشيال"}
 
 
+# ── temporal provenance: a number that is not a time (Codex remediation) ─────────────────────
+
+
+@pytest.mark.parametrize("message", ["6 أكتوبر", "6 جلسات", "جلسة رقم 6"])
+def test_a_bare_number_that_is_not_a_time_drops_a_fabricated_requested_time(message: str) -> None:
+    """The blocker: ``parse_time`` reads the "6" out of these as 18:00. Provenance must not.
+
+    A day ("6 أكتوبر"), a session count ("6 جلسات") and a session ordinal ("جلسة رقم 6") each carry
+    a bare number that is not the patient stating an appointment time, so a classifier-invented
+    ``requested_time`` gets no support from them and is dropped.
+    """
+    guarded = strip_unsupported_temporal_slots(
+        {"service": "فاشيال", "requested_time": "18:00"}, message, today=TODAY
+    )
+    assert guarded == {"service": "فاشيال"}
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("الساعة 6", "18:00"),
+        ("الساعة ٦", "18:00"),
+        ("6:00", "18:00"),
+        ("18:00", "18:00"),
+        ("٦:٠٠", "18:00"),
+        ("6 مساء", "18:00"),
+        ("6pm", "18:00"),
+    ],
+)
+def test_an_explicit_time_expression_survives_provenance(message: str, expected: str) -> None:
+    guarded = strip_unsupported_temporal_slots({"requested_time": expected}, message, today=TODAY)
+    assert guarded == {"requested_time": expected}
+
+
+@pytest.mark.parametrize("message", ["6", "٦", "6.", "  ٦ ", "18"])
+def test_a_bare_hour_as_the_whole_answer_survives_provenance(message: str) -> None:
+    """A bare hour is a real answer when it is effectively all the patient said (6/٦/18 → 18:00)."""
+    guarded = strip_unsupported_temporal_slots({"requested_time": "18:00"}, message, today=TODAY)
+    assert guarded == {"requested_time": "18:00"}
+
+
 def test_declared_slots_is_the_union_of_required_and_optional() -> None:
     assert declared_slots("booking_enquiry", CLINICS) >= {"service", "branch", "requested_date"}
     assert declared_slots("no_such_intent", CLINICS) == frozenset()

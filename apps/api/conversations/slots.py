@@ -290,6 +290,13 @@ def _message_states_date(message: str, target: str, *, today: date) -> bool:
     "يوم الأربع", "day after tomorrow"), and the parser's own in-sentence weekday scan covers the
     rest. Nothing here is a new date grammar — it is the existing parser, asked about the message's
     own spans rather than a value the classifier reported.
+
+    Known, intentionally-unfixed limitation (documented post-demo debt): an *embedded ISO date*
+    such as "عايزة أحجز يوم 2026-09-02." is not recognised here — ``[^\\W_]+`` splits "2026-09-02"
+    on its hyphens, and ``parse_date`` only reads an ISO date as a whole, exactly-matched value. So
+    a classifier ``requested_date`` that happens to be correct is dropped and the receptionist asks
+    for the day again. That is the safe failure (ask, do not book the wrong day), so it is left as
+    debt rather than widened in this pre-demo pass.
     """
     if parse_date(message, today=today) == target:
         return True
@@ -302,6 +309,46 @@ def _message_states_date(message: str, target: str, *, today: date) -> bool:
             if parse_date(" ".join(tokens[start : start + size]), today=today) == target:
                 return True
     return False
+
+
+#: Words and markers that make a number in a message an *explicit* time rather than a quantity:
+#: "الساعة" (o'clock) plus the am/pm markers ``parse_time`` already recognises. Folded forms,
+#: because they are matched against the folded message.
+_EXPLICIT_TIME_MARKERS: tuple[str, ...] = ("الساعه", *_PM_MARKERS, *_AM_MARKERS)
+
+
+def _message_states_time(message: str, target: str, *, assume_pm_before_hour: int) -> bool:
+    """Whether the patient's words state a time resolving to ``target`` — provenance-strength.
+
+    Deliberately narrower than :func:`parse_time`, which is left unchanged for the application code
+    that reads a patient's own answer. ``parse_time`` reads the bare "6" out of "6 أكتوبر",
+    "6 جلسات" or "جلسة رقم 6" and returns a wall-clock time — which let a classifier's invented
+    ``requested_time`` survive against a number that was never a time and, in an active booking,
+    reach a hold, a read-back and a real appointment. Provenance accepts a time only when the
+    message actually *states* one:
+
+    * an explicit clock — a colon/dot form such as "6:00", "18:00", "٦:٠٠"; or
+    * a number carrying an explicit time marker — "الساعة ٦", "6 مساء", "6pm"; or
+    * a bare hour that is effectively the whole answer — "6", "٦" — whitespace and punctuation
+      aside.
+
+    Every other shape is rejected, including a bare number embedded in other words. The
+    false-negative (ask again) is the safe failure here; the false-positive holds and books the
+    wrong slot. This is a separate, stricter gate used only for provenance validation.
+    """
+    folded = _fold(message)
+    if not folded:
+        return False
+    tokens = _WORD.findall(folded)
+    padded = f" {folded} "
+    stated = (
+        _CLOCK.search(folded) is not None
+        or any(marker in padded for marker in _EXPLICIT_TIME_MARKERS)
+        or (len(tokens) == 1 and tokens[0].isdigit())
+    )
+    if not stated:
+        return False
+    return parse_time(message, assume_pm_before_hour=assume_pm_before_hour) == target
 
 
 def strip_unsupported_temporal_slots(
@@ -333,8 +380,8 @@ def strip_unsupported_temporal_slots(
         del guarded[_GUARDED_DATE_SLOT]
 
     time_value = guarded.get(_GUARDED_TIME_SLOT)
-    if time_value is not None and (
-        parse_time(text, assume_pm_before_hour=assume_pm_before_hour) != time_value
+    if time_value is not None and not _message_states_time(
+        text, time_value, assume_pm_before_hour=assume_pm_before_hour
     ):
         del guarded[_GUARDED_TIME_SLOT]
 
