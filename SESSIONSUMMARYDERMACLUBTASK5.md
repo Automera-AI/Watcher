@@ -2,8 +2,50 @@
 
 **Date:** 2026-08-30
 **Branch:** `claude/dermaclub-conversational-tasks-4-7-58aj0s`
-**Commit:** `779451e` — *fix(clinic): expire a stale availability offer before it is resumed (Task 5)* (pushed)
+**Original commit:** `779451e` (superseded on two points by the Codex remediation below)
 **Builds on:** `f2aa76e` (Task 4 fix HEAD), `c57001d` (Task 4), `c1c3710` (Task 3 safety), `058b1dd` (Task 3)
+
+---
+
+## Codex remediation (supersedes the "The fix"/"Tests" sections below on two points)
+
+Codex reviewed `779451e` and did **not** approve it, raising two blocking issues, both valid:
+
+1. **Wrong timestamp anchor.** The first cut compared `TaskRow.updated_at` (written from process
+   wall-clock time) against the next `turn.received_at`, which can let an offer older than
+   `max_age_seconds` resume, and the tests faked age by editing `updated_at` rather than exercising
+   the real path.
+2. **State is not proof of an offer.** `booking_enquiry / COLLECTING / waiting for requested_time`
+   is not unique to a concrete offer — a booking whose day had **nothing free** sits in the same
+   shape, and the first predicate would have expired it and discarded the patient's
+   service/branch/date.
+
+**Correction (final state):**
+
+- When — and only when — an availability result carries **concrete slots**, the receptionist writes
+  a proof marker onto the task: `slots["availability_offered_at"] = turn.received_at.isoformat()`
+  (`_mark_concrete_offer`, called from the concrete-offer branch of `_answer_from_catalogue` and
+  from `_offer_times` guarded by `_offered_concrete_slots`). A "nothing free" answer never writes it.
+- The marker's **presence** is the offer proof (fixes blocker 2); its **value** is the offer turn's
+  own `received_at` (fixes blocker 1). It rides the task's existing `slots` JSON — the same surface
+  `booking_reference` already uses — so it survives a process restart with **no new column or
+  migration**, and it is not a `required` slot so it never reaches a read-back.
+- `resumed_offer_is_stale(task, now, vocab)` now requires the marker, parses the persisted offer
+  timestamp, and compares it to the inbound turn's `received_at` against
+  `vocabulary.quoting.max_age_seconds`. No marker ⇒ never stale.
+- The three store tests that edited `updated_at` were removed; `apps/api/tests/test_db_adapters.py`
+  is back to its pre-Task-5 baseline. The real-path regressions now live in
+  `apps/api/tests/test_stale_offer_expiry.py`, driving `begin → receptionist → record_reply`
+  against the real store + booking tools + an in-memory diary, with no timestamp mutation.
+- The stray `uv.lock` accidentally committed by `779451e` was removed from tracking and git-ignored.
+
+**Guard proofs:** stamping wall-clock `now()` instead of the offer turn's `received_at` fails the
+recent-offer test's persisted-timestamp assertion; removing the marker requirement (inferring
+staleness from state) fails the no-availability test. **Final verification:** ruff + strict mypy
+clean; **981 passed, 12 skipped**; eval 9/9 journeys, 17/17 turns.
+
+The rest of this document is the original write-up; where it describes the `updated_at` anchor or the
+manual-edit store tests, the remediation above is authoritative.
 
 ---
 

@@ -9,7 +9,6 @@ non-nullable column, and a malformed rule that must not take a tenant's routing 
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -18,7 +17,6 @@ import pytest
 from packages.intents.schema import shipped_vocabularies
 
 from apps.api.audit.log import AuditEntry
-from apps.api.conversations.receptionist import handle
 from apps.api.conversations.task import Task, TaskStatus
 from apps.api.db.engine import Database
 from apps.api.db.models import (
@@ -353,7 +351,6 @@ def _turn(
     *,
     text: str = "Any rooms free in June?",
     thread_id: str = "966500000000",
-    received_at: datetime = NOW,
 ) -> InboundTurn:
     return InboundTurn(
         tenant_id=uuid.UUID(TENANT_A),
@@ -362,7 +359,7 @@ def _turn(
         channel_identity="+966500000000",
         modality="text",
         text=text,
-        received_at=received_at,
+        received_at=NOW,
         idempotency_key=external_id,
     )
 
@@ -541,152 +538,3 @@ def test_a_finished_job_leaves_no_turns_for_the_next_one_to_spend(database: Data
     after = store.begin(_turn("wamid.9", text="and where is the branch?"))
     assert after.task is None  # the booking is finished; nothing is in flight
     assert after.replies_sent == 0
-
-
-# ── Task 5: a stale availability offer must not be resumed into a booking ─────────────────────
-#
-# Task 3 keeps a successful availability offer alive as a `booking_enquiry` left `COLLECTING` with
-# service, branch and date already held and only `requested_time` still missing, so an immediate
-# bare reply ("الساعة ٧") reaches the read-back without re-supplying context. That pending booking
-# had no freshness boundary: a much later bare reply could still inherit an old service/branch/date
-# and reach a hold or booking against a diary that has moved on. The store now enforces the clinic's
-# own `quoting.max_age_seconds` at the continuity boundary — the one place the active task is loaded
-# — measuring age off the inbound turn's own timestamp so the decision is deterministic. These pin
-# the boundary on the real adapter; `NOW` is the offer instant and the resume turn's `received_at`
-# is driven off it, never off the wall clock.
-
-CLINICS = shipped_vocabularies()["clinics"]
-
-#: The pending booking a concrete availability offer leaves behind: everything but the time.
-_POST_OFFER_SLOTS = {"service": "فاشيال", "branch": "المعادي", "requested_date": "2026-09-02"}
-
-
-def _plant_task(
-    store: SqlAlchemyConversationStore,
-    database: Database,
-    *,
-    intent: str,
-    slots: dict[str, str],
-    offered_at: datetime,
-    thread_id: str = "966500000000",
-) -> None:
-    """Create a COLLECTING task through the real store, then stamp when it was last persisted.
-
-    ``record_reply`` writes ``updated_at`` from the wall clock, so an age decision read off it would
-    depend on when the test ran. Overwriting the row's timestamps with a fixed ``offered_at`` and
-    driving the resume turn's ``received_at`` off it is what keeps the decision deterministic.
-
-    ``thread_id`` scopes the planted task to its own conversation, so a test can plant more than one
-    without them colliding in the active set.
-    """
-    key = f"{thread_id}.offer"
-    opening = store.begin(_turn(key, text="offer", thread_id=thread_id))
-    store.record_reply(
-        opening,
-        _turn(key, text="offer", thread_id=thread_id),
-        Task(intent=intent, slots=slots, status=TaskStatus.COLLECTING, vocabulary=CLINICS),
-        OutboundAction(kind="say", text="offer"),
-    )
-    with database.session() as session:
-        planted = (
-            session.query(TaskRow)
-            .filter(TaskRow.status == "collecting", TaskRow.intent == intent)
-            .one()
-        )
-        planted.created_at = offered_at
-        planted.updated_at = offered_at
-
-
-def test_a_pending_booking_within_the_freshness_window_is_resumed(database: Database) -> None:
-    """The recent offer: Task 3 behaviour is unchanged inside the freshness window.
-
-    A bare offered time arriving before the offer goes stale still finds the pending booking, which
-    still holds the service, branch and date and is still only missing ``requested_time`` — exactly
-    what the read-back → confirmation → booking flow (``test_booking_journey.py``) continues from.
-    """
-    store = SqlAlchemyConversationStore(database.tenant_session, vocabulary=CLINICS)
-    _plant_task(store, database, intent="booking_enquiry", slots=_POST_OFFER_SLOTS, offered_at=NOW)
-
-    fresh = NOW + timedelta(seconds=CLINICS.quoting.max_age_seconds - 100)
-    resumed = store.begin(_turn("wamid.time", text="الساعة ٧", received_at=fresh))
-
-    assert resumed.task is not None
-    assert resumed.task.intent == "booking_enquiry"
-    assert resumed.task.status is TaskStatus.COLLECTING
-    assert resumed.task.slots == _POST_OFFER_SLOTS
-    assert resumed.task.next_step() == ("ask", "requested_time")
-    with database.session() as session:
-        assert {row.status for row in session.query(TaskRow).all()} == {"collecting"}
-
-
-def test_a_pending_booking_past_the_freshness_window_is_not_resumed(database: Database) -> None:
-    """The stale offer: the pending booking is dropped from active continuity before the new turn.
-
-    Aged past ``quoting.max_age_seconds``, the offer is not resumed. The store hands back no task,
-    so a later bare time cannot inherit the old service/branch/date, and the row has left the active
-    set (``get_active_task`` only returns collecting/ready/executing). A hold, read-back or booking
-    from the stale context is structurally unreachable — there is nothing to continue.
-    """
-    store = SqlAlchemyConversationStore(database.tenant_session, vocabulary=CLINICS)
-    _plant_task(store, database, intent="booking_enquiry", slots=_POST_OFFER_SLOTS, offered_at=NOW)
-
-    stale = NOW + timedelta(seconds=CLINICS.quoting.max_age_seconds + 100)
-    resume_turn = _turn("wamid.time", text="الساعة ٧", received_at=stale)
-    resumed = store.begin(resume_turn)
-
-    assert resumed.task is None  # nothing in flight: the new turn starts fresh
-    assert resumed.replies_sent == 0
-    with database.session() as session:
-        row = session.query(TaskRow).one()
-        assert row.status == TaskStatus.ABANDONED.value
-        assert row.slots == _POST_OFFER_SLOTS  # kept for a person, just no longer active
-
-    # And the fresh turn, an out-of-context bare time the classifier can only call `unclear`,
-    # reaches no booking: it hands off, and the task it opens never becomes a pending booking
-    # holding the old service or branch.
-    action, task = asyncio.run(
-        handle(
-            resume_turn,
-            "unclear",
-            0.3,
-            {},
-            resumed.task,
-            vocabulary=CLINICS,
-            conversation_id=resumed.conversation_id,
-        )
-    )
-    assert action.kind == "handoff"
-    assert task.intent != "booking_enquiry"
-    assert "service" not in task.slots and "branch" not in task.slots
-
-
-def test_an_ordinary_collecting_task_past_the_window_is_not_expired(database: Database) -> None:
-    """Narrowness: the rule expires only the post-offer "waiting for requested_time" state.
-
-    A booking still missing its branch — a ``booking_enquiry`` left ``COLLECTING`` whose next step
-    asks for ``branch``, not the time — is an ordinary clarification, not a quoted offer. It is not
-    expired by this rule even well past ``max_age_seconds``; nor is an ``availability_check`` that
-    has not yet offered anything. Neither carries a live availability offer to go stale.
-    """
-    long_past = NOW + timedelta(seconds=CLINICS.quoting.max_age_seconds * 10)
-
-    for intent, slots, next_slot in (
-        ("booking_enquiry", {"service": "فاشيال", "requested_date": "2026-09-02"}, "branch"),
-        ("availability_check", {"service": "فاشيال", "branch": "المعادي"}, "requested_date"),
-    ):
-        store = SqlAlchemyConversationStore(database.tenant_session, vocabulary=CLINICS)
-        _plant_task(store, database, intent=intent, slots=slots, offered_at=NOW, thread_id=intent)
-
-        resumed = store.begin(
-            _turn("wamid.next", text="follow up", thread_id=intent, received_at=long_past)
-        )
-
-        assert resumed.task is not None, intent
-        assert resumed.task.intent == intent
-        assert resumed.task.next_step() == ("ask", next_slot)
-        with database.session() as session:
-            statuses = {
-                row.intent: row.status
-                for row in session.query(TaskRow).filter(TaskRow.intent == intent).all()
-            }
-            assert statuses == {intent: "collecting"}, intent
