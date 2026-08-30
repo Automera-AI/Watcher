@@ -52,7 +52,7 @@ from apps.api.audit.log import AuditEntry, AuditLog
 from apps.api.channels.sender import ChannelSender
 from apps.api.classifier.service import Classifier
 from apps.api.classifier.types import ClassificationOutcome, input_from
-from apps.api.conversations.slots import normalise_slots
+from apps.api.conversations.slots import normalise_slots, strip_unsupported_temporal_slots
 from apps.api.conversations.task import Task
 from apps.api.core.alerts import LOG_ONLY, AlertOutcome, EmergencyAlert, OperatorAlerter
 from apps.api.core.autonomy import Autonomy, decide_autonomy
@@ -435,6 +435,16 @@ class Orchestrator:
             extracted_slots,
             vocabulary=self._vocabulary,
             today=self._today(message),
+        )
+        # The temporal provenance guard (demo step 3). A classifier can report a `requested_date`
+        # (or time) the patient never wrote, and `normalise_slots` cannot tell an invented value
+        # from a real one — both resolve. So a resolved date/time is kept only when *this* message
+        # deterministically states it, measured with the same parsers against the same tenant
+        # clock; otherwise it is dropped and the receptionist asks. The active task, not this step,
+        # still carries the service/branch/date earlier turns established — nothing here touches
+        # those, so an "المواعيد المتاحة ايه" that names no day loses only the invented date.
+        extracted = strip_unsupported_temporal_slots(
+            extracted, turn.text, today=self._today(message)
         )
         action, task = await self._receptionist(
             turn,

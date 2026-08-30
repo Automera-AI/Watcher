@@ -289,6 +289,56 @@ def injectable_directory(monkeypatch: pytest.MonkeyPatch) -> _InjectableDirector
     return fake
 
 
+#: The single-session Primelase the demo script books ("برايم ليز جلسة واحدة"). Given the bare
+#: "برايم ليز" alias so the classifier's split into a service and a session count resolves: the
+#: catalogue also holds the six-session package, and the count is what tells them apart.
+_PRIMELASE_SINGLE = Service(
+    code="DT030",
+    name="Primelase Single Session",
+    price_minor=310_000,
+    duration_minutes=60,
+    session_count=1,
+    aliases=("برايم ليز",),
+)
+
+
+class _PrimelaseDirectory(_FakeDirectory):
+    """A diary with free single-session Primelase slots at Maadi on the demo's Wednesday."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            slots=[
+                AvailabilitySlot(
+                    external_id=f"P{index:05d}",
+                    branch_external_id="DC01",
+                    service_code="DT030",
+                    starts_at=start,
+                    ends_at=start + timedelta(minutes=60),
+                )
+                for index, start in enumerate((_cairo(17), _cairo(18)), start=1)
+            ]
+        )
+
+    def list_services(self, tenant_id: str, *, active_only: bool = True) -> list[Service]:
+        return [*SERVICES, _PRIMELASE_SINGLE]
+
+
+@pytest.fixture
+def primelase_directory(monkeypatch: pytest.MonkeyPatch) -> _PrimelaseDirectory:
+    """The booking tools wired to a diary that can actually book the demo script's service."""
+    fake = _PrimelaseDirectory()
+    copy = ConversationCopy(closing_booking_confirmed="Booked ✅ ref {booking_reference}.")
+    for tool in (
+        CloseConversation(copy),
+        CheckAvailability(fake, timezone=CAIRO, copy=copy, clock=lambda: NOW),
+        QuotePrice(fake, timezone=CAIRO, copy=copy, clock=lambda: NOW),
+        HoldSlot(fake, timezone=CAIRO, copy=copy, clock=lambda: NOW),
+        ConfirmBooking(fake, timezone=CAIRO, reference_prefix="DC", copy=copy, clock=lambda: NOW),
+    ):
+        monkeypatch.setitem(REGISTRY, tool.name, tool)
+    return fake
+
+
 def _turn(text: str) -> InboundTurn:
     return InboundTurn(
         tenant_id=TENANT_ID,
@@ -321,6 +371,59 @@ def _say(
             turns_taken=turns_taken,
         )
     )
+
+
+# ── Demo-safe clarification limit (pre-demo Step 2) ──────────────────────────────────────────
+
+
+def test_normal_booking_progress_is_not_cut_off_at_the_date_step(
+    primelase_directory: _PrimelaseDirectory,
+) -> None:
+    """The demo script, one slot per turn, must reach real availability without a hand-off.
+
+    ``service → branch → date → availability`` spends a reply on each step, so the old budget of
+    two clarifying turns handed off the moment the date was asked for — one turn before the diary
+    was ever consulted. The turn counter is advanced exactly as the worker advances it (one reply
+    per turn), so this is the real budget the live path applies.
+    """
+    ask_service, task = _say("عايزة احجز", "booking_enquiry", {}, None, turns_taken=0)
+    assert ask_service.kind == "ask"
+
+    ask_branch, task = _say(
+        "برايم ليز جلسة واحدة",
+        "booking_enquiry",
+        {"service": "برايم ليز", "session_count": "1"},
+        task,
+        turns_taken=1,
+    )
+    assert ask_branch.kind == "ask"
+
+    ask_date, task = _say("المعادي", "booking_enquiry", {"branch": "المعادي"}, task, turns_taken=2)
+    # The turn the old limit cut off: a branch was just given, the date is still outstanding.
+    assert ask_date.kind == "ask"
+    assert task.status is not TaskStatus.HANDED_OFF
+
+    offer, task = _say(
+        "بكرة", "booking_enquiry", {"requested_date": "2026-09-02"}, task, turns_taken=3
+    )
+    # Real diary availability, offered rather than handed off.
+    assert offer.kind == "ask"
+    assert task.status is not TaskStatus.HANDED_OFF
+    assert "17:00" in (offer.text or "") and "18:00" in (offer.text or "")
+
+
+def test_repeated_non_progress_still_reaches_the_handoff_boundary() -> None:
+    """The budget is larger, not gone: an answer that never fills a slot still ends with a person.
+
+    Within budget the task keeps asking; at the configured limit it hands off, so a patient who
+    never answers the outstanding question is not looped at forever.
+    """
+    within_budget, _task = _say("؟", "availability_check", {}, None, turns_taken=4)
+    assert within_budget.kind == "ask"
+
+    handed_off, task = _say("؟", "availability_check", {}, None, turns_taken=5)
+    assert handed_off.kind == "handoff"
+    assert task.status is TaskStatus.HANDED_OFF
 
 
 # ── The journey ────────────────────────────────────────────────────────────────────────────

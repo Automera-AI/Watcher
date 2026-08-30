@@ -771,6 +771,45 @@ def test_the_date_is_resolved_on_the_tenants_clock_not_the_servers() -> None:
     assert store.task.slots["requested_date"] == "2026-09-02"
 
 
+def test_a_fabricated_date_never_reaches_task_state_and_the_missing_day_is_asked() -> None:
+    """Journey B (demo step 3): an availability follow-up with no date must not invent one.
+
+    An active task already holds service and branch. The patient asks "what times are free?"
+    without naming a day, but the classifier emits a ``requested_date`` all the same. The provenance
+    guard drops it because this message states no such day, so the task keeps the service and
+    branch it had, invents no date, and asks for the missing one — rather than checking a diary
+    against a day the patient never chose, or handing off.
+    """
+    active = Task(
+        intent="availability_check",
+        slots={"service": "فاشيال", "branch": "المعادي"},
+        vocabulary=vocabulary_for("clinics"),
+    )
+    orch, _audit, _inbox, store = _conversing(
+        "availability_check",
+        0.95,
+        slots={"requested_date": "بكرة"},  # a day the message below never states
+        conversations=_FakeConversations(task=active),
+        vocabulary=vocabulary_for("clinics"),
+        policy=TenantPolicy(timezone="Africa/Cairo"),
+    )
+    outcome = asyncio.run(
+        orch.process(
+            TENANT_UUID,
+            MSG_ID,
+            _clinic_message("المواعيد المتاحة ايه", datetime(2026, 8, 31, 12, tzinfo=UTC)),
+        )
+    )
+
+    assert store.task is not None
+    assert store.task.slots["service"] == "فاشيال"
+    assert store.task.slots["branch"] == "المعادي"
+    assert "requested_date" not in store.task.slots
+    assert outcome.action is not RoutingAction.HANDOFF
+    assert outcome.outbound_action is not None
+    assert outcome.outbound_action.kind == "ask"
+
+
 def test_the_model_is_told_todays_date_on_the_tenants_clock() -> None:
     """It has no clock of its own; without this "بكرة" resolves against a training cut."""
     seen: list[Any] = []

@@ -46,7 +46,7 @@ from pathlib import Path
 from typing import Any
 
 from apps.api.conversations.receptionist import handle
-from apps.api.conversations.slots import normalise_slots
+from apps.api.conversations.slots import normalise_slots, strip_unsupported_temporal_slots
 from apps.api.conversations.task import Task, TaskStatus
 from apps.api.conversations.tools import (
     REGISTRY,
@@ -554,12 +554,18 @@ def run_journey(
             # form and pass through unchanged; a recorded one is the model's raw output and is
             # not, so a journey run on recordings without this would be scoring a pipeline that
             # does not exist.
+            today = diary.now.astimezone(_zone(diary.timezone)).date()
             slots = normalise_slots(
                 label.intent,
                 label.slots,
                 vocabulary=vocabulary,
-                today=diary.now.astimezone(_zone(diary.timezone)).date(),
+                today=today,
             )
+            # The same provenance guard the worker applies (demo step 3): a recorded classification
+            # can carry a `requested_date`/`requested_time` the message never stated, and the eval
+            # would score a pipeline that does not exist if it let one through. Kept only when this
+            # message deterministically resolves to the same value.
+            slots = strip_unsupported_temporal_slots(slots, turn.message, today=today)
             action, task = asyncio.run(
                 handle(
                     _inbound(tenant_id, turn.message, diary.now, index),
@@ -570,7 +576,7 @@ def run_journey(
                     vocabulary=vocabulary,
                     conversation_id=conversation_id,
                     turns_taken=continuity.replies_sent,
-                    today=diary.now.astimezone(_zone(diary.timezone)).date(),
+                    today=today,
                 )
             )
             continuity.record(task, action)

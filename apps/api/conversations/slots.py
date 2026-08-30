@@ -82,6 +82,11 @@ _ABSENCES = frozenset({"null", "none", "nil", "unknown", "n/a", "na", "-", "--",
 #: written: "الساعة ٦" is a perfectly ordinary way to type a time.
 _DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 
+#: Word tokens — Arabic and Latin letters and digits — with punctuation dropped. Used by the
+#: provenance guard to scan a message for a date word the exact relative-day lookup would miss if
+#: it were glued to a "؟" or a full stop.
+_WORD = re.compile(r"[^\W_]+", re.UNICODE)
+
 _ISO_DATE = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})$")
 _CLOCK = re.compile(r"(\d{1,2})\s*[:.٫]\s*(\d{2})")
 _BARE_HOUR = re.compile(r"(?<!\d)(\d{1,2})(?!\d)")
@@ -264,6 +269,76 @@ def parse_time(text: str, *, assume_pm_before_hour: int = ASSUME_PM_BEFORE_HOUR)
     if hour > 23:
         return None
     return f"{hour:02d}:{minute:02d}"
+
+
+#: The two temporal slots the provenance guard covers (pre-demo Step 3). Deliberately just these:
+#: they are the ones a fabricated value books a patient into a wrong day or time on, and the ones
+#: the classifier was seen to invent. Service and branch are *not* guarded — the active task, not a
+#: re-extraction of the message, is what preserves those across turns, and generalised slot
+#: provenance is post-demo work.
+_GUARDED_DATE_SLOT = "requested_date"
+_GUARDED_TIME_SLOT = "requested_time"
+
+
+def _message_states_date(message: str, target: str, *, today: date) -> bool:
+    """Whether the patient's own words in ``message`` deterministically resolve to ``target``.
+
+    ``parse_date`` recognises a relative day ("بكرة") only as a whole value, so a date sitting
+    inside a longer sentence ("عاوزة أحجز ... بكرة") would not resolve if the whole message were
+    handed to it. The message is therefore scanned token-window by token-window with the *same*
+    parser: windows of up to three tokens cover every multi-word form the parser knows ("بعد بكرة",
+    "يوم الأربع", "day after tomorrow"), and the parser's own in-sentence weekday scan covers the
+    rest. Nothing here is a new date grammar — it is the existing parser, asked about the message's
+    own spans rather than a value the classifier reported.
+    """
+    if parse_date(message, today=today) == target:
+        return True
+    # Word tokens only: punctuation glued to a date word ("بكرة؟", "tomorrow.") would otherwise
+    # hide it from the exact relative-day lookup. ``[^\W_]+`` keeps Arabic and Latin letters and
+    # digits and drops the rest, so the windows below are the bare words the parser recognises.
+    tokens = _WORD.findall(_fold(message))
+    for size in (1, 2, 3):
+        for start in range(len(tokens) - size + 1):
+            if parse_date(" ".join(tokens[start : start + size]), today=today) == target:
+                return True
+    return False
+
+
+def strip_unsupported_temporal_slots(
+    resolved: Mapping[str, str],
+    message: str | None,
+    *,
+    today: date,
+    assume_pm_before_hour: int = ASSUME_PM_BEFORE_HOUR,
+) -> dict[str, str]:
+    """Drop a ``requested_date``/``requested_time`` the current message does not itself support.
+
+    The temporal provenance guard (pre-demo Step 3). ``normalise_slots`` turns whatever the
+    classifier emitted into a value a task can act on, but it cannot tell a date the patient wrote
+    from one the model invented — both resolve to a clean ``YYYY-MM-DD``. This is the check that
+    can: a resolved temporal value survives only when re-parsing *this* patient message with the
+    same deterministic parser yields the identical value, and is dropped otherwise. A dropped date
+    costs one "which day?" question; an invented one books the wrong day and calls it confirmed —
+    so every uncertainty here drops.
+
+    Runs after normalisation and before the value reaches task state. It touches only the two
+    guarded temporal slots and passes every other key through untouched: the active task, not this
+    message, stays responsible for the service, branch and date earlier turns already established.
+    """
+    guarded = dict(resolved)
+    text = message or ""
+
+    date_value = guarded.get(_GUARDED_DATE_SLOT)
+    if date_value is not None and not _message_states_date(text, date_value, today=today):
+        del guarded[_GUARDED_DATE_SLOT]
+
+    time_value = guarded.get(_GUARDED_TIME_SLOT)
+    if time_value is not None and (
+        parse_time(text, assume_pm_before_hour=assume_pm_before_hour) != time_value
+    ):
+        del guarded[_GUARDED_TIME_SLOT]
+
+    return guarded
 
 
 def declared_slots(intent: str, vocabulary: Vocabulary) -> frozenset[str]:

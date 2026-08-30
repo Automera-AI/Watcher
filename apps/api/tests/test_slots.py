@@ -20,6 +20,7 @@ from apps.api.conversations.slots import (
     normalise_slots,
     parse_date,
     parse_time,
+    strip_unsupported_temporal_slots,
 )
 
 #: A Monday. The demo week runs 31 Aug – 6 Sep with Friday 4 Sep absent from the diary.
@@ -239,6 +240,80 @@ def test_the_holiday_home_vertical_still_normalises_its_own_dates() -> None:
         today=TODAY,
     )
     assert resolved == {"check_in": "2026-09-04", "check_out": "2026-09-01", "guests": "4"}
+
+
+# ── the temporal provenance guard (pre-demo Step 3) ──────────────────────────────────────────
+
+
+def test_a_date_the_message_does_not_state_is_dropped() -> None:
+    """The live failure: a classifier reports a date the patient never wrote. It must not pass."""
+    guarded = strip_unsupported_temporal_slots(
+        {"service": "فاشيال", "branch": "المعادي", "requested_date": "2026-09-02"},
+        "المواعيد المتاحة ايه",
+        today=TODAY,
+    )
+    assert guarded == {"service": "فاشيال", "branch": "المعادي"}
+
+
+def test_a_date_the_message_states_as_a_standalone_word_is_kept() -> None:
+    guarded = strip_unsupported_temporal_slots(
+        {"requested_date": "2026-09-01"}, "بكرة", today=TODAY
+    )
+    assert guarded == {"requested_date": "2026-09-01"}
+
+
+def test_a_date_stated_inside_a_longer_sentence_is_kept() -> None:
+    """A relative day the parser only knows as a whole value is still found in a sentence."""
+    guarded = strip_unsupported_temporal_slots(
+        {"service": "ليزر", "branch": "الشيخ زايد", "requested_date": "2026-09-01"},
+        "عاوزة أحجز ليزر في الشيخ زايد بكرة",
+        today=TODAY,
+    )
+    assert guarded["requested_date"] == "2026-09-01"
+
+
+def test_a_multi_word_relative_day_in_a_sentence_is_kept() -> None:
+    guarded = strip_unsupported_temporal_slots(
+        {"requested_date": "2026-09-02"}, "احجزيلي بعد بكرة", today=TODAY
+    )
+    assert guarded == {"requested_date": "2026-09-02"}
+
+
+def test_a_date_that_resolves_to_a_different_day_than_the_message_is_dropped() -> None:
+    """A message says tomorrow; a fabricated value says a different day. The value loses."""
+    guarded = strip_unsupported_temporal_slots(
+        {"requested_date": "2026-09-05"}, "بكرة", today=TODAY
+    )
+    assert guarded == {}
+
+
+def test_a_time_the_message_states_is_kept_and_a_fabricated_one_is_dropped() -> None:
+    kept = strip_unsupported_temporal_slots(
+        {"requested_time": "18:00"}, "احجزيلي الساعة ٦", today=TODAY
+    )
+    assert kept == {"requested_time": "18:00"}
+
+    dropped = strip_unsupported_temporal_slots(
+        {"requested_time": "18:00"}, "المواعيد المتاحة ايه", today=TODAY
+    )
+    assert dropped == {}
+
+
+def test_service_and_branch_are_never_touched_by_the_temporal_guard() -> None:
+    """The guard is temporal only: earlier-established, non-temporal slots pass through intact."""
+    guarded = strip_unsupported_temporal_slots(
+        {"service": "فاشيال", "branch": "المعادي"}, "المواعيد المتاحة ايه", today=TODAY
+    )
+    assert guarded == {"service": "فاشيال", "branch": "المعادي"}
+
+
+def test_an_empty_message_drops_any_temporal_slot() -> None:
+    guarded = strip_unsupported_temporal_slots(
+        {"requested_date": "2026-09-02", "requested_time": "18:00", "service": "فاشيال"},
+        None,
+        today=TODAY,
+    )
+    assert guarded == {"service": "فاشيال"}
 
 
 def test_declared_slots_is_the_union_of_required_and_optional() -> None:
