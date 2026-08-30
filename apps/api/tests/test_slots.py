@@ -350,13 +350,32 @@ def test_a_bare_number_that_is_not_a_time_drops_a_fabricated_requested_time(mess
     assert guarded == {"service": "فاشيال"}
 
 
+def test_a_mixed_message_ties_the_value_to_the_bounded_span_not_a_stray_number() -> None:
+    """Codex blocker: "6 جلسات الساعة 8" states 08:00 via "الساعة 8", not 18:00 from the count "6".
+
+    A fabricated ``requested_time=18:00`` — what greedy ``parse_time`` reads from the leading "6" —
+    must be dropped, because no bounded span in the message resolves to 18:00. The genuinely-stated
+    08:00 (from the bounded "الساعة 8") is kept.
+    """
+    dropped = strip_unsupported_temporal_slots(
+        {"service": "فاشيال", "requested_time": "18:00"}, "6 جلسات الساعة 8", today=TODAY
+    )
+    assert dropped == {"service": "فاشيال"}
+
+    kept = strip_unsupported_temporal_slots(
+        {"requested_time": "08:00"}, "6 جلسات الساعة 8", today=TODAY
+    )
+    assert kept == {"requested_time": "08:00"}
+
+
 @pytest.mark.parametrize("message", ["6 مساء", "6 م", "6 ص", "6 صباح"])
 def test_arabic_meridiem_words_are_not_accepted_as_time_markers(message: str) -> None:
     """Decision: only the English am/pm mark a number as a time; the Arabic meridiem words do not.
 
-    "6 مساء" states 18:00 to a human, so dropping it is a deliberate false-negative — the
-    receptionist asks again rather than reading the Arabic meridiem as a time marker. Kept as an
-    explicit test so the choice is visible and not re-widened by accident.
+    "6 مساء" states 18:00 to a human, so the guard dropping it is a deliberate false-negative — a
+    known Egyptian-Arabic limitation accepted for the demo (downstream, the receptionist re-asks, or
+    hands off on the active-offer ``unclear`` path). Kept as an explicit test so the choice is
+    visible and not re-widened by accident.
     """
     guarded = strip_unsupported_temporal_slots({"requested_time": "18:00"}, message, today=TODAY)
     assert guarded == {}

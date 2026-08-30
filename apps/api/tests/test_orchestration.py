@@ -810,13 +810,17 @@ def test_a_fabricated_date_never_reaches_task_state_and_the_missing_day_is_asked
     assert outcome.outbound_action.kind == "ask"
 
 
-@pytest.mark.parametrize("message", ["جلسة رقم 6", "6 مناطق", "مساء الخير، عايزة 6 جلسات"])
+@pytest.mark.parametrize(
+    "message",
+    ["جلسة رقم 6", "6 مناطق", "مساء الخير، عايزة 6 جلسات", "6 جلسات الساعة 8"],
+)
 def test_a_fabricated_time_from_a_bare_number_never_reaches_task_state(message: str) -> None:
     """Codex blocker, worker path: a classifier emits ``requested_time`` for a non-time number.
 
-    A session ordinal ("جلسة رقم 6"), a number beside a meem-initial word ("6 مناطق"), and a stray
-    time word licensing an unrelated count ("مساء الخير، عايزة 6 جلسات") each carry a bare "6" the
-    greedy parser read as 18:00. The provenance guard drops the fabricated time before it reaches
+    A session ordinal ("جلسة رقم 6"), a number beside a meem-initial word ("6 مناطق"), a stray time
+    word licensing an unrelated count ("مساء الخير، عايزة 6 جلسات"), and a mixed message whose real
+    time is 08:00 but whose leading count "6" greedily parses to 18:00 ("6 جلسات الساعة 8") each let
+    the greedy parser produce a fabricated 18:00. The provenance guard drops it before it reaches
     task state, so an active booking already holding service, branch and date is not silently given
     an appointment time the patient never stated.
     """
