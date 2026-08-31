@@ -546,21 +546,40 @@ def strip_unsupported_clinic_slots(
         services = tool._directory.list_services(tenant_id)
         stated = resolve_service_in_message(text, services)
         claimed = resolve_service(service_value, services)
-        if claimed.ambiguous:
-            narrowed = _by_session_count(claimed.candidates, guarded.get("session_count"))
-            if narrowed is not None:
-                claimed = narrowed
-        stated_codes = {
-            service.code
-            for service in ((stated.found,) if stated.found is not None else stated.candidates)
-        }
         claimed_codes = {
             service.code
             for service in ((claimed.found,) if claimed.found is not None else claimed.candidates)
         }
-        if not stated_codes or stated_codes != claimed_codes:
-            guarded.pop("service", None)
-            guarded.pop("session_count", None)
+        if stated.found is not None:
+            if claimed.found is not None and stated.found.code == claimed.found.code:
+                # Both sides already identify the same exact row. Preserve the classifier's
+                # supported wording so an Arabic alias does not turn into an English read-back.
+                pass
+            elif claimed.ambiguous and stated.found.code in claimed_codes:
+                # The current message, not classifier specificity, proved this exact catalogue
+                # row. Store its canonical name even when the classifier supplied only a broader
+                # compatible family and normalization discarded a separate package-count slot.
+                guarded["service"] = stated.found.name
+                if "session_count" in guarded:
+                    guarded["session_count"] = str(stated.found.session_count)
+            else:
+                guarded.pop("service", None)
+                guarded.pop("session_count", None)
+        elif claimed.ambiguous:
+            narrowed = _by_session_count(claimed.candidates, guarded.get("session_count"))
+            if narrowed is not None:
+                claimed = narrowed
+            claimed_codes = {
+                service.code
+                for service in (
+                    (claimed.found,) if claimed.found is not None else claimed.candidates
+                )
+            }
+        if stated.found is None:
+            stated_codes = {service.code for service in stated.candidates}
+            if not stated_codes or stated_codes != claimed_codes:
+                guarded.pop("service", None)
+                guarded.pop("session_count", None)
     elif "session_count" in guarded:
         # A count can refine a service that the same message names; by itself it may be an hour,
         # quantity, or old classifier context and must not narrow an existing service family.

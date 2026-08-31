@@ -31,8 +31,9 @@ from apps.api.conversations.task import (
     Task,
     TaskStatus,
 )
-from apps.api.conversations.tools import REGISTRY, AnswerFromKnowledge
+from apps.api.conversations.tools import REGISTRY, AnswerFromKnowledge, CheckAvailability
 from apps.api.core.alerts import AlertOutcome, EmergencyAlert
+from apps.api.core.clinic import Service
 from apps.api.core.emergency import EMERGENCY_REPLY
 from apps.api.core.knowledge import Fact
 from apps.api.core.policy import DEFAULT_POLICY, TenantPolicy
@@ -53,9 +54,44 @@ from apps.api.schemas.enums import (
 )
 from apps.api.schemas.envelope import InboundTurn, OutboundAction
 from apps.api.schemas.message import MessageEnvelope
+from apps.api.tests.test_booking_journey import _PrimelaseDirectory
 
 TENANT = "tenant-1"
 TENANT_UUID = "00000000-0000-0000-0000-000000000001"
+
+
+class _SplitPrimelaseDirectory(_PrimelaseDirectory):
+    """Production-shaped Primelase family: the bare name does not select a package."""
+
+    def list_services(self, tenant_id: str, *, active_only: bool = True) -> list[Service]:
+        return [
+            Service(
+                code="DT028",
+                name="Primelase Laser Hair Removal - Single Session",
+                price_minor=310_000,
+                duration_minutes=45,
+                session_count=1,
+                aliases=("برايم ليز جلسة واحدة", "برايمليز جلسة واحدة", "جلسة برايم ليز"),
+            ),
+            Service(
+                code="DT029",
+                name="Primelase Laser Package - 6 Sessions",
+                price_minor=1_500_000,
+                duration_minutes=45,
+                session_count=6,
+                aliases=("برايم ليز 6 جلسات", "برايم ليز ٦ جلسات"),
+            ),
+            Service(
+                code="DT030",
+                name="Primelase Laser Package - 12 Sessions",
+                price_minor=1_635_000,
+                duration_minutes=45,
+                session_count=12,
+                aliases=("برايم ليز 12 جلسة", "برايم ليز ١٢ جلسة"),
+            ),
+        ]
+
+
 MSG_ID = "msg-1"
 
 
@@ -741,6 +777,34 @@ def test_what_the_model_extracted_reaches_the_task() -> None:
     # Resolved against the tenant's clock, not the model's sense of the date.
     assert store.task.slots["requested_date"] == "2026-09-01"
     assert store.task.missing == ["requested_time"]
+
+
+def test_current_message_exact_service_survives_split_extraction_after_normalization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The production worker drops booking ``session_count`` before provenance validation."""
+    directory = _SplitPrimelaseDirectory()
+    monkeypatch.setitem(
+        REGISTRY,
+        "check_availability",
+        CheckAvailability(directory, timezone="Africa/Cairo"),
+    )
+    orch, _audit, _inbox, store = _conversing(
+        "booking_enquiry",
+        0.95,
+        slots={"service": "برايم ليز", "session_count": "1"},
+        vocabulary=vocabulary_for("clinics"),
+        policy=TenantPolicy(timezone="Africa/Cairo"),
+    )
+
+    outcome = _converse(orch, "برايم ليز جلسة واحدة")
+
+    assert store.task is not None
+    assert store.task.slots["service"] == "Primelase Laser Hair Removal - Single Session"
+    assert "session_count" not in store.task.slots
+    assert store.task.missing == ["branch", "requested_date", "requested_time"]
+    assert outcome.outbound_action is not None
+    assert outcome.outbound_action.kind == "ask"
 
 
 def test_a_slot_the_intent_never_declares_does_not_reach_the_task() -> None:

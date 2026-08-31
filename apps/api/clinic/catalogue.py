@@ -215,10 +215,13 @@ def resolve_branch_in_message(text: str, branches: Sequence[Branch]) -> BranchMa
     for size in range(1, len(words) + 1):
         for start in range(len(words) - size + 1):
             span = " ".join(words[start : start + size])
+            identity_tokens = _tokens(span)
+            if not any(character.isalpha() for token in identity_tokens for character in token):
+                continue
             found = resolve_branch(span, branches)
             candidates = (found.found,) if found.found is not None else found.candidates
             if candidates:
-                matches.append((candidates, len(_tokens(span))))
+                matches.append((candidates, len(identity_tokens)))
     if not matches:
         return BranchMatch()
 

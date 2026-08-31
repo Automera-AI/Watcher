@@ -392,6 +392,20 @@ class _ProductionTraceDirectory(_FakeDirectory):
         return [_FULL_BODY_3, _FULL_BODY_6, _FULL_BODY_12, _BIKINI_UNDERARM_6]
 
 
+class _SixOctoberDirectory(_ProductionTraceDirectory):
+    """A location catalogue whose numeric prefix must not validate by itself."""
+
+    def list_branches(self, tenant_id: str, *, active_only: bool = True) -> list[Branch]:
+        return [
+            Branch(
+                external_id="DC06",
+                name="6th of October",
+                area="Giza",
+                aliases=("6 أكتوبر", "أكتوبر"),
+            )
+        ]
+
+
 @pytest.fixture
 def production_trace_directory(monkeypatch: pytest.MonkeyPatch) -> _ProductionTraceDirectory:
     fake = _ProductionTraceDirectory()
@@ -402,6 +416,17 @@ def production_trace_directory(monkeypatch: pytest.MonkeyPatch) -> _ProductionTr
         ConfirmBooking(fake, timezone=CAIRO, reference_prefix="DC", clock=lambda: NOW),
     ):
         monkeypatch.setitem(REGISTRY, tool.name, tool)
+    return fake
+
+
+@pytest.fixture
+def six_october_directory(monkeypatch: pytest.MonkeyPatch) -> _SixOctoberDirectory:
+    fake = _SixOctoberDirectory()
+    monkeypatch.setitem(
+        REGISTRY,
+        "check_availability",
+        CheckAvailability(fake, timezone=CAIRO, clock=lambda: NOW),
+    )
     return fake
 
 
@@ -452,6 +477,31 @@ def test_classifier_branch_is_rejected_when_current_message_does_not_name_it(
     )
 
     assert "branch" not in task.slots
+
+
+def test_bare_number_cannot_validate_classifier_selected_numeric_branch(
+    six_october_directory: _SixOctoberDirectory,
+) -> None:
+    _action, task = _say(
+        "عايزة 6 جلسات",
+        "booking_enquiry",
+        {"branch": "6 أكتوبر"},
+    )
+
+    assert "branch" not in task.slots
+
+
+@pytest.mark.parametrize("message", ["6 أكتوبر", "أكتوبر", "فرع 6 أكتوبر"])
+def test_location_words_validate_sixth_of_october_branch(
+    six_october_directory: _SixOctoberDirectory, message: str
+) -> None:
+    _action, task = _say(
+        message,
+        "booking_enquiry",
+        {"branch": "6 أكتوبر"},
+    )
+
+    assert task.slots["branch"] == "6 أكتوبر"
 
 
 def test_broad_message_cannot_license_classifier_selected_specific_service(
@@ -554,26 +604,6 @@ def test_current_message_may_select_one_exact_catalogue_service(
     )
 
     assert task.slots["service"] == selected
-
-
-def test_exact_message_accepts_classifier_service_plus_separate_session_count(
-    production_trace_directory: _ProductionTraceDirectory,
-) -> None:
-    active = Task(
-        intent="booking_enquiry",
-        slots={"service": "laser"},
-        vocabulary=CLINICS,
-    )
-
-    _action, task = _say(
-        "Full Body laser hair removal - 3 sessions",
-        "booking_enquiry",
-        {"service": "Full Body", "session_count": "3"},
-        active,
-    )
-
-    assert task.slots["service"] == "Full Body"
-    assert task.slots["session_count"] == "3"
 
 
 def test_compact_production_trace_never_checks_the_classifier_invented_package(
@@ -997,6 +1027,34 @@ def test_new_date_after_none_available_runs_a_fresh_availability_check(
     assert action.kind == "ask"
     assert "11:00" in (action.text or "")
     assert task.slots["requested_date"] == "2026-09-02"
+
+
+def test_repeating_same_unavailable_date_reaches_non_progress_handoff(
+    directory: _FakeDirectory,
+) -> None:
+    _nothing_free, task = _say(
+        "احجزيلي فاشيال بيسك في المعادي الخميس",
+        "booking_enquiry",
+        {"service": "فاشيال بيسك", "branch": "المعادي", "requested_date": "2026-09-03"},
+    )
+    assert task.slots[NON_PROGRESS_TURNS_SLOT] == "0"
+
+    for attempt in range(1, 6):
+        action, task = _say(
+            "الخميس",
+            "booking_enquiry",
+            {"requested_date": "2026-09-03"},
+            task,
+        )
+        assert task.slots[NON_PROGRESS_TURNS_SLOT] == str(attempt)
+        assert "requested_date" not in task.slots
+        if attempt < 5:
+            assert action.kind == "ask"
+
+    assert action.kind == "handoff"
+    assert task.status is TaskStatus.HANDED_OFF
+    assert task.slots["service"] == "فاشيال بيسك"
+    assert task.slots["branch"] == "المعادي"
 
 
 def test_two_services_a_patient_cannot_tell_apart_are_asked_about_never_chosen(

@@ -305,6 +305,51 @@ def _stored_non_progress_turns(task: Task, *, legacy_fallback: int) -> int:
         return max(0, legacy_fallback)
 
 
+def _next_non_progress_turns(
+    task: Task,
+    vocabulary: Vocabulary,
+    *,
+    original_task: Task | None,
+    previous_progress: tuple[str, tuple[tuple[str, str], ...], tuple[str, ...]] | None,
+    previous_non_progress: int,
+    force_progress: bool,
+) -> int:
+    """Count this turn from the task's meaningful state at the point this is called."""
+    if original_task is None or task is not original_task:
+        return 0
+    if force_progress or _progress_signature(task, vocabulary) != previous_progress:
+        return 0
+    return previous_non_progress + 1
+
+
+async def _finalize_mutating_action_progress(
+    result: tuple[OutboundAction, Task],
+    vocabulary: Vocabulary,
+    *,
+    original_task: Task | None,
+    previous_progress: tuple[str, tuple[tuple[str, str], ...], tuple[str, ...]] | None,
+    previous_non_progress: int,
+    force_progress: bool,
+) -> tuple[OutboundAction, Task]:
+    """Recount after a tool path that may add and then remove business state in one turn."""
+    action, task = result
+    non_progress_turns = _next_non_progress_turns(
+        task,
+        vocabulary,
+        original_task=original_task,
+        previous_progress=previous_progress,
+        previous_non_progress=previous_non_progress,
+        force_progress=force_progress,
+    )
+    task.slots[NON_PROGRESS_TURNS_SLOT] = str(non_progress_turns)
+    if (
+        action.kind in ("ask", "confirm")
+        and non_progress_turns >= vocabulary.defaults.max_clarifying_turns
+    ):
+        return await _hand_off(task, vocabulary.defaults.on_max_turns)
+    return action, task
+
+
 async def handle(
     turn: InboundTurn,
     intent: str,
@@ -401,13 +446,14 @@ async def handle(
             # person, which is the right end for a read-back that keeps being rejected.
             refused_confirmation = True
 
-    current_progress = _progress_signature(task, vocab)
-    if original_task is None or task is not original_task:
-        non_progress_turns = 0
-    elif current_progress != previous_progress or retrying_after_none:
-        non_progress_turns = 0
-    else:
-        non_progress_turns = previous_non_progress + 1
+    non_progress_turns = _next_non_progress_turns(
+        task,
+        vocab,
+        original_task=original_task,
+        previous_progress=previous_progress,
+        previous_non_progress=previous_non_progress,
+        force_progress=retrying_after_none,
+    )
     task.slots[NON_PROGRESS_TURNS_SLOT] = str(non_progress_turns)
 
     autonomy: Autonomy = decide_autonomy(
@@ -453,7 +499,15 @@ async def handle(
         if slot == _TIME_SLOT and tool_name == _BOOKING_TOOL:
             # Not an open question. The one detail still missing is *which* appointment, and the
             # only honest way to collect it is to offer what the diary actually holds.
-            return await _offer_times(task, turn, conversation_id, vocab)
+            result = await _offer_times(task, turn, conversation_id, vocab)
+            return await _finalize_mutating_action_progress(
+                result,
+                vocab,
+                original_task=original_task,
+                previous_progress=previous_progress,
+                previous_non_progress=previous_non_progress,
+                force_progress=retrying_after_none,
+            )
         if slot == _SERVICE_SLOT and intent in _SERVICE_ASK_INTENTS:
             # The one ask on the booking/availability flow, and the last English leak on it. Asked
             # in Arabic, carrying the branch and day the task already holds — not the generic slot
@@ -488,10 +542,26 @@ async def handle(
     task.status = TaskStatus.EXECUTING
 
     if tool_name in (_AVAILABILITY_TOOL, _QUOTE_TOOL):
-        return await _answer_from_catalogue(task, turn, tool_name, conversation_id, vocab)
+        result = await _answer_from_catalogue(task, turn, tool_name, conversation_id, vocab)
+        return await _finalize_mutating_action_progress(
+            result,
+            vocab,
+            original_task=original_task,
+            previous_progress=previous_progress,
+            previous_non_progress=previous_non_progress,
+            force_progress=retrying_after_none,
+        )
 
     if tool_name == _BOOKING_TOOL:
-        return await _book(task, turn, conversation_id, vocab)
+        result = await _book(task, turn, conversation_id, vocab)
+        return await _finalize_mutating_action_progress(
+            result,
+            vocab,
+            original_task=original_task,
+            previous_progress=previous_progress,
+            previous_non_progress=previous_non_progress,
+            force_progress=retrying_after_none,
+        )
 
     if tool_name == _KNOWLEDGE_TOOL:
         return await _answer_from_knowledge(task, turn, identity_verified, vocab)
