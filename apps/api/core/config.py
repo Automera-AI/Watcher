@@ -216,6 +216,26 @@ class Settings(ChannelCredentials):
         default=HIGH_CONFIDENCE_THRESHOLD, ge=0.0, le=1.0
     )
 
+    # ── Constrained generative renderer (pre-demo Step 5, plan §8–§10) ─────────────────────
+    #
+    # `template` (the default) is the deterministic, presentation-ready Egyptian-Arabic layer Step
+    # 4 completed: every word a patient reads is deterministic and the renderer makes zero model
+    # calls. `generative` lets a model *phrase* the five eligible acts around protected
+    # placeholders while code substitutes the proven values — the model never owns a service,
+    # branch, date, time or booking reference. The default is `template` so the demo's safe mode
+    # is the one it boots in; generation is opt-in per deploy.
+    response_style: Literal["template", "generative"] = "template"
+
+    # The one short renderer call uses the cheap Claude tier through the same Anthropic
+    # configuration the classifier uses (`llm_credentials`). Haiku for the same reason the
+    # first-pass classifier is Haiku: it is a phrasing call in the path of a waiting patient.
+    response_renderer_model: str = "claude-haiku-4-5"
+
+    # A hard, short ceiling: one call, no retry loop, and a failure falls straight back to the
+    # deterministic Arabic. A renderer that is slow must not delay the conversation materially
+    # (plan §10), so this is a product decision, not a library default.
+    response_renderer_timeout_seconds: float = Field(default=2.5, gt=0.0)
+
     # ── Self-hosted / regulated tier (Phase 5, addendum §8) ────────────────────────────────
     self_hosted_llm_base_url: str | None = None
     self_hosted_llm_model: str | None = None
