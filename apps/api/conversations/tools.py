@@ -8,7 +8,7 @@ declared intent knowing about it.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -16,7 +16,13 @@ from zoneinfo import ZoneInfo
 
 from packages.intents.schema import Vocabulary, default_vocabulary
 
-from apps.api.clinic.catalogue import ServiceMatch, resolve_branch, resolve_service
+from apps.api.clinic.catalogue import (
+    ServiceMatch,
+    resolve_branch,
+    resolve_branch_in_message,
+    resolve_service,
+    resolve_service_in_message,
+)
 from apps.api.core.clinic import Branch, ClinicDirectory, Service
 from apps.api.core.knowledge import Fact, KnowledgeLookup, best_match
 from apps.api.core.property import PropertyResolver
@@ -515,6 +521,83 @@ class _ClinicTool(Tool):
 
     def _local(self, moment: datetime) -> datetime:
         return moment.astimezone(self._zone)
+
+
+def strip_unsupported_clinic_slots(
+    resolved: Mapping[str, str], message: str | None, *, tenant_id: str
+) -> dict[str, str]:
+    """Drop service/branch values more specific than the current patient message proves.
+
+    This is clinic-only by construction: the configured ``check_availability`` tool owns the
+    tenant-scoped directory and therefore the authoritative catalogue.  A vertical without that
+    tool keeps its slots unchanged.  Current-message evidence is resolved first and independently;
+    only then is the classifier value resolved and compared.  Equal catalogue candidate sets are
+    the admissible specificity for a service (one exact SKU or one still-ambiguous family), while a
+    branch must resolve to the same single location on both sides.
+    """
+    guarded = dict(resolved)
+    tool = REGISTRY.get("check_availability")
+    if not isinstance(tool, _ClinicTool):
+        return guarded
+
+    text = message or ""
+    service_value = guarded.get("service")
+    if service_value is not None:
+        services = tool._directory.list_services(tenant_id)
+        stated = resolve_service_in_message(text, services)
+        claimed = resolve_service(service_value, services)
+        claimed_codes = {
+            service.code
+            for service in ((claimed.found,) if claimed.found is not None else claimed.candidates)
+        }
+        if stated.found is not None:
+            if claimed.found is not None and stated.found.code == claimed.found.code:
+                # Both sides already identify the same exact row. Preserve the classifier's
+                # supported wording so an Arabic alias does not turn into an English read-back.
+                pass
+            elif claimed.ambiguous and stated.found.code in claimed_codes:
+                # The current message, not classifier specificity, proved this exact catalogue
+                # row. Store its canonical name even when the classifier supplied only a broader
+                # compatible family and normalization discarded a separate package-count slot.
+                guarded["service"] = stated.found.name
+                if "session_count" in guarded:
+                    guarded["session_count"] = str(stated.found.session_count)
+            else:
+                guarded.pop("service", None)
+                guarded.pop("session_count", None)
+        elif claimed.ambiguous:
+            narrowed = _by_session_count(claimed.candidates, guarded.get("session_count"))
+            if narrowed is not None:
+                claimed = narrowed
+            claimed_codes = {
+                service.code
+                for service in (
+                    (claimed.found,) if claimed.found is not None else claimed.candidates
+                )
+            }
+        if stated.found is None:
+            stated_codes = {service.code for service in stated.candidates}
+            if not stated_codes or stated_codes != claimed_codes:
+                guarded.pop("service", None)
+                guarded.pop("session_count", None)
+    elif "session_count" in guarded:
+        # A count can refine a service that the same message names; by itself it may be an hour,
+        # quantity, or old classifier context and must not narrow an existing service family.
+        guarded.pop("session_count", None)
+
+    branch_value = guarded.get("branch")
+    if branch_value is not None:
+        branches = tool._directory.list_branches(tenant_id)
+        stated_branch = resolve_branch_in_message(text, branches)
+        claimed_branch = resolve_branch(branch_value, branches)
+        if (
+            stated_branch.found is None
+            or claimed_branch.found is None
+            or stated_branch.found.external_id != claimed_branch.found.external_id
+        ):
+            guarded.pop("branch", None)
+
+    return guarded
 
 
 def _by_session_count(

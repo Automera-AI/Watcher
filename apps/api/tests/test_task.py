@@ -15,7 +15,13 @@ from __future__ import annotations
 
 import pytest
 
-from apps.api.conversations.task import Task, TaskStatus, UnknownIntent
+from apps.api.conversations.task import (
+    AWAITING_ANOTHER_DATE_SLOT,
+    NON_PROGRESS_TURNS_SLOT,
+    Task,
+    TaskStatus,
+    UnknownIntent,
+)
 
 # ── ported from the scaffold ──────────────────────────────────────────────────
 
@@ -56,6 +62,24 @@ def test_blank_values_are_ignored() -> None:
     t.absorb({"check_in": "2026-09-04"})
     t.absorb({"check_in": ""})
     assert t.slots["check_in"] == "2026-09-04"
+
+
+def test_classifier_slots_cannot_overwrite_reserved_internal_metadata() -> None:
+    """Persisted control state is neither classifier-owned nor a required business slot."""
+    t = Task(intent="booking_enquiry")
+    t.slots[NON_PROGRESS_TURNS_SLOT] = "2"
+    t.slots[AWAITING_ANOTHER_DATE_SLOT] = "1"
+
+    t.absorb(
+        {
+            NON_PROGRESS_TURNS_SLOT: "999",
+            AWAITING_ANOTHER_DATE_SLOT: "classifier-value",
+        }
+    )
+
+    assert t.slots[NON_PROGRESS_TURNS_SLOT] == "2"
+    assert t.slots[AWAITING_ANOTHER_DATE_SLOT] == "1"
+    assert t.missing == ["check_in", "check_out", "guests", "unit_type"]
 
 
 # ── added: the edges the scaffold left open ───────────────────────────────────

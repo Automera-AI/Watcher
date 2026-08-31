@@ -162,3 +162,80 @@ def resolve_branch(text: str, branches: Sequence[Branch]) -> BranchMatch:
     if len(reached) == 1:
         return BranchMatch(found=reached[0])
     return BranchMatch(candidates=tuple(reached))
+
+
+def resolve_service_in_message(text: str, services: Sequence[Service]) -> ServiceMatch:
+    """Resolve only the service specificity established by the patient's current message.
+
+    Classifier output is deliberately absent from this function.  Every contiguous span of the
+    current message is offered to :func:`resolve_service`, and the smallest candidate set wins.
+    That lets an exact package phrase outrank its broad ``laser`` sub-span while preserving an
+    ambiguous family phrase as all of its candidates.  Longer equally narrow spans outrank their
+    own broad prefixes (``برايم ليز 6`` over ``برايم ليز``); true ties are unioned, so a message
+    naming two equally-specific alternatives remains ambiguous instead of silently choosing one.
+    """
+    matches: list[tuple[tuple[Service, ...], int]] = []
+    words = normalise_service_name(text).split()
+    for size in range(1, len(words) + 1):
+        for start in range(len(words) - size + 1):
+            span = " ".join(words[start : start + size])
+            # A package count or session word can narrow catalogue candidates, but it does not
+            # identify a treatment by itself.  Requiring one alphabetic, non-noise token prevents
+            # an unrelated "الساعة 3" from licensing the sole 3-session SKU.
+            identity_tokens = _tokens(span)
+            if not any(character.isalpha() for token in identity_tokens for character in token):
+                continue
+            found = resolve_service(span, services)
+            candidates = (found.found,) if found.found is not None else found.candidates
+            if candidates:
+                matches.append((candidates, len(identity_tokens)))
+    if not matches:
+        return ServiceMatch()
+
+    narrowest = min(len(candidates) for candidates, _specificity in matches)
+    most_specific = max(
+        specificity for candidates, specificity in matches if len(candidates) == narrowest
+    )
+    codes = {
+        service.code
+        for candidates, specificity in matches
+        if len(candidates) == narrowest and specificity == most_specific
+        for service in candidates
+    }
+    candidates = tuple(service for service in services if service.code in codes)
+    if len(candidates) == 1:
+        return ServiceMatch(found=candidates[0])
+    return ServiceMatch(candidates=candidates)
+
+
+def resolve_branch_in_message(text: str, branches: Sequence[Branch]) -> BranchMatch:
+    """Resolve a branch from the current message alone, keeping equal alternatives ambiguous."""
+    matches: list[tuple[tuple[Branch, ...], int]] = []
+    words = normalise_service_name(text).split()
+    for size in range(1, len(words) + 1):
+        for start in range(len(words) - size + 1):
+            span = " ".join(words[start : start + size])
+            identity_tokens = _tokens(span)
+            if not any(character.isalpha() for token in identity_tokens for character in token):
+                continue
+            found = resolve_branch(span, branches)
+            candidates = (found.found,) if found.found is not None else found.candidates
+            if candidates:
+                matches.append((candidates, len(identity_tokens)))
+    if not matches:
+        return BranchMatch()
+
+    narrowest = min(len(candidates) for candidates, _specificity in matches)
+    most_specific = max(
+        specificity for candidates, specificity in matches if len(candidates) == narrowest
+    )
+    ids = {
+        branch.external_id
+        for candidates, specificity in matches
+        if len(candidates) == narrowest and specificity == most_specific
+        for branch in candidates
+    }
+    candidates = tuple(branch for branch in branches if branch.external_id in ids)
+    if len(candidates) == 1:
+        return BranchMatch(found=candidates[0])
+    return BranchMatch(candidates=candidates)

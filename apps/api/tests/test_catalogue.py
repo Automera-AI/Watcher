@@ -134,7 +134,18 @@ class TestBranches:
 class TestShortReplies:
     @pytest.mark.parametrize(
         "written",
-        ["أيوه", "ايوة", "تمام", "ماشي", "حاضر", "أيوه احجزيلي", "yes", "ok please", "aywa"],
+        [
+            "أيوه",
+            "ايوة",
+            "تمام",
+            "ياريت",
+            "ماشي",
+            "حاضر",
+            "أيوه احجزيلي",
+            "yes",
+            "ok please",
+            "aywa",
+        ],
     )
     def test_agreement_is_recognised(self, written: str) -> None:
         assert reads_as_yes(written)

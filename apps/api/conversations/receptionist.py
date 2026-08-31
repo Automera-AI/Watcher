@@ -4,12 +4,13 @@ Ported from the v2 scaffold with one key change: instead of accepting a scaffold
 ``Understanding`` type, this accepts intent/confidence/extracted_slots directly so it works
 with the existing classification pipeline.
 
-**``turns_taken`` is A5's addition, and it is a safety rail rather than a feature.** Once a task
-survives between messages, a task that cannot make progress no longer fails — it loops, asking a
-guest the same question every time they reply. The vocabulary has always declared
-``defaults.max_clarifying_turns`` and ``defaults.on_max_turns`` and nothing has ever read them;
-they are read here, because this is the file that decides what to say next. A receptionist that
-has asked three times and learned nothing fetches a person.
+**The clarification budget is a safety rail rather than a feature.** Once a task survives between
+messages, a task that cannot make progress no longer fails — it loops, asking a guest the same
+question every time they reply. A reserved counter now records consecutive non-progress turns;
+real task facts and confirmations reset it. ``turns_taken`` remains only as the fallback for an
+active task persisted before that counter existed. The vocabulary's
+``defaults.max_clarifying_turns`` and ``defaults.on_max_turns`` are enforced here because this is
+the file that decides what to say next.
 
 **What 2.4 changed, and what it deliberately left alone.** Every intent that reached ``execute``
 used to get the same reply — "All set! I've noted everything down." — whether or not that was
@@ -61,13 +62,20 @@ from packages.intents.schema import Vocabulary, default_vocabulary
 from apps.api.conversations.confirmation import reads_as_no, reads_as_yes
 from apps.api.conversations.renderer import render_reply
 from apps.api.conversations.slots import normalise_slots, strip_unsupported_temporal_slots
-from apps.api.conversations.task import Task, TaskStatus
+from apps.api.conversations.task import (
+    AWAITING_ANOTHER_DATE_SLOT,
+    NON_PROGRESS_TURNS_SLOT,
+    Task,
+    TaskStatus,
+    is_internal_slot,
+)
 from apps.api.conversations.tools import (
     REGISTRY,
     ConversationCopy,
     ToolResult,
     current_copy,
     fill_template,
+    strip_unsupported_clinic_slots,
 )
 from apps.api.core.autonomy import Autonomy, decide_autonomy
 from apps.api.core.screening import ScreeningBlock, screen
@@ -262,6 +270,86 @@ async def _hand_off(task: Task, tool_name: str) -> tuple[OutboundAction, Task]:
     return OutboundAction(kind="handoff", text=current_copy().handoff or HANDOFF_TEXT), task
 
 
+def _progress_signature(
+    task: Task, vocabulary: Vocabulary
+) -> tuple[str, tuple[tuple[str, str], ...], tuple[str, ...]]:
+    """Patient/business state whose change proves that the conversation advanced.
+
+    Only slots declared by the active intent participate. Reserved task metadata therefore
+    persists in ``Task.slots`` without becoming a fact, satisfying a required slot, resetting its
+    own counter, or entering any patient/tool/rendering surface.
+    """
+    intent = next(item for item in vocabulary.intents if item.name == task.intent)
+    declared = set(intent.required_slots) | set(intent.optional_slots)
+    facts = tuple(
+        sorted(
+            (name, value)
+            for name, value in task.slots.items()
+            if name in declared and not is_internal_slot(name)
+        )
+    )
+    confirmed = tuple(
+        sorted(name for name in task.confirmed if name in declared and not is_internal_slot(name))
+    )
+    return task.intent, facts, confirmed
+
+
+def _stored_non_progress_turns(task: Task, *, legacy_fallback: int) -> int:
+    """Read the persisted counter, falling back for tasks created before this marker existed."""
+    raw = task.slots.get(NON_PROGRESS_TURNS_SLOT)
+    if raw is None:
+        return max(0, legacy_fallback)
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return max(0, legacy_fallback)
+
+
+def _next_non_progress_turns(
+    task: Task,
+    vocabulary: Vocabulary,
+    *,
+    original_task: Task | None,
+    previous_progress: tuple[str, tuple[tuple[str, str], ...], tuple[str, ...]] | None,
+    previous_non_progress: int,
+    force_progress: bool,
+) -> int:
+    """Count this turn from the task's meaningful state at the point this is called."""
+    if original_task is None or task is not original_task:
+        return 0
+    if force_progress or _progress_signature(task, vocabulary) != previous_progress:
+        return 0
+    return previous_non_progress + 1
+
+
+async def _finalize_mutating_action_progress(
+    result: tuple[OutboundAction, Task],
+    vocabulary: Vocabulary,
+    *,
+    original_task: Task | None,
+    previous_progress: tuple[str, tuple[tuple[str, str], ...], tuple[str, ...]] | None,
+    previous_non_progress: int,
+    force_progress: bool,
+) -> tuple[OutboundAction, Task]:
+    """Recount after a tool path that may add and then remove business state in one turn."""
+    action, task = result
+    non_progress_turns = _next_non_progress_turns(
+        task,
+        vocabulary,
+        original_task=original_task,
+        previous_progress=previous_progress,
+        previous_non_progress=previous_non_progress,
+        force_progress=force_progress,
+    )
+    task.slots[NON_PROGRESS_TURNS_SLOT] = str(non_progress_turns)
+    if (
+        action.kind in ("ask", "confirm")
+        and non_progress_turns >= vocabulary.defaults.max_clarifying_turns
+    ):
+        return await _hand_off(task, vocabulary.defaults.on_max_turns)
+    return action, task
+
+
 async def handle(
     turn: InboundTurn,
     intent: str,
@@ -281,6 +369,11 @@ async def handle(
     This is the core receptionist loop: check autonomy, manage task state, decide next step.
     """
     vocab = vocabulary or default_vocabulary()
+    original_task = task
+    previous_progress = _progress_signature(task, vocab) if task is not None else None
+    previous_non_progress = (
+        _stored_non_progress_turns(task, legacy_fallback=turns_taken) if task is not None else 0
+    )
 
     # The dialogue-state rule: a reply is read against the question that is genuinely outstanding
     # *before* the classified intent is allowed to start a different task. "تمام" is
@@ -295,6 +388,11 @@ async def handle(
     # a time. So an `unclear` turn is offered to the slot the task is actually waiting on, and
     # only a message that resolves into that slot is treated as an answer.
     answering = task is not None and task.awaiting_agreement and _is_an_answer(turn.text)
+    retrying_after_none = (
+        task is not None
+        and task.slots.get(AWAITING_ANOTHER_DATE_SLOT) == "1"
+        and reads_as_yes(turn.text or "")
+    )
     supplied: dict[str, str] = {}
     if not answering and task is not None and intent == _UNCLEAR:
         supplied = _read_as_answer(task, turn, vocab, today)
@@ -309,7 +407,7 @@ async def handle(
             supplied, turn.text, today=today or turn.received_at.date()
         )
 
-    if answering or supplied:
+    if answering or supplied or retrying_after_none:
         assert task is not None
         intent = task.intent
         # **And the confidence with it.** `decide_autonomy` gates on how sure the *model* was, and
@@ -330,8 +428,14 @@ async def handle(
     elif task is None or task.intent != intent:
         task = Task(intent=intent, vocabulary=vocab)
 
-    task.absorb({**extracted_slots, **supplied})
+    supported_slots = strip_unsupported_clinic_slots(
+        {**extracted_slots, **supplied}, turn.text, tenant_id=str(turn.tenant_id)
+    )
+    if retrying_after_none or "requested_date" in supported_slots:
+        task.slots.pop(AWAITING_ANOTHER_DATE_SLOT, None)
+    task.absorb(supported_slots)
 
+    refused_confirmation = False
     if answering:
         if reads_as_yes(turn.text or ""):
             task.agree()
@@ -340,13 +444,17 @@ async def handle(
             # the customer says so in their own words on the next turn, and `absorb` drops the
             # confirmation of anything they change. Two of these and `on_max_turns` fetches a
             # person, which is the right end for a read-back that keeps being rejected.
-            return (
-                OutboundAction(
-                    kind="ask",
-                    text=current_copy().clarify_change or _CLARIFY_CHANGE_TEXT,
-                ),
-                task,
-            )
+            refused_confirmation = True
+
+    non_progress_turns = _next_non_progress_turns(
+        task,
+        vocab,
+        original_task=original_task,
+        previous_progress=previous_progress,
+        previous_non_progress=previous_non_progress,
+        force_progress=retrying_after_none,
+    )
+    task.slots[NON_PROGRESS_TURNS_SLOT] = str(non_progress_turns)
 
     autonomy: Autonomy = decide_autonomy(
         intent,
@@ -368,11 +476,20 @@ async def handle(
 
     step, slot = task.next_step()
 
-    # Asking again is only worth doing while it is still making progress. `turns_taken` counts
-    # what we have already said on this task, so the guard fires on the reply *after* the limit
-    # rather than on the last useful question.
-    if step in ("ask", "confirm") and turns_taken >= vocab.defaults.max_clarifying_turns:
+    # The budget applies to consecutive turns that add no business fact or confirmation. Useful
+    # service refinement and newly supplied branch/date/time facts reset it; the reserved counter
+    # survives rehydration but is excluded from the progress signature itself.
+    if step in ("ask", "confirm") and non_progress_turns >= vocab.defaults.max_clarifying_turns:
         return await _hand_off(task, vocab.defaults.on_max_turns)
+
+    if refused_confirmation:
+        return (
+            OutboundAction(
+                kind="ask",
+                text=current_copy().clarify_change or _CLARIFY_CHANGE_TEXT,
+            ),
+            task,
+        )
 
     intent_def = next((i for i in vocab.intents if i.name == intent), None)
     tool_name = intent_def.terminal_tool if intent_def is not None else None
@@ -382,7 +499,15 @@ async def handle(
         if slot == _TIME_SLOT and tool_name == _BOOKING_TOOL:
             # Not an open question. The one detail still missing is *which* appointment, and the
             # only honest way to collect it is to offer what the diary actually holds.
-            return await _offer_times(task, turn, conversation_id, vocab)
+            result = await _offer_times(task, turn, conversation_id, vocab)
+            return await _finalize_mutating_action_progress(
+                result,
+                vocab,
+                original_task=original_task,
+                previous_progress=previous_progress,
+                previous_non_progress=previous_non_progress,
+                force_progress=retrying_after_none,
+            )
         if slot == _SERVICE_SLOT and intent in _SERVICE_ASK_INTENTS:
             # The one ask on the booking/availability flow, and the last English leak on it. Asked
             # in Arabic, carrying the branch and day the task already holds — not the generic slot
@@ -417,10 +542,26 @@ async def handle(
     task.status = TaskStatus.EXECUTING
 
     if tool_name in (_AVAILABILITY_TOOL, _QUOTE_TOOL):
-        return await _answer_from_catalogue(task, turn, tool_name, conversation_id, vocab)
+        result = await _answer_from_catalogue(task, turn, tool_name, conversation_id, vocab)
+        return await _finalize_mutating_action_progress(
+            result,
+            vocab,
+            original_task=original_task,
+            previous_progress=previous_progress,
+            previous_non_progress=previous_non_progress,
+            force_progress=retrying_after_none,
+        )
 
     if tool_name == _BOOKING_TOOL:
-        return await _book(task, turn, conversation_id, vocab)
+        result = await _book(task, turn, conversation_id, vocab)
+        return await _finalize_mutating_action_progress(
+            result,
+            vocab,
+            original_task=original_task,
+            previous_progress=previous_progress,
+            previous_non_progress=previous_non_progress,
+            force_progress=retrying_after_none,
+        )
 
     if tool_name == _KNOWLEDGE_TOOL:
         return await _answer_from_knowledge(task, turn, identity_verified, vocab)
@@ -543,6 +684,15 @@ def _clear_concrete_offer(task: Task) -> None:
     the service/branch/date the patient gave for B.
     """
     task.slots.pop(_OFFER_AT_SLOT, None)
+
+
+def _reset_after_none_available(task: Task) -> None:
+    """Keep treatment/location but clear the failed day and state derived from that day."""
+    _clear_concrete_offer(task)
+    for slot in ("requested_date", _TIME_SLOT):
+        task.slots.pop(slot, None)
+        task.confirmed.discard(slot)
+    task.slots[AWAITING_ANOTHER_DATE_SLOT] = "1"
 
 
 def resumed_offer_is_stale(task: Task, now: datetime, vocab: Vocabulary) -> bool:
@@ -851,6 +1001,7 @@ async def _offer_times(
             text = await render_reply(
                 "nothing_free", _known_booking_facts(task, today), fallback=result.human_summary
             )
+            _reset_after_none_available(task)
             return OutboundAction(kind="ask", text=text), task
         return OutboundAction(kind="ask", text=result.human_summary), task
     return await _hand_off(task, "handoff_to_human")
@@ -1026,6 +1177,7 @@ async def _answer_from_catalogue(
                 _known_booking_facts(task, turn.received_at.date()),
                 fallback=result.human_summary,
             )
+            _reset_after_none_available(task)
             return OutboundAction(kind="ask", text=text), task
         return OutboundAction(kind="say" if result.ok else "ask", text=result.human_summary), task
     return await _hand_off(task, vocab.defaults.on_tool_failure)

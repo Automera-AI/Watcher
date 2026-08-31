@@ -423,9 +423,13 @@ def test_a_pregnancy_disclosure_never_invokes_the_renderer(
 
 def test_the_generic_handoff_never_invokes_the_renderer(generative: _CannedProvider) -> None:
     """Repeated non-progress reaches the hand-off boundary — a deterministic surface."""
-    action, task = _say("؟", "availability_check", {}, None, turns_taken=5)
+    action, task = _say("؟", "availability_check", {}, None, turns_taken=0)
+    for _attempt in range(4):
+        action, task = _say("؟", "availability_check", {}, task, turns_taken=0)
+    calls_before_handoff = list(generative.calls)
+    action, task = _say("؟", "availability_check", {}, task, turns_taken=0)
     assert action.kind == "handoff"
-    assert generative.calls == []
+    assert generative.calls == calls_before_handoff
 
 
 def test_the_unbuilt_fallback_never_invokes_the_renderer(
@@ -451,7 +455,9 @@ def test_a_price_quote_never_invokes_the_renderer(
 ) -> None:
     """Price is never eligible: the deterministic quote stands, exact to the last digit."""
     action, _task = _say(
-        "الباكدج الست جلسات بكام؟", "price_enquiry", {"service": "برايم ليز 6 جلسات"}
+        "برايم ليز 6 جلسات بكام؟",
+        "price_enquiry",
+        {"service": "برايم ليز 6 جلسات"},
     )
     assert action.kind == "say"
     assert "15,000 EGP" in (action.text or "")
