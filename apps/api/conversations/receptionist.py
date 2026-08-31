@@ -390,21 +390,19 @@ async def handle(
             # also lacks a service is not asked "which service would you like to book?".
             resolved_today = today or turn.received_at.date()
             fallback = _ask_for_service(task, resolved_today)
+            # The renderer is told *which* slot to ask about through a deterministic ``{slot}``
+            # descriptor, so it phrases the question the task chose — never one it picked.
             text = await render_reply(
-                "ask_missing_slot",
-                _known_booking_facts(task, resolved_today),
-                fallback=fallback,
+                "ask_missing_slot", _slot_facts(_SERVICE_SLOT), fallback=fallback
             )
             return OutboundAction(kind="ask", text=text), task
         if (contextual := _ask_for_slot(slot)) is not None:
             # The branch/date/time asks between the service and the diary. Arabic for the clinic
             # booking slots (see `_CLINIC_SLOT_ASKS`); every other slot keeps the generic prompt.
-            # The renderer may phrase the question warmly (``ask_missing_slot``); it carries only
-            # the context the task already holds and, failing, is the Arabic fallback unchanged.
+            # The renderer may phrase the question warmly, but only about this exact slot (the
+            # ``{slot}`` descriptor); failing, it is the Arabic fallback unchanged.
             text = await render_reply(
-                "ask_missing_slot",
-                _known_booking_facts(task, today or turn.received_at.date()),
-                fallback=contextual,
+                "ask_missing_slot", _slot_facts(slot), fallback=contextual
             )
             return OutboundAction(kind="ask", text=text), task
         return (
@@ -760,6 +758,29 @@ def _booking_facts(task: Task, reference: str, today: date) -> dict[str, str]:
     facts = _read_back_facts(task, today)
     facts["booking_reference"] = reference
     return facts
+
+
+#: The deterministic Egyptian-Arabic descriptor of each clinic slot a missing-slot question asks
+#: about. Passed to the renderer as the required ``{slot}`` fact so the model asks about the slot
+#: the task chose — a proven value it substitutes, never a question it picks. Substituted after
+#: validation, so these words are not part of the renderer's safe vocabulary.
+_SLOT_DESCRIPTORS: dict[str, str] = {
+    _SERVICE_SLOT: "الخدمة اللي تحبي تحجزيها",
+    "branch": "الفرع اللي يناسبك",
+    "requested_date": "اليوم اللي يناسبك",
+    _TIME_SLOT: "الساعة اللي تحبيها",
+}
+
+
+def _slot_facts(slot: str) -> dict[str, str]:
+    """The ``{slot}`` descriptor fact for a missing-slot ask, or ``{}`` for a non-clinic slot.
+
+    Empty for any slot without a descriptor, which makes the ``ask_missing_slot`` spec fail its
+    required fact and fall back deterministically without a model call — the renderer never phrases
+    a question about a slot it cannot name.
+    """
+    descriptor = _SLOT_DESCRIPTORS.get(slot)
+    return {"slot": descriptor} if descriptor else {}
 
 
 async def _availability(

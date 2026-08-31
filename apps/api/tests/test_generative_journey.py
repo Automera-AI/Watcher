@@ -68,16 +68,35 @@ from apps.api.tests.test_booking_journey import (
 # Arabic, makes no clinical claim, and claims the booking is done only on ``booking_confirmed``.
 
 _VALID_TEMPLATES: dict[str, str] = {
-    "ask_missing_slot": "تمام يا فندم، محتاجة أعرف التفصيلة الناقصة عشان أكمّلك؟",
-    "offer_times": "تمام يا قمر، عندي المواعيد دي في {branch} {date}: {times}. تحبي أنهي واحدة؟",
-    "nothing_free": "معلش يا فندم، مفيش حاجة فاضية في اليوم ده. تحبي أشوفلك يوم تاني؟",
+    "ask_missing_slot": "تمام يا فندم، ممكن تقوليلي {slot}؟",
+    "offer_times": (
+        "تمام يا قمر، متاح {service} في {branch} يوم {date} المواعيد دي {times}. تحبي أنهي واحدة؟"
+    ),
+    "nothing_free": (
+        "معلش يا فندم، مفيش مواعيد فاضية {service} في {branch} يوم {date}. تحبي يوم تاني؟"
+    ),
     "read_back": "تمام يا قمر، أأكدلك {service} في {branch} يوم {date} الساعة {time}؟ صح كده؟",
-    "booking_confirmed": "تم الحجز يا قمر ✅ رقم حجزك {booking_reference}. مستنيينك في الفرع!",
+    "booking_confirmed": (
+        "تم الحجز يا قمر، {service} في {branch} يوم {date} الساعة {time}. "
+        "رقم حجزك {booking_reference}. مستنيينك في الفرع!"
+    ),
+}
+
+#: Adversarial phrasings that pass the old digit/English/denylist checks but assert protected facts
+#: in prose: a fabricated service/branch/day beside a valid offer, an efficacy claim, and a
+#: premature "the booking is confirmed" on a read-back. Each MUST be rejected → deterministic
+#: fallback. These are the Codex production-seam probes, driven through the real receptionist below.
+_ADVERSARIAL_TEMPLATES: dict[str, str] = {
+    "ask_missing_slot": "تمام، تحبي تحجزي البوتوكس في الزمالك؟",
+    "offer_times": "البوتوكس في الزمالك يوم الخميس مضمون ونتيجته ممتازة، المتاح {times}",
+    "nothing_free": "مفيش مواعيد للبوتوكس في الزمالك يوم الخميس، تحبي تاني؟",
+    "read_back": "ميعادك اتأكد لـ {service} في {branch} يوم {date} الساعة {time}",
+    "booking_confirmed": "تم حجز البوتوكس في الزمالك، رقم حجزك {booking_reference}",
 }
 
 
 class _CannedProvider:
-    """Returns a valid phrasing for the spec's act and counts every call it receives."""
+    """Returns a phrasing for the spec's act and counts every call it receives."""
 
     def __init__(self, templates: dict[str, str] | None = None) -> None:
         self._templates = templates if templates is not None else dict(_VALID_TEMPLATES)
@@ -101,6 +120,17 @@ def generative(provider: _CannedProvider) -> Iterator[_CannedProvider]:
         yield provider
     finally:
         configure_renderer(TemplateRenderer())  # never leak generative mode into other tests
+
+
+@pytest.fixture
+def adversarial() -> Iterator[_CannedProvider]:
+    """A generative renderer over a provider that tries to smuggle fabricated facts in prose."""
+    provider = _CannedProvider(dict(_ADVERSARIAL_TEMPLATES))
+    configure_renderer(GenerativeRenderer(provider))
+    try:
+        yield provider
+    finally:
+        configure_renderer(TemplateRenderer())
 
 
 def _wire(directory: ClinicDirectory, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -241,6 +271,114 @@ def test_nothing_free_is_generated_and_names_no_invented_slot(
     assert "يا فندم" in (action.text or "")
     assert generative.calls == ["nothing_free"]
     assert dermaclub.bookings == []
+
+
+def test_a_missing_slot_question_asks_about_the_slot_the_task_chose(
+    dermaclub: _PrimelaseDirectory, generative: _CannedProvider
+) -> None:
+    """Blocker 2: the model is handed the deterministic ``{slot}`` descriptor, not a free choice.
+
+    The service ask must name the service, the branch ask the branch — the model cannot ask for a
+    branch when the task is still missing a service, because the descriptor it substitutes is the
+    slot ``next_step()`` returned.
+    """
+    ask_service, task = _say("عايزة احجز", "booking_enquiry", {}, None, turns_taken=0)
+    assert "الخدمة اللي تحبي تحجزيها" in (ask_service.text or "")
+    assert "الفرع" not in (ask_service.text or "")
+
+    ask_branch, task = _say(
+        "برايم ليز جلسة واحدة",
+        "booking_enquiry",
+        {"service": "برايم ليز", "session_count": "1"},
+        task,
+        turns_taken=1,
+    )
+    assert "الفرع اللي يناسبك" in (ask_branch.text or "")
+
+
+# ── The Codex production-seam probes: fabricated facts in prose fall back to deterministic ─────
+
+
+def test_a_fabricated_offer_in_prose_falls_back_to_the_deterministic_offer(
+    dermaclub: _PrimelaseDirectory, adversarial: _CannedProvider
+) -> None:
+    """The real receptionist path: a model naming بوتوكس/الزمالك/الخميس is rejected, not delivered.
+
+    The patient sees the deterministic Arabic offer with the diary's real service, branch and
+    times — never the fabricated botox-in-Zamalek-on-Thursday sentence.
+    """
+    _, task = _say("عايزة احجز", "booking_enquiry", {}, None, turns_taken=0)
+    _, task = _say(
+        "برايم ليز جلسة واحدة",
+        "booking_enquiry",
+        {"service": "برايم ليز", "session_count": "1"},
+        task,
+        turns_taken=1,
+    )
+    _, task = _say("المعادي", "booking_enquiry", {"branch": "المعادي"}, task, turns_taken=2)
+    offer, task = _say(
+        "بكرة", "booking_enquiry", {"requested_date": "2026-09-02"}, task, turns_taken=3
+    )
+    assert "بوتوكس" not in (offer.text or "") and "الزمالك" not in (offer.text or "")
+    assert "الخميس" not in (offer.text or "") and "مضمون" not in (offer.text or "")
+    # The deterministic DermaClub offer, with the real diary values.
+    assert "متاح عندنا" in (offer.text or "")
+    assert "17:00" in (offer.text or "") and "18:00" in (offer.text or "")
+
+
+def test_a_premature_confirmation_paraphrase_falls_back_and_books_nothing(
+    dermaclub: _PrimelaseDirectory, adversarial: _CannedProvider
+) -> None:
+    """A read-back that tries to say "ميعادك اتأكد" falls back — and the diary is untouched.
+
+    The patient is asked to confirm, not told it is done, and no booking exists before the yes.
+    """
+    task = Task(
+        intent="booking_enquiry",
+        slots={
+            "service": "برايم ليز",
+            "branch": "المعادي",
+            "requested_date": "2026-09-02",
+            "requested_time": "17:00",
+        },
+        vocabulary=CLINICS,
+    )
+    read_back, task = _say(
+        "عاوزة أحجز برايم ليز جلسة واحدة في المعادي بكرة الساعة ٥",
+        "booking_enquiry",
+        {
+            "service": "برايم ليز",
+            "session_count": "1",
+            "branch": "المعادي",
+            "requested_date": "2026-09-02",
+            "requested_time": "17:00",
+        },
+    )
+    assert read_back.kind == "confirm"
+    assert "اتأكد" not in (read_back.text or "")  # never claims the booking is done
+    assert (read_back.text or "").startswith("تأكيد الحجز:")  # the deterministic read-back
+    assert dermaclub.bookings == []  # explicit-confirmation invariant intact
+
+
+def test_a_fabricated_confirmation_still_delivers_the_real_reference_deterministically(
+    dermaclub: _PrimelaseDirectory, adversarial: _CannedProvider
+) -> None:
+    """Even the confirmation act, if it names a fabricated service, falls back — reference kept."""
+    task = Task(
+        intent="booking_enquiry",
+        slots={
+            "service": "برايم ليز",
+            "branch": "المعادي",
+            "requested_date": "2026-09-02",
+            "requested_time": "17:00",
+        },
+        vocabulary=CLINICS,
+    )
+    booked, task = _say("أيوه", "thanks_closing", {}, task, turns_taken=1)
+    assert booked.kind == "say"
+    assert "بوتوكس" not in (booked.text or "") and "الزمالك" not in (booked.text or "")
+    assert "DC-0266" in (booked.text or "")  # the real durable reference, deterministic wording
+    assert [b.reference for b in dermaclub.bookings] == ["DC-0266"]
 
 
 # ── Journey D + the excluded surfaces: the renderer never runs on a safety path ───────────────

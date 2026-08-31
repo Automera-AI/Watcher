@@ -3,24 +3,41 @@
 The deterministic system already decides the *act* and proves the *facts* — which service, which
 branch, which day, which times the diary returned, which reference the scheduling system issued.
 This module lets a model phrase that act naturally in Egyptian Arabic **without ever owning a
-protected value**. The model writes the sentence around placeholders (``{times}``, ``{branch}``,
-``{booking_reference}`` …) and code substitutes the deterministic values afterwards; the model
-never controls the values themselves.
+protected value, and without being able to assert an unproven one in prose**.
+
+**Safe by construction, not by denylist.** A model writing free Arabic can name a service, a
+branch, or a day it invented — "بوتوكس في الزمالك يوم الخميس" — in ordinary words that carry no
+digit and no English, so a denylist can never bound it. The lock here is the other way round:
+
+1. **Full placeholder coverage.** Every protected value an act carries must appear as a placeholder
+   (``{service}``/``{branch}``/``{date}``/``{time}``/``{times}``/``{booking_reference}``), so the
+   model never *needs* to write a fact — it is handed the real one to place.
+2. **A closed safe vocabulary.** Once the placeholders are removed, every remaining word must come
+   from a small per-act allowlist built from hand-written, fact-locked exemplar phrasings (see
+   ``_EXEMPLARS``). The model may recombine those safe connective/politeness words freely, but a
+   word it was not given — a fabricated service or branch name, a weekday, an efficacy claim
+   ("مضمونة", "نتيجتها ممتازة"), a premature-confirmation verb ("اتأكد", "تم الحجز") on a non-
+   confirmation act — is simply not in the set, so the generation is rejected and the deterministic
+   Step-4 fallback stands. Over-rejection is safe (it falls back); only over-acceptance would be a
+   leak, and the allowlist cannot over-accept a word it does not contain.
+
+Booking-status words ("تم", "الحجز", "اتأكد", "حجزك") live *only* in the ``booking_confirmed``
+vocabulary, so a read-back or an offer cannot claim the appointment is done. The slot a missing-
+slot question is about is itself a proven fact (``{slot}``), so the model asks the question the
+deterministic layer chose, not one it picked.
 
 **This is deliberately smaller than the post-demo renderer architecture.** No ``MessageFact``, no
-fact-IDs, no phrase library, no ``RenderPlan``. One short call, one hard timeout, no retry loop.
-Any failure — a provider error, a timeout, a template that references a value it was not given,
-an invented number, an English leak, a clinical claim — returns the deterministic Arabic fallback
-the caller already composed (Step 4), unchanged. Generation can only ever make the receptionist
-*sound* better; it can never make the transaction *wrong*.
+fact-IDs, no phrase library of whole sentences, no ``RenderPlan``. One short call, one hard timeout,
+no retry loop. Any failure — a provider error, a timeout, an out-of-vocabulary word, a missing
+placeholder, an invented number, an English leak — returns the deterministic Arabic fallback the
+caller already composed, unchanged. Generation can make the receptionist *sound* better; it can
+never make the transaction *wrong*. The default renderer is the no-op ``TemplateRenderer``, so
+``RESPONSE_STYLE=template`` (the default) makes **zero** model calls.
 
 **Where it is not allowed to run at all.** The receptionist calls the renderer only on the five
-eligible acts (``ask_missing_slot``, ``offer_times``, ``nothing_free``, ``read_back``,
-``booking_confirmed``). The excluded safety surfaces — the clinical block, the emergency reply,
-the generic hand-off, the unbuilt-tool fallback, a price quote, any transactional failure needing
-exact deterministic wording — never reach this module, because the receptionist never asks it to
-phrase them (plan §8 "Never eligible"). The default renderer is the no-op ``TemplateRenderer``, so
-``RESPONSE_STYLE=template`` (the default) makes **zero** model calls.
+eligible acts. The excluded safety surfaces — clinical block, emergency, generic hand-off,
+unbuilt-tool fallback, price quote, ambiguous service, any transactional failure — never reach this
+module, because the receptionist never asks it to phrase them (plan §8 "Never eligible").
 
 **Persistence invariant.** Generation happens inside the receptionist, before the outbound reply
 is persisted, so the one ``OutboundAction`` the receptionist returns is the exact text that is
@@ -30,6 +47,7 @@ recorded to conversation history, delivered on the channel, and carried on
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import TYPE_CHECKING, Any, Literal, Protocol
@@ -56,86 +74,117 @@ RenderAct = Literal[
     "booking_confirmed",
 ]
 
-#: Every protected placeholder the model is allowed to reference. A fact the caller does not supply
-#: for a given render is simply not in that request's ``facts``, and a template that references it
-#: is rejected — the model may only place values the deterministic layer proved.
-_KNOWN_PLACEHOLDERS = frozenset({"service", "branch", "date", "time", "times", "booking_reference"})
+#: Every placeholder the model may reference. ``slot`` is the deterministic descriptor of the one
+#: detail a missing-slot question is about ("الخدمة اللي تحبي تحجزيها" …), a proven fact like the
+#: rest, so the model asks the question the task chose rather than one it picked.
+_KNOWN_PLACEHOLDERS = frozenset(
+    {"service", "branch", "date", "time", "times", "booking_reference", "slot"}
+)
 
-#: Which placeholders each act *must* surface. These are the protected values whose omission would
-#: let the model imply something untrue: an ``offer_times`` that never shows ``{times}`` has made
-#: the availability up, and a ``booking_confirmed`` without ``{booking_reference}`` is the "All
-#: set!" bug wearing a nicer sentence. ``ask_missing_slot`` and ``nothing_free`` require none —
-#: the first asks for what is missing and the second states an absence, so neither carries a
-#: protected number that has to appear.
+#: Which placeholders each act must surface — its **full** protected-fact set, not just the numeric
+#: one. Requiring only ``{times}`` on an offer let the model name a fabricated service/branch/day in
+#: prose beside it; requiring every fact as a placeholder means the model is handed each real value
+#: to place and never needs to write one. Paired with the closed vocabulary below, this is what
+#: makes the fact lock structural: proven values in, nothing else admitted.
 _REQUIRED_PLACEHOLDERS: dict[str, frozenset[str]] = {
-    "ask_missing_slot": frozenset(),
-    "offer_times": frozenset({"times"}),
-    "nothing_free": frozenset(),
+    "ask_missing_slot": frozenset({"slot"}),
+    "offer_times": frozenset({"service", "branch", "date", "times"}),
+    "nothing_free": frozenset({"service", "branch", "date"}),
     "read_back": frozenset({"service", "branch", "date", "time"}),
-    "booking_confirmed": frozenset({"booking_reference"}),
+    "booking_confirmed": frozenset({"service", "branch", "date", "time", "booking_reference"}),
+}
+
+#: Hand-written, fact-locked exemplar phrasings — two purposes. They few-shot the model toward safe
+#: output, and they *define the closed vocabulary*: the only Arabic words the model may use outside
+#: placeholders are the words in these sentences (per act). Every exemplar uses only safe connective
+#: / politeness / question words and the act's placeholders — no service, branch, weekday, relative
+#: day, number word, clinical or efficacy term, and no booking-status word except on
+#: ``booking_confirmed``. Adding a word here widens what the model may say; nothing else does.
+_EXEMPLARS: dict[str, tuple[str, ...]] = {
+    "ask_missing_slot": (
+        "تمام يا فندم، ممكن تقوليلي {slot}؟",
+        "أكيد، محتاجة أعرف {slot} عشان أكمّلك؟",
+        "تمام، تحبي تقوليلي {slot} لو سمحتي؟",
+    ),
+    "offer_times": (
+        "تمام يا قمر، متاح {service} في {branch} يوم {date} المواعيد دي {times}. تحبي أنهي واحدة؟",
+        "أكيد، عندنا {service} في {branch} يوم {date} {times}. أنهي ميعاد يناسبك؟",
+    ),
+    "nothing_free": (
+        "معلش يا فندم، مفيش مواعيد فاضية {service} في {branch} يوم {date}. تحبي أشوفلك يوم تاني؟",
+        "للأسف مفيش حاجة فاضية {service} في {branch} يوم {date}. أدوّرلك على يوم تاني؟",
+    ),
+    "read_back": (
+        "تمام يا قمر، أأكدلك {service} في {branch} يوم {date} الساعة {time}؟ صح كده؟",
+        "أكيد، تحبي أأكد {service} في {branch} يوم {date} الساعة {time}؟",
+    ),
+    "booking_confirmed": (
+        "تم الحجز يا قمر، {service} في {branch} يوم {date} الساعة {time}. "
+        "رقم حجزك {booking_reference}. مستنيينك في الفرع!",
+        "الحجز اتأكد يا فندم، {service} في {branch} يوم {date} الساعة {time}. "
+        "رقمك {booking_reference}.",
+    ),
 }
 
 #: A ``{placeholder}`` token. The inner name is captured so an unknown or malformed one is caught.
 _TOKEN = re.compile(r"\{([^{}]*)\}")
 
-#: Any digit the model might have typed itself — ASCII, Arabic-Indic (٠-٩) or the extended
-#: Arabic-Indic range (۰-۹). Every appointment time, date and reference arrives through a
-#: placeholder and is substituted *after* validation, so a digit surviving in the model's own
-#: template is a number it invented and the whole generation is rejected.
+#: Any digit the model might have typed itself — ASCII, Arabic-Indic (٠-٩) or extended Arabic-Indic
+#: (۰-۹). Every time, date and reference arrives through a placeholder and is substituted *after*
+#: validation, so a digit surviving in the model's own template is a number it invented.
 _DIGIT = re.compile(r"[0-9٠-٩۰-۹]")
 
-#: A run of Latin letters long enough to be English prose rather than a stray character. The reply
-#: must be Egyptian Arabic; a Latin service name or reference reaches the patient only through a
-#: substituted placeholder, never through the model writing it out.
+#: A run of Latin letters — English prose the Egyptian-Arabic reply must not carry.
 _LATIN_WORD = re.compile(r"[A-Za-z]{3,}")
 
-#: Clinical / suitability / recommendation language the renderer must never emit — deciding a
-#: treatment is suitable, safe, advisable or risky is a clinician's call, and the model phrasing a
-#: booking confirmation has no business making it. Matched case-insensitively as substrings; the
-#: Egyptian-Arabic terms are matched directly. Kept tight so an ordinary offer or read-back never
-#: trips it.
-_CLINICAL_MARKERS_EN = (
-    "recommend",
-    "suitable",
-    "safe",
-    "risk",
-    "advise",
-    "pregnan",
-    "medical",
-    "treatment is",
-)
-_CLINICAL_MARKERS_AR = (
-    "مناسب",
-    "أنصح",
-    "ننصح",
-    "بننصح",
-    "آمن",
-    "خطر",
-    "حامل",
-    "استشير",
-)
+#: Arabic diacritics and tatweel, stripped before tokenising so "مَواعيد" and "مواعيدـ" match
+#: "مواعيد". (``ـ`` tatweel, ``ً-ْ`` harakat, ``ٰ`` superscript alef.)
+_ARABIC_MARKS = re.compile(r"[ـً-ْٰ]")
 
-#: Phrases that claim a booking already exists. Allowed only on ``booking_confirmed``; on any other
-#: act (an offer, a read-back that is still *asking* permission) a claim that the appointment is
-#: done is a lie the renderer must not tell, so it is rejected and the deterministic wording stands.
-_CONFIRMATION_MARKERS = (
-    "تم الحجز",
-    "اتحجز",
-    "حجزتلك",
-    "تم تأكيد الحجز",
-    "booked",
-    "confirmed",
-)
+#: Anything that is not an Arabic letter or whitespace → a word separator. Digits, Latin, emoji and
+#: punctuation all become boundaries, so tokenising yields Arabic words only. The range ``ء``
+#: (hamza) to ``ي`` (yeh) is every standard Arabic letter; ``ٱ`` is alef wasla.
+_NON_ARABIC_LETTER = re.compile(r"[^ء-يٱ\s]")
+
+
+def _normalise_words(text: str) -> list[str]:
+    """The Arabic content words of ``text``, lightly normalised for allowlist matching.
+
+    Diacritics and tatweel are removed, non-letters become boundaries, and a leading conjunction
+    ``و`` and/or definite article ``ال`` are stripped so "والمواعيد"/"المواعيد" both match the
+    exemplar word "مواعيد". The normalisation is deliberately conservative: any form it fails to
+    fold simply is not found in the allowlist and the generation falls back, which is safe. It can
+    never fold a fabricated word *into* the allowlist, because the allowlist holds only the exemplar
+    words themselves.
+    """
+    cleaned = _NON_ARABIC_LETTER.sub(" ", _ARABIC_MARKS.sub("", text))
+    words: list[str] = []
+    for raw in cleaned.split():
+        word = raw
+        if word.startswith("و") and len(word) > 2:
+            word = word[1:]
+        if word.startswith("ال") and len(word) > 3:
+            word = word[2:]
+        if word:
+            words.append(word)
+    return words
+
+
+#: The closed vocabulary per act: every Arabic word its exemplars use (placeholders drop out under
+#: normalisation, being non-Arabic). The model may use only these words outside placeholders.
+_SAFE_WORDS: dict[str, frozenset[str]] = {
+    act: frozenset(word for exemplar in exemplars for word in _normalise_words(exemplar))
+    for act, exemplars in _EXEMPLARS.items()
+}
 
 
 class RenderSpec(BaseModel):
     """A minimal render request: the proven act, and the proven values it may place.
 
-    ``facts`` maps a protected placeholder name to the deterministic value code will substitute for
-    it. The model is told the placeholder names and phrases around them; it never sees this as a
-    value it may alter. The validator enforces the contract before a single token is sent: every
-    fact key is a known placeholder, and every placeholder the act *requires* is present — so a
-    caller that has not proven the protected values for an act cannot ask the model to imply them.
+    ``facts`` maps a placeholder name to the deterministic value code will substitute for it. The
+    validator enforces the contract before a single token is sent: every fact key is a known
+    placeholder, no value is blank, and every placeholder the act *requires* is present — so a
+    caller that has not proven an act's full protected-fact set cannot ask the model to imply it.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -157,7 +206,7 @@ class RenderSpec(BaseModel):
 
     @property
     def required_placeholders(self) -> frozenset[str]:
-        """The placeholders this act's template must contain."""
+        """The placeholders this act's template must contain — its full protected-fact set."""
         return _REQUIRED_PLACEHOLDERS[self.act]
 
     @property
@@ -171,22 +220,22 @@ def substitute_or_reject(template: str, spec: RenderSpec) -> str | None:
 
     Returns the final patient-ready text on success, or ``None`` when the template breaks any rule,
     in which case the caller sends its deterministic Arabic fallback instead. Every check runs on
-    the model's *own* output, before the protected values are inserted, so the Latin/digit/clinical
-    rules judge what the model wrote rather than what code is about to place. The rules, in order:
+    the model's *own* output, before the protected values are inserted. The rules, in order:
 
-    * balanced, well-formed ``{placeholder}`` syntax;
+    * well-formed, balanced ``{placeholder}`` syntax;
     * no unknown placeholder (every token is one of the facts this act was given);
-    * every placeholder the act requires is present;
+    * every placeholder the act requires is present (its full protected-fact set);
     * no digit the model typed itself (invented time / date / reference);
-    * no English prose (the reply must be Egyptian Arabic);
-    * no clinical / suitability / recommendation language;
-    * no claim the booking is confirmed unless the act *is* the confirmation.
+    * no English prose;
+    * **every non-placeholder Arabic word is in the act's closed safe vocabulary** — this is the
+      structural lock that a fabricated service/branch/day, an efficacy claim, or a premature
+      "it's booked" cannot pass, because none of those words is in the vocabulary.
     """
     text = template.strip()
     if not text:
         return None
 
-    stripped = _TOKEN.sub("", text)
+    stripped = _TOKEN.sub(" ", text)
     if "{" in stripped or "}" in stripped:
         return None  # a stray or unbalanced brace — malformed placeholder syntax
 
@@ -203,18 +252,12 @@ def substitute_or_reject(template: str, spec: RenderSpec) -> str | None:
     if _LATIN_WORD.search(stripped):
         return None
 
-    lowered = text.lower()
-    if any(marker in lowered for marker in _CLINICAL_MARKERS_EN):
-        return None
-    if any(marker in text for marker in _CLINICAL_MARKERS_AR):
-        return None
-
-    if spec.act != "booking_confirmed" and any(
-        marker in lowered for marker in ("booked", "confirmed")
-    ):
-        return None
-    if spec.act != "booking_confirmed" and any(marker in text for marker in _CONFIRMATION_MARKERS):
-        return None
+    safe = _SAFE_WORDS[spec.act]
+    for word in _normalise_words(stripped):
+        if word not in safe:
+            # A word the model was not given — a fabricated fact, an efficacy claim, or an
+            # out-of-act booking-status word. Not provably safe, so fall back.
+            return None
 
     try:
         return text.format(**spec.facts)
@@ -235,49 +278,50 @@ class RenderProvider(Protocol):
     def complete(self, spec: RenderSpec) -> str: ...
 
 
-#: The renderer's whole instruction. Everything variable (the act, the placeholders it may use)
-#: goes in the user turn; this stays byte-identical so it could be cached, and — more importantly —
-#: so the fact-lock rules the validator enforces are stated to the model up front.
+#: The renderer's whole instruction. Everything variable (the act, its placeholders, its exemplars)
+#: goes in the user turn; this states the fact-lock rules the validator enforces up front.
 _SYSTEM_PROMPT = (
     "You are a warm Egyptian-Arabic receptionist at a dermatology clinic. You write ONE short, "
     "natural chat message in Egyptian Arabic (عامية مصرية).\n\n"
     "Absolute rules:\n"
-    "- Use ONLY the placeholders you are given, written exactly as {name}. Do not invent "
-    "placeholders.\n"
-    "- Never write any number, time, date, or booking reference yourself — those only ever appear "
-    "through a placeholder. Do not type digits.\n"
-    "- Write in Egyptian Arabic only. Do not write English words or sentences.\n"
-    "- Never give medical advice, and never say a treatment is suitable, safe, recommended or "
-    "risky.\n"
+    "- Use ONLY the placeholders you are given, written exactly as {name}, and use every one that "
+    "is marked required. Do not invent placeholders.\n"
+    "- Never write a service name, branch name, day, time, number, or booking reference yourself — "
+    "those appear ONLY through their placeholders. Do not type digits.\n"
+    "- Stay very close to the example phrasings you are shown: reuse their words and vary only the "
+    "order and warmth. Do not introduce new nouns.\n"
+    "- Write in Egyptian Arabic only. No English.\n"
+    "- Never give medical advice or say a treatment is suitable, safe, recommended, guaranteed, or "
+    "effective.\n"
     "- Only say a booking is confirmed if you are explicitly asked to confirm it.\n"
     "- Reply with the message text only — no quotes, no labels, no explanation."
 )
 
-#: What each eligible act is asking the model to phrase, in the user turn. Concrete but placeholder-
-#: only: the model is told the shape of the sentence, never a real value.
+#: What each eligible act is asking the model to phrase, in the user turn.
 _ACT_BRIEF: dict[str, str] = {
-    "ask_missing_slot": "Ask the patient warmly for the missing booking detail (a service, a "
-    "branch, a day, or a time). Keep it to one friendly question.",
+    "ask_missing_slot": "Ask the patient warmly for the one missing booking detail named by "
+    "{slot}. Ask about {slot} and nothing else.",
     "offer_times": "Tell the patient the available appointment times and ask which one suits them.",
     "nothing_free": "Gently tell the patient there is nothing free for what they asked, and offer "
     "to look at another day.",
-    "read_back": "Read the booking details back to the patient and ask them to confirm, without "
-    "claiming it is booked yet.",
-    "booking_confirmed": "Warmly tell the patient the appointment is confirmed and give them the "
-    "booking reference.",
+    "read_back": "Read the booking details back to the patient and ask them to confirm — do NOT "
+    "say it is booked yet.",
+    "booking_confirmed": "Warmly tell the patient the appointment is now confirmed and give them "
+    "the booking reference.",
 }
 
 
 def _user_prompt(spec: RenderSpec) -> str:
-    """The per-request turn: the act's brief plus the exact placeholders it may use."""
+    """The per-request turn: the act's brief, the placeholders to use, and the safe exemplars."""
     required = spec.required_placeholders
     listed = ", ".join(
-        f"{{{name}}}" + (" (must be used)" if name in required else "") for name in spec.facts
+        f"{{{name}}}" + (" (required)" if name in required else "") for name in spec.facts
     )
-    placeholders = listed or "(none — use no placeholders)"
+    examples = "\n".join(f"- {exemplar}" for exemplar in _EXEMPLARS[spec.act])
     return (
         f"{_ACT_BRIEF[spec.act]}\n\n"
-        f"Placeholders you may use: {placeholders}.\n"
+        f"Placeholders you may use: {listed}.\n\n"
+        f"Example phrasings (reuse these words; vary only order and warmth):\n{examples}\n\n"
         "Write the Egyptian-Arabic message now."
     )
 
@@ -374,6 +418,9 @@ class GenerativeRenderer:
     facts), a provider error, a timeout, or a phrasing that breaks any fact-lock rule all return
     the fallback the receptionist already composed. There is no second, repair call — a single
     failed render must never delay the conversation materially (plan §10).
+
+    The provider call is synchronous but offloaded with ``asyncio.to_thread``, so the ~2.5s ceiling
+    a slow render can spend never blocks other work sharing the event loop.
     """
 
     def __init__(self, provider: RenderProvider) -> None:
@@ -387,7 +434,7 @@ class GenerativeRenderer:
             # them — fall back deterministically without a call.
             return fallback
         try:
-            raw = self._provider.complete(spec)
+            raw = await asyncio.to_thread(self._provider.complete, spec)
         except ProviderError as exc:
             logger.warning("renderer provider error on %s, using fallback: %s", act, exc)
             return fallback
@@ -431,15 +478,31 @@ async def render_reply(act: RenderAct, facts: dict[str, str], *, fallback: str) 
 def build_renderer(settings: Settings, client: httpx.Client | None = None) -> Renderer:
     """The renderer named by ``RESPONSE_STYLE`` — ``template`` (default) or ``generative``.
 
-    ``template`` is the no-op renderer and builds no HTTP client. ``generative`` wires one
-    ``claude-haiku-4-5`` call through the existing Anthropic configuration
-    (``Settings.llm_credentials``); if the Anthropic key is missing it degrades to the template
-    renderer with a warning rather than failing the boot — a demo that forgot the key should still
-    run deterministically, not refuse to start.
+    ``template`` is the no-op renderer and builds no HTTP client. ``generative`` wires one short
+    Claude call through the existing Anthropic configuration (``Settings.llm_credentials``). It
+    degrades to the template renderer — never failing the boot — when it cannot run correctly: a
+    non-clinic vertical (the phrasing vocabulary is Egyptian-Arabic clinic wording), a non-Claude
+    model id (this path speaks only the Anthropic Messages API), or a missing Anthropic key. A demo
+    that is misconfigured should still run deterministically, not refuse to start or emit the wrong
+    voice.
     """
     if settings.response_style != "generative":
         return TemplateRenderer()
+    if settings.tenant_vertical != "clinics":
+        logger.warning(
+            "RESPONSE_STYLE=generative on vertical=%s; the renderer voice is clinic Egyptian "
+            "Arabic, so using the template renderer instead",
+            settings.tenant_vertical,
+        )
+        return TemplateRenderer()
     model_id = settings.response_renderer_model
+    if not model_id.startswith("claude"):
+        logger.warning(
+            "RESPONSE_RENDERER_MODEL=%s is not a Claude model, but the renderer speaks the "
+            "Anthropic Messages API; using the template renderer",
+            model_id,
+        )
+        return TemplateRenderer()
     try:
         credentials = settings.llm_credentials(model_id)
     except Exception:  # noqa: BLE001 - missing key etc.; never fail boot over the renderer
