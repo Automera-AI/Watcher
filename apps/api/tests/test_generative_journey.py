@@ -124,6 +124,19 @@ def adversarial() -> Iterator[_CannedProvider]:
         configure_renderer(TemplateRenderer())
 
 
+@pytest.fixture
+def latin_prefixed() -> Iterator[_CannedProvider]:
+    """A provider that prepends a short Latin label to an otherwise valid offer skeleton."""
+    templates = dict(_VALID_TEMPLATES)
+    templates["offer_times"] = f"OK {templates['offer_times']}"
+    provider = _CannedProvider(templates)
+    configure_renderer(GenerativeRenderer(provider))
+    try:
+        yield provider
+    finally:
+        configure_renderer(TemplateRenderer())
+
+
 def _wire(directory: ClinicDirectory, monkeypatch: pytest.MonkeyPatch) -> None:
     """Register the four booking tools + greet/close against a diary, in DermaClub Arabic."""
     copy = _DERMACLUB_COPY
@@ -553,6 +566,69 @@ def _confirmation_classification() -> dict[str, object]:
         "confidence_person": 0.95,
         "confidence_company": 0.95,
     }
+
+
+def _offer_classification() -> dict[str, object]:
+    return {
+        "intent": "booking_enquiry",
+        "summary_one_line": "requested tomorrow",
+        "language": "ar",
+        "person_name": None,
+        "company_name": None,
+        "extracted_slots": {"requested_date": "2026-09-02"},
+        "confidence_overall": 0.95,
+        "confidence_intent": 0.95,
+        "confidence_person": 0.95,
+        "confidence_company": 0.95,
+    }
+
+
+def test_a_latin_prefixed_offer_is_never_persisted_or_delivered(
+    dermaclub: _PrimelaseDirectory, latin_prefixed: _CannedProvider
+) -> None:
+    """The real receptionist path rejects the whole candidate before persistence or delivery."""
+    waiting_for_date = Task(
+        intent="booking_enquiry",
+        slots={"service": "برايم ليز", "session_count": "1", "branch": "المعادي"},
+        vocabulary=CLINICS,
+    )
+    store = _RecordingConversations(waiting_for_date)
+    sender = _RecordingSender()
+    classifier = Classifier(
+        _ScriptedProvider("cheap", _offer_classification()),
+        _ScriptedProvider("big", _offer_classification()),
+    )
+    orch = Orchestrator(
+        classifier,
+        _FakeAudit(),
+        _FakeInbox(),
+        crm_lookup=lambda _t, _c: [],
+        receptionist=receptionist_handle,
+        conversations=store,
+        sender=sender,
+        vocabulary=CLINICS,
+        policy=DEFAULT_POLICY,
+    )
+    message = MessageEnvelope(
+        external_id="wamid.offer",
+        thread_id="201000000000",
+        source_kind=SourceKind.DIRECT,
+        sender_phone_e164="+201000000000",
+        type=MessageType.TEXT,
+        body_text="بكرة",
+        received_at=datetime(2026, 9, 1, 9, 0, tzinfo=UTC),
+    )
+    outcome = asyncio.run(orch.process(str(TENANT_ID), "msg-offer", message))
+
+    assert outcome.action is RoutingAction.RECEPTIONIST_REPLY
+    assert outcome.outbound_action is not None
+    assert latin_prefixed.calls == ["offer_times"]
+    assert "OK" not in outcome.outbound_action.text
+    assert "متاح عندنا" in outcome.outbound_action.text
+    assert store.replies[-1] is outcome.outbound_action
+    assert sender.sent[-1] is outcome.outbound_action
+    assert "OK" not in store.replies[-1].text
+    assert "OK" not in sender.sent[-1].text
 
 
 def test_the_accepted_generated_text_is_exactly_what_is_persisted_and_delivered(

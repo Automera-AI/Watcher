@@ -13,7 +13,10 @@ or end a read-back on a statement instead of a question. So the lock is structur
 1. **Full placeholder coverage.** Every protected value an act carries must appear as a placeholder
    (``{service}``/``{branch}``/``{date}``/``{time}``/``{times}``/``{booking_reference}``), so the
    model never *needs* to write a fact — it is handed the real one to place.
-2. **Exemplar-skeleton match.** The model's phrasing, once punctuation and diacritics are stripped
+2. **Complete-output character gate.** After approved placeholders are removed, every remaining
+   character must be Arabic, whitespace, or one of the four inert punctuation marks the exemplars
+   use (``،؟.!``). Latin letters, emoji, and every other symbol reject the whole generation.
+3. **Exemplar-skeleton match.** The surviving phrasing, once punctuation and diacritics are stripped
    and words are lightly normalised, must equal — word for word, in order, with the placeholders in
    their exact positions — one of a small set of hand-written, fact-locked skeletons for that act
    (see ``_EXEMPLARS``). Each skeleton *is* the meaning: the ``nothing_free`` skeletons carry the
@@ -138,8 +141,13 @@ _TOKEN = re.compile(r"\{([^{}]*)\}")
 #: validation, so a digit surviving in the model's own template is a number it invented.
 _DIGIT = re.compile(r"[0-9٠-٩۰-۹]")
 
-#: A run of Latin letters — English prose the Egyptian-Arabic reply must not carry.
-_LATIN_WORD = re.compile(r"[A-Za-z]{3,}")
+#: Any model-authored Latin letter rejects the candidate, including a one-letter label.
+_LATIN_LETTER = re.compile(r"[A-Za-z]")
+
+#: Complete patient-visible character allowlist after approved placeholders are removed. The four
+#: punctuation marks are exactly the inert punctuation used by ``_EXEMPLARS``; emoji and arbitrary
+#: symbols are deliberately not admitted in the pre-demo renderer.
+_UNAPPROVED_MODEL_CHARACTER = re.compile(r"[^ء-يٱـً-ْٰ\s،؟.!]")
 
 #: Arabic diacritics and tatweel, stripped before tokenising so "مَواعيد" and "مواعيدـ" match
 #: "مواعيد". (``ـ`` tatweel, ``ً-ْ`` harakat, ``ٰ`` superscript alef.)
@@ -178,10 +186,10 @@ def _canonical_tokens(template: str) -> tuple[str, ...]:
     """The template as an ordered sequence of normalised words and placeholder markers.
 
     Placeholders become their own ``{name}`` tokens in position; the Arabic between them is
-    normalised word by word (``_normalise_words``), so punctuation, diacritics, tatweel and emoji
-    fall away. Two phrasings that differ only in punctuation or a stripped clitic canonicalise to
-    the same sequence; a reordering, an omission or an inserted word does not. This is what makes
-    the match test one of *meaning-bearing structure*, not just of the words present.
+    normalised word by word (``_normalise_words``), so approved punctuation, diacritics and tatweel
+    fall away. Two phrasings that differ only in approved punctuation or a stripped clitic
+    canonicalise to the same sequence; a reordering, an omission or an inserted word does not. This
+    is what makes the match test one of *meaning-bearing structure*, not just of the words present.
     """
     parts: list[str] = []
     cursor = 0
@@ -249,15 +257,15 @@ def substitute_or_reject(template: str, spec: RenderSpec) -> str | None:
     * no unknown placeholder (every token is one of the facts this act was given);
     * every placeholder the act requires is present (its full protected-fact set);
     * no digit the model typed itself (invented time / date / reference);
-    * no English prose;
+    * no model-authored Latin letter;
+    * no character outside Arabic letters/marks, whitespace, and ``،؟.!``;
     * **the phrasing canonicalises to one of the act's approved skeletons** — the ordered,
       meaning-bearing structural lock. A fabricated service/branch/day, a dropped negation, a
       reordering that moves "يناسبك" onto the treatment, a read-back that ends on a statement, or a
       premature "تم الحجز" all produce a sequence that is not an approved skeleton, and fall back.
 
-    On success the *original* text is what is substituted and returned, so the model's own
-    punctuation, spacing and emoji reach the patient — only the validation runs on the canonical
-    form.
+    On success the *original* text is what is substituted and returned, but only after this complete
+    patient-visible output has passed both the character gate and the structural lock.
     """
     text = template.strip()
     if not text:
@@ -277,8 +285,10 @@ def substitute_or_reject(template: str, spec: RenderSpec) -> str | None:
 
     if _DIGIT.search(stripped):
         return None  # a number the model typed itself
-    if _LATIN_WORD.search(stripped):
-        return None  # English prose
+    if _LATIN_LETTER.search(stripped):
+        return None  # even a one-letter model-authored Latin label
+    if _UNAPPROVED_MODEL_CHARACTER.search(stripped):
+        return None  # emoji or arbitrary patient-visible punctuation/symbols
 
     if _canonical_tokens(text) not in _SKELETONS[spec.act]:
         # Not one of the approved sentences for this act — reordered, missing a word, or carrying

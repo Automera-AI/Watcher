@@ -140,6 +140,37 @@ def test_english_prose_is_rejected() -> None:
     assert substitute_or_reject("We have {service} at {branch} {date}: {times}", spec) is None
 
 
+def test_an_ok_prefix_on_a_valid_skeleton_falls_back() -> None:
+    provider = _Provider(f"OK {_GOOD['offer_times']}")
+    fallback = "المواعيد المتاحة"
+    assert _render(GenerativeRenderer(provider), "offer_times", _OFFER, fallback) == fallback
+
+
+def test_a_no_prefix_on_a_valid_skeleton_falls_back() -> None:
+    provider = _Provider(f"NO {_GOOD['offer_times']}")
+    fallback = "المواعيد المتاحة"
+    assert _render(GenerativeRenderer(provider), "offer_times", _OFFER, fallback) == fallback
+
+
+@pytest.mark.parametrize("prefix", ["yes", "x"])
+def test_any_model_authored_latin_letter_causes_fallback(prefix: str) -> None:
+    provider = _Provider(f"{prefix} {_GOOD['offer_times']}")
+    fallback = "المواعيد المتاحة"
+    assert _render(GenerativeRenderer(provider), "offer_times", _OFFER, fallback) == fallback
+
+
+def test_a_cross_mark_appended_to_a_valid_skeleton_falls_back() -> None:
+    provider = _Provider(f"{_GOOD['offer_times']} ❌")
+    fallback = "المواعيد المتاحة"
+    assert _render(GenerativeRenderer(provider), "offer_times", _OFFER, fallback) == fallback
+
+
+def test_a_check_mark_appended_to_a_pre_confirmation_act_falls_back() -> None:
+    provider = _Provider(f"{_GOOD['read_back']} ✅")
+    fallback = "تأكيد الحجز"
+    assert _render(GenerativeRenderer(provider), "read_back", _READ_BACK, fallback) == fallback
+
+
 # ── The blockers a denylist used to miss: prose facts, efficacy, premature confirmation ───────
 
 
@@ -205,14 +236,14 @@ def test_a_read_back_that_is_a_statement_not_a_question_is_rejected() -> None:
 
 
 def test_light_punctuation_variation_of_a_skeleton_is_accepted() -> None:
-    """The lock is structural, not on punctuation: an added emoji on a skeleton still passes."""
+    """Approved inert punctuation may vary without weakening the structural lock."""
     spec = RenderSpec(act="offer_times", facts=_OFFER)
     varied = (
-        "تمام يا قمر 🌸 متاح {service} في {branch} يوم {date} "
-        "المواعيد دي {times}. تحبي أنهي واحدة؟!"
+        "تمام يا قمر! متاح {service} في {branch} يوم {date} "
+        "المواعيد دي {times}، تحبي أنهي واحدة؟!"
     )
     out = substitute_or_reject(varied, spec)
-    assert out is not None and "🌸" in out and "17:00 / 18:00" in out
+    assert out is not None and "قمر!" in out and "17:00 / 18:00،" in out
 
 
 def test_the_confirmation_act_may_state_the_booking_is_done() -> None:
