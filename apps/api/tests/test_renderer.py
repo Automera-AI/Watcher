@@ -12,39 +12,30 @@ from __future__ import annotations
 
 import asyncio
 
+import httpx
 import pytest
 from pydantic import ValidationError
 
 from apps.api.classifier.provider import ProviderError
 from apps.api.conversations.renderer import (
+    _EXEMPLARS,
     GenerativeRenderer,
     RenderAct,
     RenderSpec,
     TemplateRenderer,
+    build_renderer,
     substitute_or_reject,
 )
+from apps.api.core.config import Settings
 
 # Proven fact sets for the acts under test — the deterministic values code substitutes.
 _OFFER = {"service": "برايم ليز", "branch": "المعادي", "date": "بكرة", "times": "17:00 / 18:00"}
 _READ_BACK = {"service": "برايم ليز", "branch": "المعادي", "date": "بكرة", "time": "17:00"}
 _CONFIRMED = {**_READ_BACK, "booking_reference": "DC-0266"}
 
-# A cooperative, in-vocabulary phrasing for each act (built from the renderer's own exemplars), so
-# the accept path is exercised, not only the reject paths.
-_GOOD = {
-    "ask_missing_slot": "تمام يا فندم، ممكن تقوليلي {slot}؟",
-    "offer_times": (
-        "تمام يا قمر، متاح {service} في {branch} يوم {date} المواعيد دي {times}. تحبي أنهي واحدة؟"
-    ),
-    "nothing_free": (
-        "معلش يا فندم، مفيش مواعيد فاضية {service} في {branch} يوم {date}. تحبي يوم تاني؟"
-    ),
-    "read_back": "تمام يا قمر، أأكدلك {service} في {branch} يوم {date} الساعة {time}؟ صح كده؟",
-    "booking_confirmed": (
-        "تم الحجز يا قمر، {service} في {branch} يوم {date} الساعة {time}. "
-        "رقم حجزك {booking_reference}."
-    ),
-}
+# A cooperative phrasing for each act — the renderer's own first exemplar, so it matches an
+# approved skeleton and exercises the accept path (with light punctuation variation).
+_GOOD = {act: exemplars[0] for act, exemplars in _EXEMPLARS.items()}
 
 
 def _render(
@@ -187,6 +178,43 @@ def test_a_clinical_suitability_claim_is_rejected() -> None:
     assert substitute_or_reject(claim, spec) is None
 
 
+# ── The round-3 semantic bypasses: allowlisted words, reordered into a different meaning ───────
+
+
+def test_reordering_that_attaches_suitability_to_the_treatment_is_rejected() -> None:
+    """A reorder that moves the "suits you" word onto the treatment is not an approved skeleton."""
+    spec = RenderSpec(act="offer_times", facts=_OFFER)
+    reordered = "{service} يناسبك في {branch} يوم {date}، المواعيد دي {times}. تحبي أنهي واحدة؟"
+    assert substitute_or_reject(reordered, spec) is None
+
+
+def test_a_nothing_free_that_drops_the_negation_is_rejected() -> None:
+    """Omitting "مفيش" inverts "nothing free" into "appointments are available" — must reject."""
+    spec = RenderSpec(
+        act="nothing_free", facts={"service": "برايم ليز", "branch": "المعادي", "date": "بعد بكرة"}
+    )
+    inverted = "{service} في {branch} يوم {date} مواعيد فاضية. تحبي يوم تاني؟"
+    assert substitute_or_reject(inverted, spec) is None
+
+
+def test_a_read_back_that_is_a_statement_not_a_question_is_rejected() -> None:
+    """A read-back must ask; a statement form is not one of the approved read-back skeletons."""
+    spec = RenderSpec(act="read_back", facts=_READ_BACK)
+    statement = "{service} في {branch} يوم {date} الساعة {time} أكيد."
+    assert substitute_or_reject(statement, spec) is None
+
+
+def test_light_punctuation_variation_of_a_skeleton_is_accepted() -> None:
+    """The lock is structural, not on punctuation: an added emoji on a skeleton still passes."""
+    spec = RenderSpec(act="offer_times", facts=_OFFER)
+    varied = (
+        "تمام يا قمر 🌸 متاح {service} في {branch} يوم {date} "
+        "المواعيد دي {times}. تحبي أنهي واحدة؟!"
+    )
+    out = substitute_or_reject(varied, spec)
+    assert out is not None and "🌸" in out and "17:00 / 18:00" in out
+
+
 def test_the_confirmation_act_may_state_the_booking_is_done() -> None:
     """The one act whose vocabulary includes "تم الحجز" — with the reference that makes it true."""
     out = substitute_or_reject(
@@ -246,3 +274,43 @@ def test_a_spec_the_caller_cannot_prove_never_reaches_the_provider() -> None:
     )
     assert out == "تم"
     assert provider.calls == 0
+
+
+# ── build_renderer: the style / vertical / model gates ───────────────────────────────────────
+
+
+def _generative_settings(**overrides: object) -> Settings:
+    base: dict[str, object] = {
+        "response_style": "generative",
+        "tenant_vertical": "clinics",
+        "response_renderer_model": "claude-haiku-4-5",
+        "anthropic_api_key": "sk-test",
+    }
+    base.update(overrides)
+    return Settings(**base)  # type: ignore[arg-type]
+
+
+def test_build_renderer_is_template_by_default() -> None:
+    assert isinstance(build_renderer(Settings(response_style="template")), TemplateRenderer)
+
+
+def test_build_renderer_is_generative_on_a_clinic_claude_deploy_with_a_key() -> None:
+    renderer = build_renderer(_generative_settings(), client=httpx.Client())
+    assert isinstance(renderer, GenerativeRenderer)
+
+
+def test_build_renderer_falls_back_on_a_non_clinic_vertical() -> None:
+    """The renderer voice is clinic Egyptian Arabic; a holiday-home deploy must not use it."""
+    renderer = build_renderer(_generative_settings(tenant_vertical="holiday_homes"))
+    assert isinstance(renderer, TemplateRenderer)
+
+
+def test_build_renderer_falls_back_on_a_non_claude_model() -> None:
+    """This path speaks only the Anthropic Messages API."""
+    renderer = build_renderer(_generative_settings(response_renderer_model="gpt-4o-mini"))
+    assert isinstance(renderer, TemplateRenderer)
+
+
+def test_build_renderer_falls_back_without_an_anthropic_key() -> None:
+    renderer = build_renderer(_generative_settings(anthropic_api_key=None))
+    assert isinstance(renderer, TemplateRenderer)

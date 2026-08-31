@@ -5,34 +5,36 @@ branch, which day, which times the diary returned, which reference the schedulin
 This module lets a model phrase that act naturally in Egyptian Arabic **without ever owning a
 protected value, and without being able to assert an unproven one in prose**.
 
-**Safe by construction, not by denylist.** A model writing free Arabic can name a service, a
-branch, or a day it invented — "بوتوكس في الزمالك يوم الخميس" — in ordinary words that carry no
-digit and no English, so a denylist can never bound it. The lock here is the other way round:
+**Safe by construction: the output must be one of a few approved sentence skeletons.** A word
+allowlist bounds *vocabulary* but not *meaning* — the same safe words reordered can attach "يناسبك"
+to the treatment (a suitability claim), drop the "مفيش" that makes "nothing free" mean nothing free,
+or end a read-back on a statement instead of a question. So the lock is structural, not lexical:
 
 1. **Full placeholder coverage.** Every protected value an act carries must appear as a placeholder
    (``{service}``/``{branch}``/``{date}``/``{time}``/``{times}``/``{booking_reference}``), so the
    model never *needs* to write a fact — it is handed the real one to place.
-2. **A closed safe vocabulary.** Once the placeholders are removed, every remaining word must come
-   from a small per-act allowlist built from hand-written, fact-locked exemplar phrasings (see
-   ``_EXEMPLARS``). The model may recombine those safe connective/politeness words freely, but a
-   word it was not given — a fabricated service or branch name, a weekday, an efficacy claim
-   ("مضمونة", "نتيجتها ممتازة"), a premature-confirmation verb ("اتأكد", "تم الحجز") on a non-
-   confirmation act — is simply not in the set, so the generation is rejected and the deterministic
-   Step-4 fallback stands. Over-rejection is safe (it falls back); only over-acceptance would be a
-   leak, and the allowlist cannot over-accept a word it does not contain.
+2. **Exemplar-skeleton match.** The model's phrasing, once punctuation and diacritics are stripped
+   and words are lightly normalised, must equal — word for word, in order, with the placeholders in
+   their exact positions — one of a small set of hand-written, fact-locked skeletons for that act
+   (see ``_EXEMPLARS``). Each skeleton *is* the meaning: the ``nothing_free`` skeletons carry the
+   negation, the ask and read-back skeletons are interrogative, only ``booking_confirmed`` carries
+   "تم الحجز". A reordering, an omission, an inserted "أكيد", a fabricated service or branch, an
+   efficacy claim — anything that is not one of the approved sentences — does not match, so the
+   generation is rejected and the deterministic Step-4 fallback stands. Over-rejection is safe (it
+   falls back); over-acceptance is impossible because only the vetted skeletons are accepted.
 
-Booking-status words ("تم", "الحجز", "اتأكد", "حجزك") live *only* in the ``booking_confirmed``
-vocabulary, so a read-back or an offer cannot claim the appointment is done. The slot a missing-
-slot question is about is itself a proven fact (``{slot}``), so the model asks the question the
-deterministic layer chose, not one it picked.
+The slot a missing-slot question is about is itself a proven fact (``{slot}``), so the model asks
+the question the deterministic layer chose, not one it picked. Generation here is effectively the
+model choosing (and lightly punctuating) among approved phrasings — bounded on purpose. A looser
+grammar is post-demo work (plan §18); this is the strict pre-demo form Codex asked for.
 
 **This is deliberately smaller than the post-demo renderer architecture.** No ``MessageFact``, no
-fact-IDs, no phrase library of whole sentences, no ``RenderPlan``. One short call, one hard timeout,
-no retry loop. Any failure — a provider error, a timeout, an out-of-vocabulary word, a missing
-placeholder, an invented number, an English leak — returns the deterministic Arabic fallback the
-caller already composed, unchanged. Generation can make the receptionist *sound* better; it can
-never make the transaction *wrong*. The default renderer is the no-op ``TemplateRenderer``, so
-``RESPONSE_STYLE=template`` (the default) makes **zero** model calls.
+fact-IDs, no ``RenderPlan``. One short call, one hard timeout, no retry loop. Any failure — a
+provider error, a timeout, an unmatched skeleton, a missing placeholder, an invented number, an
+English leak — returns the deterministic Arabic fallback the caller already composed, unchanged.
+Generation can make the receptionist *sound* better; it can never make the transaction *wrong*. The
+default renderer is the no-op ``TemplateRenderer``, so ``RESPONSE_STYLE=template`` (the default)
+makes **zero** model calls.
 
 **Where it is not allowed to run at all.** The receptionist calls the renderer only on the five
 eligible acts. The excluded safety surfaces — clinical block, emergency, generic hand-off,
@@ -94,12 +96,14 @@ _REQUIRED_PLACEHOLDERS: dict[str, frozenset[str]] = {
     "booking_confirmed": frozenset({"service", "branch", "date", "time", "booking_reference"}),
 }
 
-#: Hand-written, fact-locked exemplar phrasings — two purposes. They few-shot the model toward safe
-#: output, and they *define the closed vocabulary*: the only Arabic words the model may use outside
-#: placeholders are the words in these sentences (per act). Every exemplar uses only safe connective
-#: / politeness / question words and the act's placeholders — no service, branch, weekday, relative
-#: day, number word, clinical or efficacy term, and no booking-status word except on
-#: ``booking_confirmed``. Adding a word here widens what the model may say; nothing else does.
+#: The approved sentence skeletons per act — the *only* phrasings a generation may take (up to
+#: punctuation, diacritics and the light word-normalisation below). Each is a complete, hand-vetted,
+#: fact-locked Egyptian-Arabic sentence whose meaning is safe by inspection: the ``nothing_free``
+#: skeletons carry the "مفيش" negation, the ask and read-back skeletons are questions, and only
+#: ``booking_confirmed`` states "تم الحجز"/"الحجز اتأكد". They also few-shot the model. Adding a
+#: skeleton widens what the model may say; nothing else does. To stay matchable, a skeleton uses no
+#: service/branch/weekday/relative-day/number word and no booking-status word outside
+#: ``booking_confirmed`` — the facts are only ever the placeholders.
 _EXEMPLARS: dict[str, tuple[str, ...]] = {
     "ask_missing_slot": (
         "تمام يا فندم، ممكن تقوليلي {slot}؟",
@@ -108,11 +112,11 @@ _EXEMPLARS: dict[str, tuple[str, ...]] = {
     ),
     "offer_times": (
         "تمام يا قمر، متاح {service} في {branch} يوم {date} المواعيد دي {times}. تحبي أنهي واحدة؟",
-        "أكيد، عندنا {service} في {branch} يوم {date} {times}. أنهي ميعاد يناسبك؟",
+        "أكيد، عندنا {service} في {branch} يوم {date} المواعيد دي {times}. أنهي ميعاد يناسبك؟",
     ),
     "nothing_free": (
         "معلش يا فندم، مفيش مواعيد فاضية {service} في {branch} يوم {date}. تحبي أشوفلك يوم تاني؟",
-        "للأسف مفيش حاجة فاضية {service} في {branch} يوم {date}. أدوّرلك على يوم تاني؟",
+        "للأسف مفيش حاجة فاضية {service} في {branch} يوم {date}. تحبي أدوّرلك على يوم تاني؟",
     ),
     "read_back": (
         "تمام يا قمر، أأكدلك {service} في {branch} يوم {date} الساعة {time}؟ صح كده؟",
@@ -122,7 +126,7 @@ _EXEMPLARS: dict[str, tuple[str, ...]] = {
         "تم الحجز يا قمر، {service} في {branch} يوم {date} الساعة {time}. "
         "رقم حجزك {booking_reference}. مستنيينك في الفرع!",
         "الحجز اتأكد يا فندم، {service} في {branch} يوم {date} الساعة {time}. "
-        "رقمك {booking_reference}.",
+        "رقم حجزك {booking_reference}.",
     ),
 }
 
@@ -170,10 +174,29 @@ def _normalise_words(text: str) -> list[str]:
     return words
 
 
-#: The closed vocabulary per act: every Arabic word its exemplars use (placeholders drop out under
-#: normalisation, being non-Arabic). The model may use only these words outside placeholders.
-_SAFE_WORDS: dict[str, frozenset[str]] = {
-    act: frozenset(word for exemplar in exemplars for word in _normalise_words(exemplar))
+def _canonical_tokens(template: str) -> tuple[str, ...]:
+    """The template as an ordered sequence of normalised words and placeholder markers.
+
+    Placeholders become their own ``{name}`` tokens in position; the Arabic between them is
+    normalised word by word (``_normalise_words``), so punctuation, diacritics, tatweel and emoji
+    fall away. Two phrasings that differ only in punctuation or a stripped clitic canonicalise to
+    the same sequence; a reordering, an omission or an inserted word does not. This is what makes
+    the match test one of *meaning-bearing structure*, not just of the words present.
+    """
+    parts: list[str] = []
+    cursor = 0
+    for match in _TOKEN.finditer(template):
+        parts.extend(_normalise_words(template[cursor : match.start()]))
+        parts.append("{" + match.group(1) + "}")
+        cursor = match.end()
+    parts.extend(_normalise_words(template[cursor:]))
+    return tuple(parts)
+
+
+#: The approved canonical token sequences per act. A generation is accepted only if its own
+#: canonical form is one of these — the ordered, structural lock the word allowlist could not be.
+_SKELETONS: dict[str, frozenset[tuple[str, ...]]] = {
+    act: frozenset(_canonical_tokens(exemplar) for exemplar in exemplars)
     for act, exemplars in _EXEMPLARS.items()
 }
 
@@ -227,9 +250,14 @@ def substitute_or_reject(template: str, spec: RenderSpec) -> str | None:
     * every placeholder the act requires is present (its full protected-fact set);
     * no digit the model typed itself (invented time / date / reference);
     * no English prose;
-    * **every non-placeholder Arabic word is in the act's closed safe vocabulary** — this is the
-      structural lock that a fabricated service/branch/day, an efficacy claim, or a premature
-      "it's booked" cannot pass, because none of those words is in the vocabulary.
+    * **the phrasing canonicalises to one of the act's approved skeletons** — the ordered,
+      meaning-bearing structural lock. A fabricated service/branch/day, a dropped negation, a
+      reordering that moves "يناسبك" onto the treatment, a read-back that ends on a statement, or a
+      premature "تم الحجز" all produce a sequence that is not an approved skeleton, and fall back.
+
+    On success the *original* text is what is substituted and returned, so the model's own
+    punctuation, spacing and emoji reach the patient — only the validation runs on the canonical
+    form.
     """
     text = template.strip()
     if not text:
@@ -248,16 +276,14 @@ def substitute_or_reject(template: str, spec: RenderSpec) -> str | None:
         return None
 
     if _DIGIT.search(stripped):
-        return None
+        return None  # a number the model typed itself
     if _LATIN_WORD.search(stripped):
-        return None
+        return None  # English prose
 
-    safe = _SAFE_WORDS[spec.act]
-    for word in _normalise_words(stripped):
-        if word not in safe:
-            # A word the model was not given — a fabricated fact, an efficacy claim, or an
-            # out-of-act booking-status word. Not provably safe, so fall back.
-            return None
+    if _canonical_tokens(text) not in _SKELETONS[spec.act]:
+        # Not one of the approved sentences for this act — reordered, missing a word, or carrying
+        # one it was not given. Its meaning is not provably safe, so fall back.
+        return None
 
     try:
         return text.format(**spec.facts)

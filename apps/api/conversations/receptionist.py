@@ -401,9 +401,7 @@ async def handle(
             # booking slots (see `_CLINIC_SLOT_ASKS`); every other slot keeps the generic prompt.
             # The renderer may phrase the question warmly, but only about this exact slot (the
             # ``{slot}`` descriptor); failing, it is the Arabic fallback unchanged.
-            text = await render_reply(
-                "ask_missing_slot", _slot_facts(slot), fallback=contextual
-            )
+            text = await render_reply("ask_missing_slot", _slot_facts(slot), fallback=contextual)
             return OutboundAction(kind="ask", text=text), task
         return (
             OutboundAction(

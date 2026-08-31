@@ -26,6 +26,7 @@ from apps.api.conversations import tools
 from apps.api.conversations.receptionist import handle
 from apps.api.conversations.receptionist import handle as receptionist_handle
 from apps.api.conversations.renderer import (
+    _EXEMPLARS,
     GenerativeRenderer,
     RenderSpec,
     TemplateRenderer,
@@ -67,20 +68,10 @@ from apps.api.tests.test_booking_journey import (
 # template obeys the fact lock: it uses only the act's placeholders, types no digit itself, is pure
 # Arabic, makes no clinical claim, and claims the booking is done only on ``booking_confirmed``.
 
-_VALID_TEMPLATES: dict[str, str] = {
-    "ask_missing_slot": "تمام يا فندم، ممكن تقوليلي {slot}؟",
-    "offer_times": (
-        "تمام يا قمر، متاح {service} في {branch} يوم {date} المواعيد دي {times}. تحبي أنهي واحدة؟"
-    ),
-    "nothing_free": (
-        "معلش يا فندم، مفيش مواعيد فاضية {service} في {branch} يوم {date}. تحبي يوم تاني؟"
-    ),
-    "read_back": "تمام يا قمر، أأكدلك {service} في {branch} يوم {date} الساعة {time}؟ صح كده؟",
-    "booking_confirmed": (
-        "تم الحجز يا قمر، {service} في {branch} يوم {date} الساعة {time}. "
-        "رقم حجزك {booking_reference}. مستنيينك في الفرع!"
-    ),
-}
+#: The first approved skeleton for each act — a cooperative model that phrases within the lock. Each
+#: carries a marker ("يا قمر" / "يا فندم") absent from the deterministic fallback, so a test can
+#: prove the generated sentence reached the patient.
+_VALID_TEMPLATES: dict[str, str] = {act: exemplars[0] for act, exemplars in _EXEMPLARS.items()}
 
 #: Adversarial phrasings that pass the old digit/English/denylist checks but assert protected facts
 #: in prose: a fabricated service/branch/day beside a valid offer, an efficacy claim, and a
