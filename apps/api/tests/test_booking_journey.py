@@ -23,7 +23,7 @@ from packages.intents.schema import vocabulary_for
 
 from apps.api.conversations import tools
 from apps.api.conversations.receptionist import handle
-from apps.api.conversations.task import Task, TaskStatus
+from apps.api.conversations.task import NON_PROGRESS_TURNS_SLOT, Task, TaskStatus
 from apps.api.conversations.tools import (
     REGISTRY,
     CheckAvailability,
@@ -75,6 +75,7 @@ SERVICES = (
         price_minor=1_635_000,
         duration_minutes=60,
         session_count=12,
+        aliases=("الليزر 12 جلسة", "لليزر 12 جلسة", "ليزر 12 جلسة"),
     ),
     Service(
         code="DT021",
@@ -82,6 +83,7 @@ SERVICES = (
         price_minor=1_635_000,
         duration_minutes=60,
         session_count=12,
+        aliases=("الليزر 12 جلسة", "لليزر 12 جلسة", "ليزر 12 جلسة"),
     ),
     Service(
         code="DT029",
@@ -110,6 +112,7 @@ class _FakeDirectory:
         self.slots = slots if slots is not None else _default_diary()
         self.bookings: list[Booking] = []
         self.holds: dict[str, tuple[str, datetime]] = {}
+        self.availability_queries: list[tuple[str, str, date]] = []
         self.next_serial = 266  # the workbook's highest is DC-0265
 
     def list_branches(self, tenant_id: str, *, active_only: bool = True) -> list[Branch]:
@@ -130,6 +133,7 @@ class _FakeDirectory:
         conversation_id: str | None = None,
     ) -> list[AvailabilitySlot]:
         at = now or NOW
+        self.availability_queries.append((service_code, branch_external_id, on_date))
         found = []
         for slot in self.slots:
             if slot.service_code != service_code or slot.branch_external_id != branch_external_id:
@@ -340,6 +344,67 @@ def primelase_directory(monkeypatch: pytest.MonkeyPatch) -> _PrimelaseDirectory:
     return fake
 
 
+_FULL_BODY_3 = Service(
+    code="DT040",
+    name="Full Body laser hair removal - 3 sessions",
+    price_minor=500_000,
+    duration_minutes=60,
+    session_count=3,
+    category="Laser",
+    aliases=("فل بودي", "ليزر"),
+)
+_FULL_BODY_6 = Service(
+    code="DT041",
+    name="Full Body laser hair removal - 6 sessions",
+    price_minor=900_000,
+    duration_minutes=60,
+    session_count=6,
+    category="Laser",
+    aliases=("فل بودي", "ليزر"),
+)
+_FULL_BODY_12 = Service(
+    code="DT042",
+    name="Full Body laser hair removal - 12 sessions",
+    price_minor=1_600_000,
+    duration_minutes=60,
+    session_count=12,
+    category="Laser",
+    aliases=("فل بودي", "ليزر"),
+)
+_BIKINI_UNDERARM_6 = Service(
+    code="DT043",
+    name="Bikini & Underarm Laser Hair Removal - 6 Sessions",
+    price_minor=700_000,
+    duration_minutes=45,
+    session_count=6,
+    category="Laser",
+    aliases=("ليزر بيكيني واندر ارم", "ليزر"),
+)
+
+
+class _ProductionTraceDirectory(_FakeDirectory):
+    """The service choices present in the live trace, without inventing diary availability."""
+
+    def __init__(self) -> None:
+        super().__init__(slots=[])
+
+    def list_services(self, tenant_id: str, *, active_only: bool = True) -> list[Service]:
+        return [_FULL_BODY_3, _FULL_BODY_6, _FULL_BODY_12, _BIKINI_UNDERARM_6]
+
+
+@pytest.fixture
+def production_trace_directory(monkeypatch: pytest.MonkeyPatch) -> _ProductionTraceDirectory:
+    fake = _ProductionTraceDirectory()
+    for tool in (
+        CheckAvailability(fake, timezone=CAIRO, clock=lambda: NOW),
+        QuotePrice(fake, timezone=CAIRO, clock=lambda: NOW),
+        HoldSlot(fake, timezone=CAIRO, clock=lambda: NOW),
+        ConfirmBooking(fake, timezone=CAIRO, reference_prefix="DC", clock=lambda: NOW),
+    ):
+        monkeypatch.setitem(REGISTRY, tool.name, tool)
+    return fake
+
+
 def _turn(text: str) -> InboundTurn:
     return InboundTurn(
         tenant_id=TENANT_ID,
@@ -372,6 +437,197 @@ def _say(
             turns_taken=turns_taken,
         )
     )
+
+
+# ── Current-message provenance for service and branch (live trace) ────────────────────────────
+
+
+def test_classifier_branch_is_rejected_when_current_message_does_not_name_it(
+    production_trace_directory: _ProductionTraceDirectory,
+) -> None:
+    _action, task = _say(
+        "محتاجة احجز ليزر",
+        "booking_enquiry",
+        {"service": "laser", "branch": "المعادي"},
+    )
+
+    assert "branch" not in task.slots
+
+
+def test_broad_message_cannot_license_classifier_selected_specific_service(
+    production_trace_directory: _ProductionTraceDirectory,
+) -> None:
+    active = Task(
+        intent="booking_enquiry",
+        slots={"service": "laser"},
+        vocabulary=CLINICS,
+    )
+
+    _action, task = _say(
+        "بكرة ف المعادي",
+        "booking_enquiry",
+        {
+            "service": "Bikini & Underarm Laser Hair Removal - 6 Sessions",
+            "branch": "المعادي",
+            "requested_date": "2026-09-02",
+        },
+        active,
+    )
+
+    assert task.slots["branch"] == "المعادي"
+    assert task.slots["requested_date"] == "2026-09-02"
+    assert task.slots["service"] == "laser"
+
+
+def test_ambiguous_laser_message_cannot_license_one_catalogue_sku(
+    production_trace_directory: _ProductionTraceDirectory,
+) -> None:
+    active = Task(
+        intent="booking_enquiry",
+        slots={"service": "laser"},
+        vocabulary=CLINICS,
+    )
+
+    _action, task = _say(
+        "ليزر",
+        "booking_enquiry",
+        {"service": "Bikini & Underarm Laser Hair Removal - 6 Sessions"},
+        active,
+    )
+
+    assert task.slots["service"] == "laser"
+
+
+def test_session_count_without_service_words_cannot_license_one_catalogue_sku(
+    production_trace_directory: _ProductionTraceDirectory,
+) -> None:
+    active = Task(
+        intent="booking_enquiry",
+        slots={"service": "laser"},
+        vocabulary=CLINICS,
+    )
+
+    _action, task = _say(
+        "بكرة الساعة 3",
+        "booking_enquiry",
+        {"service": _FULL_BODY_3.name, "requested_date": "2026-09-02"},
+        active,
+    )
+
+    assert task.slots["service"] == "laser"
+
+
+def test_current_message_may_change_service_to_supported_full_body_family(
+    production_trace_directory: _ProductionTraceDirectory,
+) -> None:
+    active = Task(
+        intent="booking_enquiry",
+        slots={"service": "laser"},
+        vocabulary=CLINICS,
+    )
+
+    _action, task = _say(
+        "عايزة فل بودي",
+        "booking_enquiry",
+        {"service": "Full Body"},
+        active,
+    )
+
+    assert task.slots["service"] == "Full Body"
+
+
+def test_current_message_may_select_one_exact_catalogue_service(
+    production_trace_directory: _ProductionTraceDirectory,
+) -> None:
+    active = Task(
+        intent="booking_enquiry",
+        slots={"service": "laser"},
+        vocabulary=CLINICS,
+    )
+    selected = "Full Body laser hair removal - 3 sessions"
+
+    _action, task = _say(
+        selected,
+        "booking_enquiry",
+        {"service": selected},
+        active,
+    )
+
+    assert task.slots["service"] == selected
+
+
+def test_exact_message_accepts_classifier_service_plus_separate_session_count(
+    production_trace_directory: _ProductionTraceDirectory,
+) -> None:
+    active = Task(
+        intent="booking_enquiry",
+        slots={"service": "laser"},
+        vocabulary=CLINICS,
+    )
+
+    _action, task = _say(
+        "Full Body laser hair removal - 3 sessions",
+        "booking_enquiry",
+        {"service": "Full Body", "session_count": "3"},
+        active,
+    )
+
+    assert task.slots["service"] == "Full Body"
+    assert task.slots["session_count"] == "3"
+
+
+def test_compact_production_trace_never_checks_the_classifier_invented_package(
+    production_trace_directory: _ProductionTraceDirectory,
+) -> None:
+    """The live sequence retains broad facts until the patient selects an exact package."""
+    action, task = _say(
+        "محتاجة احجز ليزر",
+        "booking_enquiry",
+        {"service": "laser", "branch": "المعادي"},
+    )
+    assert action.kind == "ask"
+    assert task.slots["service"] == "laser"
+    assert "branch" not in task.slots
+
+    action, task = _say(
+        "بكرة ف المعادي",
+        "booking_enquiry",
+        {
+            "service": _BIKINI_UNDERARM_6.name,
+            "branch": "المعادي",
+            "requested_date": "2026-09-02",
+        },
+        task,
+    )
+    assert action.kind == "ask"
+    assert task.slots["service"] == "laser"
+    assert task.slots["branch"] == "المعادي"
+    assert task.slots["requested_date"] == "2026-09-02"
+    assert production_trace_directory.availability_queries == []
+
+    action, task = _say(
+        "عايزة فل بودي",
+        "booking_enquiry",
+        {"service": "Full Body"},
+        task,
+    )
+    assert action.kind == "ask"
+    assert task.slots["service"] == "Full Body"
+    assert production_trace_directory.availability_queries == []
+
+    action, task = _say(
+        "Full Body laser hair removal - 3 sessions",
+        "booking_enquiry",
+        {"service": _FULL_BODY_3.name},
+        task,
+    )
+
+    assert action.kind == "ask"
+    assert task.status is not TaskStatus.HANDED_OFF
+    assert task.slots["service"] == _FULL_BODY_3.name
+    assert [query[0] for query in production_trace_directory.availability_queries] == [
+        _FULL_BODY_3.code
+    ]
 
 
 # ── Demo-safe clarification limit (pre-demo Step 2) ──────────────────────────────────────────
@@ -411,6 +667,50 @@ def test_normal_booking_progress_is_not_cut_off_at_the_date_step(
     assert offer.kind == "ask"
     assert task.status is not TaskStatus.HANDED_OFF
     assert "17:00" in (offer.text or "") and "18:00" in (offer.text or "")
+
+
+def test_more_than_five_useful_booking_turns_do_not_trigger_handoff(
+    production_trace_directory: _ProductionTraceDirectory,
+) -> None:
+    """Useful service refinement remains progress even after the old total-turn ceiling."""
+    action, task = _say("محتاجة احجز", "booking_enquiry", {}, None, turns_taken=0)
+    assert action.kind == "ask"
+
+    action, task = _say("ليزر", "booking_enquiry", {"service": "laser"}, task, turns_taken=1)
+    assert action.kind == "ask"
+
+    action, task = _say("المعادي", "booking_enquiry", {"branch": "Maadi"}, task, turns_taken=2)
+    assert action.kind == "ask"
+
+    action, task = _say(
+        "بكرة",
+        "booking_enquiry",
+        {"requested_date": "2026-09-02"},
+        task,
+        turns_taken=3,
+    )
+    assert action.kind == "ask"
+
+    action, task = _say(
+        "عايزة فل بودي",
+        "booking_enquiry",
+        {"service": "Full Body"},
+        task,
+        turns_taken=4,
+    )
+    assert action.kind == "ask"
+
+    action, task = _say(
+        "Full Body laser hair removal - 3 sessions",
+        "booking_enquiry",
+        {"service": _FULL_BODY_3.name},
+        task,
+        turns_taken=5,
+    )
+
+    assert action.kind != "handoff"
+    assert task.status is not TaskStatus.HANDED_OFF
+    assert task.slots["service"] == _FULL_BODY_3.name
 
 
 def _to_primelase_offer(turns_taken_start: int = 0) -> tuple[OutboundAction, Task]:
@@ -489,16 +789,17 @@ def test_an_explicit_time_after_an_offer_still_books(
 
 
 def test_repeated_non_progress_still_reaches_the_handoff_boundary() -> None:
-    """The budget is larger, not gone: an answer that never fills a slot still ends with a person.
+    """Five consecutive replies that add no task fact still fetch a person."""
+    action, task = _say("محتاجة احجز", "booking_enquiry", {}, None, turns_taken=0)
+    assert action.kind == "ask"
 
-    Within budget the task keeps asking; at the configured limit it hands off, so a patient who
-    never answers the outstanding question is not looped at forever.
-    """
-    within_budget, _task = _say("؟", "availability_check", {}, None, turns_taken=4)
-    assert within_budget.kind == "ask"
+    for attempt in range(1, 6):
+        action, task = _say("مش عارفة", "booking_enquiry", {}, task, turns_taken=0)
+        assert task.slots[NON_PROGRESS_TURNS_SLOT] == str(attempt)
+        if attempt < 5:
+            assert action.kind == "ask"
 
-    handed_off, task = _say("؟", "availability_check", {}, None, turns_taken=5)
-    assert handed_off.kind == "handoff"
+    assert action.kind == "handoff"
     assert task.status is TaskStatus.HANDED_OFF
 
 
@@ -634,6 +935,70 @@ def test_a_day_with_nothing_free_is_answered_rather_than_handed_off(
     assert "مفيش مواعيد فاضية" in (action.text or "")
 
 
+def test_none_available_response_uses_failed_date_then_clears_only_date_bound_state(
+    directory: _FakeDirectory,
+) -> None:
+    action, task = _say(
+        "احجزيلي فاشيال بيسك في المعادي الخميس",
+        "booking_enquiry",
+        {"service": "فاشيال بيسك", "branch": "المعادي", "requested_date": "2026-09-03"},
+    )
+
+    assert action.kind == "ask"
+    assert "Thursday 03 September" in (action.text or "")
+    assert task.slots["service"] == "فاشيال بيسك"
+    assert task.slots["branch"] == "المعادي"
+    assert "requested_date" not in task.slots
+    assert "requested_time" not in task.slots
+    assert "requested_date" not in task.confirmed
+    assert "requested_time" not in task.confirmed
+
+
+@pytest.mark.parametrize("agreement", ["تمام", "ياريت"])
+def test_affirmative_after_none_available_asks_for_new_date_without_rechecking_old_one(
+    directory: _FakeDirectory, agreement: str
+) -> None:
+    _nothing_free, task = _say(
+        "احجزيلي فاشيال بيسك في المعادي الخميس",
+        "booking_enquiry",
+        {"service": "فاشيال بيسك", "branch": "المعادي", "requested_date": "2026-09-03"},
+    )
+    calls_after_failure = list(directory.availability_queries)
+
+    action, task = _say(agreement, "thanks_closing", {}, task)
+
+    assert action.kind == "ask"
+    assert action.text == "تمام، تحبي الحجز يكون يوم ايه؟"
+    assert directory.availability_queries == calls_after_failure
+    assert task.slots["service"] == "فاشيال بيسك"
+    assert task.slots["branch"] == "المعادي"
+    assert "requested_date" not in task.slots
+
+
+def test_new_date_after_none_available_runs_a_fresh_availability_check(
+    directory: _FakeDirectory,
+) -> None:
+    _nothing_free, task = _say(
+        "احجزيلي فاشيال بيسك في المعادي الخميس",
+        "booking_enquiry",
+        {"service": "فاشيال بيسك", "branch": "المعادي", "requested_date": "2026-09-03"},
+    )
+    calls_after_failure = len(directory.availability_queries)
+
+    action, task = _say(
+        "الأربع",
+        "booking_enquiry",
+        {"requested_date": "2026-09-02"},
+        task,
+    )
+
+    assert len(directory.availability_queries) == calls_after_failure + 1
+    assert directory.availability_queries[-1][2] == WEDNESDAY
+    assert action.kind == "ask"
+    assert "11:00" in (action.text or "")
+    assert task.slots["requested_date"] == "2026-09-02"
+
+
 def test_two_services_a_patient_cannot_tell_apart_are_asked_about_never_chosen(
     directory: _FakeDirectory,
 ) -> None:
@@ -655,7 +1020,9 @@ def test_a_quote_states_the_currency_and_the_session_count(directory: _FakeDirec
     it is wrong by a factor of five, and the patient finds out at the counter.
     """
     action, _task = _say(
-        "الباكدج الست جلسات بكام؟", "price_enquiry", {"service": "برايم ليز 6 جلسات"}
+        "باكدج برايم ليز الست جلسات بكام؟",
+        "price_enquiry",
+        {"service": "برايم ليز 6 جلسات"},
     )
     assert action.kind == "say"
     assert "15,000 EGP" in (action.text or "")
@@ -666,7 +1033,7 @@ def test_availability_is_answered_with_times_the_diary_actually_holds(
     directory: _FakeDirectory,
 ) -> None:
     action, _task = _say(
-        "في مواعيد فاضية للفاشيال في المعادي بكرة؟",
+        "في مواعيد فاضية للفاشيال بيسك في المعادي بكرة؟",
         "availability_check",
         {"service": "فاشيال بيسك", "branch": "المعادي", "requested_date": "2026-09-02"},
     )
@@ -1250,7 +1617,9 @@ def test_the_generic_handoff_is_arabic_when_configured(dermaclub: _PrimelaseDire
     Repeated non-progress on the same outstanding question reaches the configured hand-off boundary;
     the sentence it says is the tenant's Arabic ``handoff``, not the neutral English default.
     """
-    action, task = _say("؟", "availability_check", {}, None, turns_taken=5)
+    action, task = _say("؟", "availability_check", {}, None, turns_taken=0)
+    for _attempt in range(5):
+        action, task = _say("؟", "availability_check", {}, task, turns_taken=0)
     assert action.kind == "handoff"
     assert task.status is TaskStatus.HANDED_OFF
     assert action.text == _DERMACLUB_COPY.handoff

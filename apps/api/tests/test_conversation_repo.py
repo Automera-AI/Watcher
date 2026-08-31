@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from apps.api.conversations.task import AWAITING_ANOTHER_DATE_SLOT, NON_PROGRESS_TURNS_SLOT
 from apps.api.db.base import Base
 from apps.api.db.conversation_repo import (
     ConversationRepository,
@@ -98,3 +99,21 @@ def test_task_round_trip_via_row(session: Session) -> None:
     reconstituted = task_from_row(reloaded)
     assert reconstituted.slots == {"date": "2026-01-15"}
     assert "date" in reconstituted.confirmed
+
+
+def test_reserved_internal_metadata_survives_task_rehydration(session: Session) -> None:
+    repo = ConversationRepository(session)
+    conv = repo.find_or_create_conversation(TENANT, "whatsapp", "thread-1")
+    row = repo.create_task(conv.id, TENANT, "booking_enquiry")
+
+    task = task_from_row(row)
+    task.slots[NON_PROGRESS_TURNS_SLOT] = "3"
+    task.slots[AWAITING_ANOTHER_DATE_SLOT] = "1"
+    task_to_row(task, row)
+    repo.save_task(row)
+
+    reloaded = repo.get_active_task(conv.id)
+    assert reloaded is not None
+    reconstituted = task_from_row(reloaded)
+    assert reconstituted.slots[NON_PROGRESS_TURNS_SLOT] == "3"
+    assert reconstituted.slots[AWAITING_ANOTHER_DATE_SLOT] == "1"

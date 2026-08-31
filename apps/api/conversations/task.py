@@ -21,6 +21,18 @@ from enum import StrEnum
 
 from packages.intents.schema import Vocabulary, default_vocabulary
 
+#: Reserved task-slot namespace for state-machine metadata persisted without a schema migration.
+#: Classifier output may never write these keys; patient/business surfaces consume only vocabulary
+#: slots or explicitly named facts, while these values remain in ``Task.slots`` across rehydration.
+INTERNAL_SLOT_PREFIX = "__watcher_internal__"
+AWAITING_ANOTHER_DATE_SLOT = f"{INTERNAL_SLOT_PREFIX}awaiting_another_date"
+NON_PROGRESS_TURNS_SLOT = f"{INTERNAL_SLOT_PREFIX}non_progress_turns"
+
+
+def is_internal_slot(name: str) -> bool:
+    """Whether ``name`` is reserved persisted state rather than a patient/business fact."""
+    return name.startswith(INTERNAL_SLOT_PREFIX)
+
 
 class TaskStatus(StrEnum):
     COLLECTING = "collecting"
@@ -95,7 +107,7 @@ class Task:
         date must not erase the one we already have.
         """
         for key, value in new_slots.items():
-            if not value:
+            if not value or is_internal_slot(key):
                 continue
             if self.slots.get(key) not in (None, value):
                 self.confirmed.discard(key)

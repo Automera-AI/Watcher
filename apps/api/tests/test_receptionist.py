@@ -579,9 +579,11 @@ def test_handoff_and_unbuilt_default_to_english_and_take_the_tenants_arabic() ->
     global Arabic default would put Arabic in a holiday-home hand-off. So the default is English and
     the clinic's configured wording overrides it, the same seam every other line goes through.
     """
-    default_handoff, _ = asyncio.run(
-        handle(_turn("؟"), "availability_check", 0.95, {}, None, vocabulary=_CLINICS, turns_taken=5)
-    )
+    task = None
+    for _attempt in range(6):
+        default_handoff, task = asyncio.run(
+            handle(_turn("؟"), "availability_check", 0.95, {}, task, vocabulary=_CLINICS)
+        )
     assert default_handoff.kind == "handoff"
     assert default_handoff.text == HANDOFF_TEXT  # neutral English default
 
@@ -590,11 +592,11 @@ def test_handoff_and_unbuilt_default_to_english_and_take_the_tenants_arabic() ->
         ConversationCopy(handoff="هحوّلك لزميلي حالاً.", unbuilt="هراجع وأرجعلك.")
     )
     try:
-        arabic_handoff, _ = asyncio.run(
-            handle(
-                _turn("؟"), "availability_check", 0.95, {}, None, vocabulary=_CLINICS, turns_taken=5
+        task = None
+        for _attempt in range(6):
+            arabic_handoff, task = asyncio.run(
+                handle(_turn("؟"), "availability_check", 0.95, {}, task, vocabulary=_CLINICS)
             )
-        )
         task = Task(
             intent="availability_check",
             slots={"service": "س", "branch": "ب", "requested_date": "2026-09-02"},

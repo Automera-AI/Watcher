@@ -20,7 +20,7 @@ Three cases, exactly the ones the review asked to pin:
 2. a stale concrete offer leaves active continuity before the receptionist sees it, and nothing is
    held, read back, confirmed or booked from it;
 3. a booking whose day had *no* concrete times is never marked, so it is not expired however long
-   the patient takes — its service/branch/date survive.
+   the patient takes — its service/branch survive while the failed date remains cleared.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ import pytest
 from packages.intents.schema import vocabulary_for
 
 from apps.api.conversations.receptionist import handle
-from apps.api.conversations.task import Task, TaskStatus
+from apps.api.conversations.task import AWAITING_ANOTHER_DATE_SLOT, Task, TaskStatus
 from apps.api.conversations.tools import (
     REGISTRY,
     CheckAvailability,
@@ -220,8 +220,8 @@ def test_a_no_availability_booking_is_never_expired_however_long_it_waits(
 
     A booking for a day with nothing free stays ``booking_enquiry / COLLECTING`` waiting for
     ``requested_time`` — the same shape as a real pending offer — but it was offered no times, so it
-    carries no offer proof. Even long past ``max_age_seconds`` it resumes untouched, with the
-    patient's service, branch and date still available (the pre-Task-5 behaviour).
+    carries no offer proof. Even long past ``max_age_seconds`` it remains active with the
+    patient's service and branch, while the failed date remains cleared for a fresh choice.
     """
     store = SqlAlchemyConversationStore(database.tenant_session, vocabulary=CLINICS)
 
@@ -248,7 +248,8 @@ def test_a_no_availability_booking_is_never_expired_however_long_it_waits(
     assert resumed.task.status is TaskStatus.COLLECTING
     assert resumed.task.slots["service"] == "فاشيال بيسك"
     assert resumed.task.slots["branch"] == "المعادي"
-    assert resumed.task.slots["requested_date"] == "2026-09-03"
+    assert "requested_date" not in resumed.task.slots
+    assert resumed.task.slots[AWAITING_ANOTHER_DATE_SLOT] == "1"
     assert _active_row(database) is not None  # still active, not abandoned
 
 
@@ -261,7 +262,7 @@ def test_a_new_day_with_no_availability_clears_the_earlier_offer_proof(
     Thursday with nothing free — a fresh availability evaluation that returns no concrete times. The
     earlier proof must be cleared then and there, not left orphaned on the task: otherwise a much
     later bare time would expire this booking (using A's stale timestamp) and discard the
-    service/branch/date the patient gave for B.
+    service/branch state retained after B failed.
     """
     store = SqlAlchemyConversationStore(database.tenant_session, vocabulary=CLINICS)
 
@@ -292,13 +293,14 @@ def test_a_new_day_with_no_availability_clears_the_earlier_offer_proof(
     row = _active_row(database)
     assert row is not None
     assert "availability_offered_at" not in row.slots  # A's proof was cleared, not orphaned onto B
-    assert row.slots["requested_date"] == "2026-09-03"
+    assert "requested_date" not in row.slots
+    assert row.slots[AWAITING_ANOTHER_DATE_SLOT] == "1"
 
     # A much later bare time (well past the window measured from A's offer) must NOT expire B.
     long_after = NOW + timedelta(seconds=MAX_AGE + 200)
     resumed = store.begin(_turn("الساعة ٦", received_at=long_after, key="late-time"))
     assert resumed.task is not None  # B was not wrongly abandoned
-    assert resumed.task.slots["requested_date"] == "2026-09-03"
+    assert "requested_date" not in resumed.task.slots
     assert resumed.task.slots["service"] == "فاشيال بيسك"
     assert resumed.task.slots["branch"] == "المعادي"
     assert _active_row(database) is not None
