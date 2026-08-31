@@ -546,14 +546,15 @@ def build_renderer(settings: Settings, client: httpx.Client | None = None) -> Re
         credentials = settings.llm_credentials(model_id)
     except Exception:  # noqa: BLE001 - missing key etc.; never fail boot over the renderer
         logger.warning(
-            "RESPONSE_STYLE=generative but credentials for %s are unavailable; "
-            "falling back to the deterministic template renderer",
+            "Generative renderer configuration unavailable for model %s; using the deterministic "
+            "template renderer",
             model_id,
         )
         return TemplateRenderer()
     if credentials.api_key is None:
         logger.warning(
-            "RESPONSE_STYLE=generative but no API key for %s; using the template renderer",
+            "Generative renderer access is not configured for model %s; using the template "
+            "renderer",
             model_id,
         )
         return TemplateRenderer()
