@@ -19,10 +19,12 @@ from pydantic import ValidationError
 from apps.api.classifier.provider import ProviderError
 from apps.api.conversations.renderer import (
     _EXEMPLARS,
+    _SYSTEM_PROMPT,
     GenerativeRenderer,
     RenderAct,
     RenderSpec,
     TemplateRenderer,
+    _user_prompt,
     build_renderer,
     substitute_or_reject,
 )
@@ -91,6 +93,23 @@ def test_a_spec_with_an_unknown_fact_is_rejected() -> None:
 def test_a_spec_with_a_blank_fact_is_rejected() -> None:
     with pytest.raises(ValidationError):
         RenderSpec(act="offer_times", facts={**_OFFER, "times": ""})
+
+
+# ── The prompt contract ───────────────────────────────────────────────────────────────────────
+
+
+def test_prompts_require_one_exemplar_without_reordering() -> None:
+    instruction = (
+        "Choose ONE of the example phrasings. Preserve its words, word order, and placeholder "
+        "positions exactly. Vary only light punctuation and spacing. Do not add other words, "
+        "labels, symbols, or emoji."
+    )
+    user_prompt = _user_prompt(RenderSpec(act="offer_times", facts=_OFFER))
+
+    assert instruction in _SYSTEM_PROMPT
+    assert instruction in user_prompt
+    assert "vary only the order and warmth" not in _SYSTEM_PROMPT
+    assert "vary only order and warmth" not in user_prompt
 
 
 # ── The validator: the accept path, and every way it rejects ─────────────────────────────────

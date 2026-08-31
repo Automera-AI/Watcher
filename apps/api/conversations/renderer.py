@@ -324,8 +324,9 @@ _SYSTEM_PROMPT = (
     "is marked required. Do not invent placeholders.\n"
     "- Never write a service name, branch name, day, time, number, or booking reference yourself — "
     "those appear ONLY through their placeholders. Do not type digits.\n"
-    "- Stay very close to the example phrasings you are shown: reuse their words and vary only the "
-    "order and warmth. Do not introduce new nouns.\n"
+    "- Choose ONE of the example phrasings. Preserve its words, word order, and placeholder "
+    "positions exactly. Vary only light punctuation and spacing. Do not add other words, labels, "
+    "symbols, or emoji.\n"
     "- Write in Egyptian Arabic only. No English.\n"
     "- Never give medical advice or say a treatment is suitable, safe, recommended, guaranteed, or "
     "effective.\n"
@@ -357,7 +358,9 @@ def _user_prompt(spec: RenderSpec) -> str:
     return (
         f"{_ACT_BRIEF[spec.act]}\n\n"
         f"Placeholders you may use: {listed}.\n\n"
-        f"Example phrasings (reuse these words; vary only order and warmth):\n{examples}\n\n"
+        "Choose ONE of the example phrasings. Preserve its words, word order, and placeholder "
+        "positions exactly. Vary only light punctuation and spacing. Do not add other words, "
+        f"labels, symbols, or emoji.\n\nExample phrasings:\n{examples}\n\n"
         "Write the Egyptian-Arabic message now."
     )
 
