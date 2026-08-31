@@ -25,6 +25,7 @@ from apps.api.channels.factory import build_alerter, build_sender
 from apps.api.channels.sender import ChannelSender
 from apps.api.classifier.service import Classifier
 from apps.api.conversations.receptionist import handle
+from apps.api.conversations.renderer import build_renderer, configure_renderer
 from apps.api.conversations.tools import (
     REGISTRY,
     configure_clinic,
@@ -134,6 +135,12 @@ def build_consumer(
     # in neutral English that names no client.
     copy = settings.conversation_copy()
     configure_conversation_copy(copy)
+    # The fact-locked generative renderer (demo step 5), by the same named-seam pattern. Default is
+    # `RESPONSE_STYLE=template` — the deterministic Arabic layer, zero model calls — so a process
+    # that sets nothing behaves exactly as it did before Step 5. `generative` wires one short Haiku
+    # call per eligible act, validated against the fact lock, with the deterministic fallback on any
+    # failure. Configured on both the API and the worker because both call this.
+    configure_renderer(build_renderer(settings))
     # The booking journey (demo step 6), for the verticals that have one. Registered only when the
     # tenant's vocabulary declares the clinic *terminal capabilities* — the tools an intent names
     # as its endpoint. ``hold_slot`` is not one of those (no intent declares it; it runs mid-flow
@@ -183,11 +190,12 @@ def build_consumer(
     )
     _logger.info(
         "consumer wired: git_sha=%s vertical=%s clinic_tools_registered=%s "
-        "missing_clinic_tools=%s registered_tools=%s",
+        "missing_clinic_tools=%s response_style=%s registered_tools=%s",
         _deployed_sha(),
         selected.vertical,
         clinic_flow_supported and not missing_clinic_tools,
         missing_clinic_tools,
+        settings.response_style,
         sorted(REGISTRY),
     )
     return ConsumerGraph(consumer=consumer, sender=sender)

@@ -59,6 +59,7 @@ from datetime import UTC, date, datetime
 from packages.intents.schema import Vocabulary, default_vocabulary
 
 from apps.api.conversations.confirmation import reads_as_no, reads_as_yes
+from apps.api.conversations.renderer import render_reply
 from apps.api.conversations.slots import normalise_slots, strip_unsupported_temporal_slots
 from apps.api.conversations.task import Task, TaskStatus
 from apps.api.conversations.tools import (
@@ -387,17 +388,25 @@ async def handle(
             # in Arabic, carrying the branch and day the task already holds — not the generic slot
             # prompt. Gated on the intent so a `price_enquiry` or `preparation_aftercare_info` that
             # also lacks a service is not asked "which service would you like to book?".
-            return (
-                OutboundAction(
-                    kind="ask",
-                    text=_ask_for_service(task, today or turn.received_at.date()),
-                ),
-                task,
+            resolved_today = today or turn.received_at.date()
+            fallback = _ask_for_service(task, resolved_today)
+            text = await render_reply(
+                "ask_missing_slot",
+                _known_booking_facts(task, resolved_today),
+                fallback=fallback,
             )
+            return OutboundAction(kind="ask", text=text), task
         if (contextual := _ask_for_slot(slot)) is not None:
             # The branch/date/time asks between the service and the diary. Arabic for the clinic
             # booking slots (see `_CLINIC_SLOT_ASKS`); every other slot keeps the generic prompt.
-            return OutboundAction(kind="ask", text=contextual), task
+            # The renderer may phrase the question warmly (``ask_missing_slot``); it carries only
+            # the context the task already holds and, failing, is the Arabic fallback unchanged.
+            text = await render_reply(
+                "ask_missing_slot",
+                _known_booking_facts(task, today or turn.received_at.date()),
+                fallback=contextual,
+            )
+            return OutboundAction(kind="ask", text=text), task
         return (
             OutboundAction(
                 kind="ask",
@@ -706,6 +715,53 @@ def _readable(task: Task, slot: str) -> str:
         return value
 
 
+# ── Renderer facts (demo step 5): the proven values each eligible act may place ───────────────
+#
+# Every value here is deterministic — a task slot the patient established, a spoken day derived from
+# a stored ISO date, the diary's own times, the scheduling system's own reference. The renderer
+# phrases *around* these; it never chooses them. Only the values that are actually known are
+# included, so ``RenderSpec`` requires exactly what an act needs and no template can reference a
+# fact the turn has not proven. The Arabic spoken day is used rather than ``_readable``'s English
+# formatting so a *generated* reply stays fully Arabic — the deterministic fallback (which does use
+# the English date) still stands if generation fails.
+
+
+def _known_booking_facts(task: Task, today: date) -> dict[str, str]:
+    """The service, branch and spoken day this task already holds, whichever are present."""
+    facts: dict[str, str] = {}
+    if service := task.slots.get(_SERVICE_SLOT):
+        facts["service"] = service
+    if branch := task.slots.get("branch"):
+        facts["branch"] = branch
+    if spoken := _spoken_day(task.slots.get("requested_date"), today):
+        facts["date"] = spoken
+    return facts
+
+
+def _offer_facts(task: Task, result: ToolResult, today: date) -> dict[str, str]:
+    """The offer's facts: the diary's own times, plus the service, branch and day held."""
+    facts = _known_booking_facts(task, today)
+    times = (result.data or {}).get("times") or []
+    if times:
+        facts["times"] = " / ".join(str(t) for t in times)
+    return facts
+
+
+def _read_back_facts(task: Task, today: date) -> dict[str, str]:
+    """The booking details being read back: service, branch, spoken day and the chosen time."""
+    facts = _known_booking_facts(task, today)
+    if chosen := task.slots.get(_TIME_SLOT):
+        facts["time"] = chosen
+    return facts
+
+
+def _booking_facts(task: Task, reference: str, today: date) -> dict[str, str]:
+    """The confirmed booking's facts: the durable reference, plus the details it was made for."""
+    facts = _read_back_facts(task, today)
+    facts["booking_reference"] = reference
+    return facts
+
+
 async def _availability(
     task: Task, turn: InboundTurn, conversation_id: str | None
 ) -> ToolResult | None:
@@ -758,12 +814,25 @@ async def _offer_times(
     if (block := _screen_category(result, vocab)) is not None:
         return await _blocked(task, block)
     if result.human_summary:
+        today = turn.received_at.date()
         # Only a result carrying real slots is a concrete offer. "Nothing free on Thursday" also
         # has a human_summary and leaves the task in the same ``COLLECTING`` / waiting-for-time
         # shape, but it offered nothing — so it must *not* be re-marked, or its later resume would
         # be expired and the patient's service/branch/date discarded.
         if _offered_concrete_slots(result):
             _mark_concrete_offer(task, turn)
+            text = await render_reply(
+                "offer_times", _offer_facts(task, result, today), fallback=result.human_summary
+            )
+            return OutboundAction(kind="ask", text=text), task
+        if result.error == "none_available":
+            # A real answer to a real question, eligible for warm phrasing. Gated strictly on the
+            # "nothing free" error so an ambiguous-service "which did you mean?" (also a
+            # ``human_summary`` with no concrete times) is never routed through the renderer.
+            text = await render_reply(
+                "nothing_free", _known_booking_facts(task, today), fallback=result.human_summary
+            )
+            return OutboundAction(kind="ask", text=text), task
         return OutboundAction(kind="ask", text=result.human_summary), task
     return await _hand_off(task, "handoff_to_human")
 
@@ -809,11 +878,20 @@ async def _read_back(
     values = "، ".join(_readable(task, slot) for slot in outstanding)
     copy = current_copy()
     template = copy.confirm_read_back or _READ_BACK_TEXT
+    fallback = fill_template(template, details=details, values=values) or _READ_BACK_TEXT.format(
+        details=details
+    )
+    # The renderer may phrase the read-back naturally — but it may never claim the booking is done
+    # (the validator rejects a confirmation claim on any non-``booking_confirmed`` act), so this
+    # stays a question the patient answers. Only the clinic booking shape (service/branch/date/time)
+    # supplies the required facts; any other read-back falls back deterministically without a call.
+    text = await render_reply(
+        "read_back", _read_back_facts(task, turn.received_at.date()), fallback=fallback
+    )
     return (
         OutboundAction(
             kind="confirm",
-            text=fill_template(template, details=details, values=values)
-            or _READ_BACK_TEXT.format(details=details),
+            text=text,
             # The buttons beside an Arabic read-back were the last English on the turn. A tenant
             # sets them in its own language (`confirm_yes`/`confirm_no`); `confirmation.py` reads
             # "أيوه"/"لأ" as agreement/refusal, so an Arabic button still books or corrects.
@@ -913,8 +991,23 @@ async def _answer_from_catalogue(
             _mark_concrete_offer(task, turn)
             task.intent = _BOOKING_INTENT
             task.status = TaskStatus.COLLECTING
-            return OutboundAction(kind="say", text=result.human_summary), task
+            text = await render_reply(
+                "offer_times",
+                _offer_facts(task, result, turn.received_at.date()),
+                fallback=result.human_summary,
+            )
+            return OutboundAction(kind="say", text=text), task
         task.status = TaskStatus.COMPLETED if result.ok else TaskStatus.COLLECTING
+        if tool_name == _AVAILABILITY_TOOL and not result.ok and result.error == "none_available":
+            # "Nothing free" on a pure availability check — eligible for warm phrasing. Never the
+            # ambiguous-service question (a different ``error``) and never a price quote (a
+            # different ``tool_name``): those keep their exact deterministic wording.
+            text = await render_reply(
+                "nothing_free",
+                _known_booking_facts(task, turn.received_at.date()),
+                fallback=result.human_summary,
+            )
+            return OutboundAction(kind="ask", text=text), task
         return OutboundAction(kind="say" if result.ok else "ask", text=result.human_summary), task
     return await _hand_off(task, vocab.defaults.on_tool_failure)
 
@@ -970,14 +1063,20 @@ async def _book(
     task.slots[_REFERENCE_SLOT] = str(reference)
     task.status = TaskStatus.COMPLETED
     template = current_copy().booking_confirmed or _BOOKED_TEXT
-    return (
-        OutboundAction(
-            kind="say",
-            text=fill_template(template, booking_reference=str(reference))
-            or _BOOKED_TEXT.format(booking_reference=reference),
-        ),
-        task,
+    fallback = fill_template(template, booking_reference=str(reference)) or _BOOKED_TEXT.format(
+        booking_reference=reference
     )
+    # The one act where a confirmation claim is allowed — and it is only reached here, after a real
+    # durable reference came back from the scheduling system. ``booking_reference`` is a required
+    # placeholder, so a generation that drops it is rejected and the deterministic sentence (which
+    # states the same reference) stands: the model can only phrase the confirmation, never fabricate
+    # or omit the reference that makes it true.
+    text = await render_reply(
+        "booking_confirmed",
+        _booking_facts(task, str(reference), turn.received_at.date()),
+        fallback=fallback,
+    )
+    return OutboundAction(kind="say", text=text), task
 
 
 async def _unbuilt(task: Task) -> tuple[OutboundAction, Task]:
